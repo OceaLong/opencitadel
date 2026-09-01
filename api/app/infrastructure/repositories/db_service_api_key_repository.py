@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.service_api_key import ServiceApiKey
@@ -17,6 +17,10 @@ class DBServiceApiKeyRepository(ServiceApiKeyRepository):
             select(ServiceApiKeyORM).where(
                 ServiceApiKeyORM.key_hash == key_hash,
                 ServiceApiKeyORM.revoked_at.is_(None),
+                or_(
+                    ServiceApiKeyORM.expires_at.is_(None),
+                    ServiceApiKeyORM.expires_at > datetime.now(UTC),
+                ),
             )
         )
         record = result.scalar_one_or_none()

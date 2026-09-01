@@ -29,6 +29,7 @@ class PatrolRemediationMode(StrEnum):
 class TrafficPolicy(_OperationsPolicyModel):
     rate_limit_enabled: bool = True
     requests_per_minute: int = Field(default=120, ge=1, le=100_000)
+    auth_requests_per_minute: int = Field(default=10, ge=1, le=100_000)
     session_stream_interval_seconds: int = Field(default=15, ge=1, le=3_600)
 
 
@@ -43,6 +44,13 @@ class SchedulerPolicy(_OperationsPolicyModel):
 class PatrolOperationsPolicy(_OperationsPolicyModel):
     admission: PatrolAdmissionMode = PatrolAdmissionMode.ACCEPTING
     remediation: PatrolRemediationMode = PatrolRemediationMode.DISABLED
+
+
+class ApprovalOperationsPolicy(_OperationsPolicyModel):
+    # How long a human approval may sit pending before it is expired and the
+    # waiting Run is advanced (see RunAggregate._decide_RequestApproval). Default
+    # one day; range 1 minute .. 30 days.
+    ttl_minutes: int = Field(default=1440, ge=1, le=43_200)
 
 
 class SandboxOperationsPolicy(_OperationsPolicyModel):
@@ -132,6 +140,7 @@ class OperationsPolicy(_OperationsPolicyModel):
     traffic: TrafficPolicy = Field(default_factory=TrafficPolicy)
     scheduler: SchedulerPolicy = Field(default_factory=SchedulerPolicy)
     patrol: PatrolOperationsPolicy = Field(default_factory=PatrolOperationsPolicy)
+    approval: ApprovalOperationsPolicy = Field(default_factory=ApprovalOperationsPolicy)
     sandbox: SandboxOperationsPolicy = Field(default_factory=SandboxOperationsPolicy)
     resource_gc: ResourceGcPolicy = Field(default_factory=ResourceGcPolicy)
     patrol_retention: PatrolRetentionPolicy = Field(default_factory=PatrolRetentionPolicy)
@@ -139,6 +148,7 @@ class OperationsPolicy(_OperationsPolicyModel):
 
 
 __all__ = [
+    "ApprovalOperationsPolicy",
     "OperationsPolicy",
     "PatrolAdmissionMode",
     "PatrolOperationsPolicy",

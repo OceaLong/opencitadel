@@ -261,10 +261,30 @@ class SeedDeps:
     patrol_pack_service: PatrolPackService
     admin_user_id: str
     demo_inference_env: DemoInferenceEnv | None = None
+    ops_collector_token: str = ""
+
+
+def _collector_auth_headers(
+    token: str, existing: dict[str, str] | None = None
+) -> dict[str, str] | None:
+    """Merge the ``Authorization: Bearer`` header the Collector now requires.
+
+    ops-collector rejects unauthenticated streamable-http requests, so the
+    seeded MCPServerRecord must carry the shared token. Empty token leaves the
+    existing headers untouched (legacy / stdio deployments)."""
+    cleaned = token.strip()
+    if not cleaned:
+        return existing
+    merged = dict(existing or {})
+    merged["Authorization"] = f"Bearer {cleaned}"
+    return merged
 
 
 async def seed_mcp_tool_policies(
-    mcp_server_service: MCPServerService, *, actor_user_id: str
+    mcp_server_service: MCPServerService,
+    *,
+    actor_user_id: str,
+    collector_token: str = "",
 ) -> str:
     """Enable ops-collector and persist its nine tool policies.
 
@@ -280,6 +300,7 @@ async def seed_mcp_tool_policies(
                 transport=MCPTransport.STREAMABLE_HTTP,
                 url=DEMO_MCP_SERVER_URL,
                 enabled=True,
+                headers=_collector_auth_headers(collector_token),
                 tool_policies=_desired_tool_policies(),
                 visibility=ResourceVisibility.GLOBAL,
             ),
@@ -288,7 +309,8 @@ async def seed_mcp_tool_policies(
         )
         return "create"
     desired = _desired_tool_policies()
-    if target.enabled and target.tool_policies == desired:
+    desired_headers = _collector_auth_headers(collector_token, target.headers)
+    if target.enabled and target.tool_policies == desired and target.headers == desired_headers:
         return "skip"
     updated = MCPServerRecord(
         id=target.id,
@@ -299,7 +321,7 @@ async def seed_mcp_tool_policies(
         command=target.command,
         args=target.args,
         url=target.url,
-        headers=target.headers,
+        headers=desired_headers,
         env=target.env,
         transport_options=target.transport_options,
         tool_policies=desired,
@@ -429,7 +451,9 @@ async def run_seed(deps: SeedDeps) -> dict[str, str]:
     results: dict[str, str] = {}
 
     results["mcp_tool_policies"] = await seed_mcp_tool_policies(
-        deps.mcp_server_service, actor_user_id=deps.admin_user_id
+        deps.mcp_server_service,
+        actor_user_id=deps.admin_user_id,
+        collector_token=deps.ops_collector_token,
     )
     _log("MCP server 'ops-collector' enabled + 9 tool policies", results["mcp_tool_policies"])
 
@@ -542,6 +566,7 @@ async def run_seed_command(
                 patrol_pack_service=patrol_pack_service,
                 admin_user_id=admin.id,
                 demo_inference_env=read_demo_inference_env(),
+                ops_collector_token=settings.ops_collector_token,
             )
             return await run_seed(deps)
     finally:

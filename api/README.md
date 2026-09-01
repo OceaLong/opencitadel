@@ -83,13 +83,28 @@ All application routes are under `/api`.
 
 - `/auth/*`, `/teams/*`, `/service-keys/*`: identity and workspaces
 - `/sessions/*`: session CRUD, message command admission, public event replay,
-  VNC and files
+  VNC and files; `?q=` title/message search, and the soft-delete recycle bin
+  (`GET /sessions/deleted`, `POST /sessions/{id}/delete|restore|purge`)
 - `/runs/*`, `/approval-batches/*`: formal execution and approval commands
-- `/knowledge-bases/*`: immutable candidate builds and published version bindings
-- `/scheduled-jobs/*`, `/patrol-*`: automation, patrol, evidence, remediation
+- `/approvals`: reviewer inbox — `GET /approvals?status=pending` (also
+  `approved`/`rejected`/`cancelled`/`expired`) across Runs
+- `/knowledge-bases/*`: immutable candidate builds and published version
+  bindings, plus the soft-delete recycle bin (`GET /knowledge-bases/deleted`,
+  `DELETE /knowledge-bases/{id}`, `POST /{id}/restore`,
+  `DELETE /{id}/purge`)
+- `/scheduled-jobs/*`, `/patrol-*`: automation, patrol, evidence, remediation;
+  `GET /scheduled-jobs/{id}/runs` returns paginated firing history
+- `/artifacts/*`: workspace artifacts with desensitized share fields
+  (`is_shared`, `share_expires_at`, `share_token_preview`); the full share token
+  is returned only once on create/rotate
+- `/a2a` (inbound, `X-Api-Key`): A2A JSON-RPC — `message/send`,
+  `message/stream`, `tasks/get`, `tasks/cancel`
+- `/capabilities`: platform capability report including `report_pdf`
 - `/inference/endpoints/*`, `/inference/models/*`, `/inference/bindings/*`,
   `/skills/*`, `/runtime-policies/*`: runtime resources, policy revisions, and inference bindings
-- `/admin/*`: users, usage, audit, governance, compliance
+- `/admin/*`: users, usage, audit, governance, compliance; team deletion
+  (`cascade` | `transfer_to_owner`) and user deletion
+  (`anonymize` | `cascade` | `transfer_to_team`) are explicit audited strategies
 
 OpenAPI at `/openapi.json` is the route-level source of truth.
 

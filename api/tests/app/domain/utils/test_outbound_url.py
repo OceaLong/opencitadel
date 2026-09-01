@@ -66,6 +66,47 @@ def test_outbound_url_rejects_any_unsafe_dns_answer(monkeypatch):
         resolve_outbound_url("https://example.com/api")
 
 
+def test_outbound_url_rejects_nat64_wellknown_prefix(monkeypatch):
+    # 64:ff9b::a9fe:a9fe embeds 169.254.169.254; Python calls it "global".
+    monkeypatch.setattr(
+        "app.domain.utils.outbound_url.socket.getaddrinfo",
+        lambda *args, **kwargs: _answers("64:ff9b::a9fe:a9fe"),
+    )
+
+    with pytest.raises(OutboundURLRejected, match="NAT64"):
+        resolve_outbound_url("https://example.com/api")
+
+
+def test_outbound_url_rejects_ipv4_mapped_metadata_address(monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.utils.outbound_url.socket.getaddrinfo",
+        lambda *args, **kwargs: _answers("::ffff:169.254.169.254"),
+    )
+
+    with pytest.raises(OutboundURLRejected, match="元数据"):
+        resolve_outbound_url("https://example.com/api")
+
+
+def test_outbound_url_rejects_ipv4_mapped_private_address(monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.utils.outbound_url.socket.getaddrinfo",
+        lambda *args, **kwargs: _answers("::ffff:10.0.0.1"),
+    )
+
+    with pytest.raises(OutboundURLRejected, match="内网"):
+        resolve_outbound_url("https://example.com/api")
+
+
+def test_outbound_url_rejects_6to4_relay_anycast(monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.utils.outbound_url.socket.getaddrinfo",
+        lambda *args, **kwargs: _answers("192.88.99.1"),
+    )
+
+    with pytest.raises(OutboundURLRejected):
+        resolve_outbound_url("https://example.com/api")
+
+
 def test_outbound_url_returns_all_validated_public_addresses(monkeypatch):
     monkeypatch.setattr(
         "app.domain.utils.outbound_url.socket.getaddrinfo",

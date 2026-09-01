@@ -3,6 +3,7 @@ from fastapi import Depends, Header, Request
 from app.application.ports.crypto import CsrfPort, ServiceKeyPort
 from app.application.request_context import get_request_id
 from app.application.security.authorization_context import (
+    authorization_scope,
     get_authorization_context,
     set_authorization_context,
 )
@@ -12,6 +13,7 @@ from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.repositories.uow import UnitOfWorkFactory
 from app.domain.utils.time_utils import utc_now
 from app.interfaces.auth_context import get_principal, set_principal
+from app.interfaces.observability.security_metrics import record_service_key_auth_failure
 from app.interfaces.service_dependencies import (
     get_csrf_service,
     get_service_key_hasher,
@@ -69,9 +71,11 @@ async def enforce_auditor_read_only(
 
 
 async def get_workspace_context(
+    request: Request,
     x_workspace_id: str | None = Header(default=None, alias="X-Workspace-Id"),
 ) -> WorkspaceContext:
     principal = await get_current_principal()
+    request.state.user_id = principal.user_id
     workspace_id = (x_workspace_id or "").strip()
     if not workspace_id:
         context = WorkspaceContext(
@@ -88,6 +92,7 @@ async def get_workspace_context(
         return context
     if workspace_id not in principal.team_roles:
         raise ForbiddenError("无权访问该工作区", error_key="errors.workspaceAccessDenied")
+    request.state.workspace_id = workspace_id
     context = WorkspaceContext(
         principal=principal,
         scope=OwnerScope.team(principal.user_id, workspace_id),
@@ -115,32 +120,40 @@ async def require_service_api_key(
     uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Principal:
     if not x_api_key:
+        record_service_key_auth_failure()
         raise UnauthorizedError("缺少服务 API Key")
     key_hash = hasher.hash(x_api_key)
-    async with uow_factory() as uow:
-        key = await uow.service_api_key.get_by_hash(key_hash)
-        if not key:
-            raise UnauthorizedError("服务 API Key 无效")
-        user = await uow.user.get_by_id(key.owner_user_id)
-        if not user or not user.is_active:
-            raise UnauthorizedError("服务 API Key 所属账号不可用")
-        principal = Principal(
-            user_id=user.id,
-            global_role=user.global_role,
-            token_version=user.token_version,
-            team_roles={},
-        )
-        if principal.is_auditor:
-            raise ForbiddenError("审计员为只读角色，无法使用服务 API Key 执行操作")
-        # Record last use so admins can see which keys are live / stale. The
-        # column existed but was never written.
-        await uow.service_api_key.save(key.model_copy(update={"last_used_at": utc_now()}))
-        await uow.commit()
-        set_principal(principal)
-        set_authorization_context(
-            AuthorizationContext.for_principal(
-                principal,
-                request_id=get_request_id() or "",
+    # The service key is validated before any principal exists, so the lookup of
+    # the key and its owning user runs under a trusted system scope; RLS on
+    # service_api_keys / users would otherwise deny this pre-identity read.
+    with authorization_scope(AuthorizationContext.system("service-api-key")):
+        async with uow_factory() as uow:
+            key = await uow.service_api_key.get_by_hash(key_hash)
+            if not key:
+                record_service_key_auth_failure()
+                raise UnauthorizedError("服务 API Key 无效")
+            user = await uow.user.get_by_id(key.owner_user_id)
+            if not user or not user.is_active:
+                record_service_key_auth_failure()
+                raise UnauthorizedError("服务 API Key 所属账号不可用")
+            principal = Principal(
+                user_id=user.id,
+                global_role=user.global_role,
+                token_version=user.token_version,
+                team_roles={},
             )
+            if principal.is_auditor:
+                record_service_key_auth_failure()
+                raise ForbiddenError("审计员为只读角色，无法使用服务 API Key 执行操作")
+            # Record last use so admins can see which keys are live / stale. The
+            # column existed but was never written.
+            await uow.service_api_key.save(key.model_copy(update={"last_used_at": utc_now()}))
+            await uow.commit()
+    set_principal(principal)
+    set_authorization_context(
+        AuthorizationContext.for_principal(
+            principal,
+            request_id=get_request_id() or "",
         )
-        return principal
+    )
+    return principal

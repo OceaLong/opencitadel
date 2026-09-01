@@ -46,6 +46,13 @@ to the authoritative Run projection. Reconciliation copies terminal Run state
 to the summary and sends durable inbox notifications plus optional MCP IM.
 Process death cannot manufacture a terminal state.
 
+`GET /api/scheduled-jobs/{job_id}/runs` returns the paginated firing history for
+a job (each firing's id, linked execution Run, and terminal outcome) so an
+operator can audit every past trigger, not only the latest summary. The leader
+lease is continuously renewed for as long as a replica holds it, so a healthy
+leader keeps polling without repeatedly re-acquiring; losing the lease simply
+lets another replica take over.
+
 The same leased loop runs bounded knowledge-base version GC and patrol
 retention. These operations use their own database leases and never delete
 active/bound versions or audit rows.

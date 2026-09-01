@@ -125,7 +125,13 @@ export const adminApi = {
   deleteUser: (
     userId: string,
     strategy: "cascade" | "transfer_to_team" | "anonymize" = "anonymize",
-  ) => del<{ strategy: string }>(`/admin/users/${userId}?strategy=${strategy}`),
+    teamId?: string,
+  ) => {
+    const query = new URLSearchParams({ strategy });
+    // transfer_to_team 策略要求携带 team_id,否则后端返回 400。
+    if (teamId) query.set("team_id", teamId);
+    return del<{ strategy: string }>(`/admin/users/${userId}?${query.toString()}`);
+  },
 
   getQuota: (userId: string) => get<Quota>(`/admin/users/${userId}/quota`),
 

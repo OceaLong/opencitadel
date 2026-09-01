@@ -13,7 +13,10 @@ PostgreSQL/Redis 选项，以及可选的 Ops Collector/Actuator。
   `opencitadel-sandbox` 镜像
 - 带 pgvector 的全新 PostgreSQL 数据库和 Redis
 
-Chart 可为自包含安装创建 PostgreSQL、Redis 与 MinIO；生产环境建议使用托管服务。
+Chart 可为自包含安装创建 PostgreSQL、Redis 与 MinIO。内置 PostgreSQL 与 Redis 均为
+单副本、仅评估级；生产请使用外部/托管服务或 CloudNativePG 等 Operator，并设置
+`postgresql.enabled=false` / `redis.enabled=false`，同时用 `env.POSTGRES_HOST`、
+`env.REDIS_HOST`（及 `secrets.*` 中的相关凭证）指向它。
 
 ## 安装
 
@@ -62,11 +65,31 @@ Schema；内核只有 Append、Claim 与 Projection 所需的运行权限。
 | `redis.enabled` | `true` | Chart 托管 Redis |
 | `minio.enabled` | `false` | 可选的 Chart 托管 MinIO |
 | `networkPolicy.enabled` | `true` | Workload 网络隔离 |
+| `egressProxy.enabled` | `true` | 沙箱出站代理（squid），沙箱 NetworkPolicy 已依赖它 |
+| `pdb.enabled` | `false` | 为 api/内核配置 PodDisruptionBudget（minAvailable:1） |
+| `topologySpread.enabled` | `true` | 将 api/内核副本跨节点分散 |
+| `monitoring.prometheusRule.enabled` | `false` | 渲染基线 PrometheusRule 告警 |
+| `backup.enabled` | `false` | 定时 pg_dump 备份 CronJob（写入 PVC） |
 | `opsCollector.enabled` | `false` | 固定只读 Patrol Collector |
 | `opsActuator.enabled` | `false` | 白名单写入 Patrol Actuator |
 | `migrate.enabled` | `true` | 运行串行化的 Migration initContainer |
 
 `values.schema.json` 会验证执行内核契约并拒绝已淘汰的部署键。
+
+## 韧性与可观测
+
+- `pdb.enabled=true` 在自愿中断（滚动更新/节点排空）期间为 api/内核至少保留一个可用
+  Pod；仅在多副本下使用。
+- `topologySpread.enabled`（默认开启）以软约束（`ScheduleAnyway`）按主机名将 api/内核
+  跨节点分散，单节点集群仍可调度。
+- `monitoring.prometheusRule.enabled=true` 渲染 `PrometheusRule`（需 Prometheus
+  Operator），包含基线告警：审批决策超时率、审计链验证失败、执行 outbox 投递滞后/重投
+  堆积、沙箱准入拒绝率、HTTP 5xx 率、限流拒绝率。后两项依赖 API 落地
+  `http_requests_total` / `rate_limit_rejected_total`；在此之前这两条规则不会有数据。
+- `backup.enabled=true` 运行定时 `pg_dump` CronJob，写入独立 PVC 并按份数保留。其资源名
+  `opencitadel-postgres-backup` 即 Ops Patrol `opsCollector.registeredBackups` 条目的
+  对应目标，使巡检备份项有真实来源。该本地 PVC 转储仅评估级；生产应通过托管数据库备份
+  或将转储投递到对象存储。
 
 ## 必填密钥
 
@@ -87,6 +110,14 @@ Bootstrap，不会注入 API 或执行内核容器。
 ## 安全要求
 
 - 保持 `networkPolicy.enabled=true`，沙箱 Ingress 只允许 API/执行内核。
+- 保持 `egressProxy.enabled=true`：它部署所有沙箱出站必经的 squid 代理。沙箱
+  NetworkPolicy 仅放行 DNS 与到代理 Pod（label
+  `app.kubernetes.io/component=egress-proxy`）的 3128，由代理解析目标并执行
+  `deploy/squid/squid.conf` 的私网/元数据黑名单。api/内核的
+  `SANDBOX_HTTP_PROXY`、`SANDBOX_HTTPS_PROXY`、`SANDBOX_CHROME_ARGS` 默认指向
+  `http://<release>-egress-proxy:3128`。关闭它会使沙箱除 DNS 外全部 fail-closed，
+  除非同时放开沙箱 NetworkPolicy；如需外部代理，请把上述 `env.SANDBOX_*` 覆盖为
+  该代理地址。
 - Collector 保持只读；Actuator 独立部署并使用明确白名单。
 - 配置公网 HTTPS 前端/OAuth URL 与 `env.COOKIE_SECURE=true`。
 - 精确设置可信 Proxy CIDR、出站端口与私网主机白名单。

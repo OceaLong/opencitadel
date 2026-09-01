@@ -366,6 +366,121 @@ def test_artifact_revoke_share_denied_without_session_access():
     asyncio.run(_run())
 
 
+def _share_uow_for(artifact):
+    uow = AsyncMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.artifact.get_by_id = AsyncMock(return_value=artifact)
+    uow.session.get_metadata = AsyncMock(return_value=object())
+    uow.artifact.save = AsyncMock()
+    uow.audit.add = AsyncMock()
+    uow.commit = AsyncMock()
+    return uow
+
+
+def test_create_share_link_returns_expiry_and_writes_audit():
+    artifact = Artifact(id="a1", session_id="s1", kind="doc", title="T")
+    uow = _share_uow_for(artifact)
+    service = _artifact_service_without_storage(uow)
+
+    async def _run():
+        token, expires = await service.create_share_link(
+            "a1", ttl_hours=168, scope=OwnerScope.team("owner", "team-1")
+        )
+        assert artifact.share_token == token
+        assert artifact.share_expires_at == expires
+        # Full token is returned exactly once here (creation moment).
+        assert len(token) > 8
+        uow.audit.add.assert_awaited_once()
+        log = uow.audit.add.await_args.args[0]
+        assert log.action == "artifact.share.create"
+        assert log.resource_type == "artifact"
+        assert log.resource_id == "a1"
+        assert log.actor_user_id == "owner"
+        assert log.team_id == "team-1"
+        assert log.session_id == "s1"
+        assert log.metadata["ttl_hours"] == 168
+        # Audit must not persist the full unauthenticated token.
+        assert token not in str(log.metadata)
+        assert log.metadata["share_token_preview"] == token[-4:]
+        uow.commit.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_revoke_share_link_writes_audit():
+    artifact = Artifact(id="a1", session_id="s1", kind="doc", title="T", share_token="tok")
+    uow = _share_uow_for(artifact)
+    service = _artifact_service_without_storage(uow)
+
+    async def _run():
+        await service.revoke_share_link("a1", scope=OwnerScope.personal("owner"))
+        assert artifact.share_token is None
+        uow.audit.add.assert_awaited_once()
+        log = uow.audit.add.await_args.args[0]
+        assert log.action == "artifact.share.revoke"
+        assert log.resource_type == "artifact"
+        assert log.resource_id == "a1"
+        assert log.actor_user_id == "owner"
+
+    asyncio.run(_run())
+
+
+def test_artifact_to_response_exposes_share_status_without_full_token():
+    from datetime import UTC, datetime, timedelta
+
+    from app.interfaces.endpoints.artifact_routes import _to_response
+
+    expires = datetime.now(UTC) + timedelta(hours=168)
+    artifact = Artifact(
+        id="a1",
+        session_id="s1",
+        kind="doc",
+        title="T",
+        share_token="supersecrettoken1234",
+        share_expires_at=expires,
+    )
+    resp = _to_response(artifact)
+    assert resp.is_shared is True
+    assert resp.share_expires_at == expires
+    assert resp.share_token_preview == "1234"
+    # Full unauthenticated token must never be serialized in the response.
+    dumped = resp.model_dump_json()
+    assert "supersecrettoken1234" not in dumped
+    assert "share_token" not in resp.model_dump()
+
+
+def test_artifact_to_response_expired_share_is_not_active():
+    from datetime import UTC, datetime, timedelta
+
+    from app.interfaces.endpoints.artifact_routes import _to_response
+
+    expired = datetime.now(UTC) - timedelta(hours=1)
+    artifact = Artifact(
+        id="a1",
+        session_id="s1",
+        kind="doc",
+        title="T",
+        share_token="tok",
+        share_expires_at=expired,
+    )
+    resp = _to_response(artifact)
+    assert resp.is_shared is False
+    assert resp.share_token_preview is None
+    # Expiry is still surfaced so the UI can explain why it's inactive.
+    assert resp.share_expires_at == expired
+
+
+def test_artifact_to_response_unshared_defaults():
+    from app.interfaces.endpoints.artifact_routes import _to_response
+
+    artifact = Artifact(id="a1", session_id="s1", kind="doc", title="T")
+    resp = _to_response(artifact)
+    assert resp.is_shared is False
+    assert resp.share_expires_at is None
+    assert resp.share_token_preview is None
+
+
 def test_artifact_tool_requires_content_or_source_path():
     from app.domain.services.tools.artifact import ArtifactTool
 

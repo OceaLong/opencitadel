@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Bot,
   FileSearch,
@@ -27,6 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import type { ArtifactEventSummary, ToolEvent } from "@/lib/api/types";
 import { formatDuration } from "@/lib/session-events";
+import { toBcp47 } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -68,11 +69,11 @@ const TOOL_ICONS: Record<ToolKind, typeof Terminal> = {
   default: Monitor,
 };
 
-function formatToolTime(value: ToolEvent["started_at"]): string | null {
+function formatToolTime(value: ToolEvent["started_at"], locale: string): string | null {
   if (value == null) return null;
   const date = new Date(typeof value === "number" && value < 10000000000 ? value * 1000 : value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleTimeString();
+  return date.toLocaleTimeString(toBcp47(locale));
 }
 
 function formatArgs(args: Record<string, unknown>): string {
@@ -85,12 +86,13 @@ function formatArgs(args: Record<string, unknown>): string {
 
 function ToolPreviewHeader({ tool, onClose }: { tool: ToolEvent; onClose: () => void }) {
   const t = useTranslations("toolPreview");
+  const locale = useLocale();
   const kind = getToolKind(tool);
   const label = getFriendlyToolLabel(tool);
   const ToolIcon = TOOL_ICONS[kind];
   const toolDesc = getToolDescription(kind, t);
-  const startedAt = formatToolTime(tool.started_at);
-  const endedAt = formatToolTime(tool.ended_at);
+  const startedAt = formatToolTime(tool.started_at, locale);
+  const endedAt = formatToolTime(tool.ended_at, locale);
 
   return (
     <div className="border-border/70 bg-muted/30 flex flex-shrink-0 flex-col gap-2 border-b px-4 py-3">

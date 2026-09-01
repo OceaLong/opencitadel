@@ -1,0 +1,100 @@
+{{- if .Values.egressProxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-egress-proxy
+  labels:
+    app.kubernetes.io/component: egress-proxy
+spec:
+  replicas: {{ .Values.egressProxy.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: egress-proxy
+  template:
+    metadata:
+      labels:
+        # MUST stay in sync with networkpolicy-sandbox.yaml, which只允许沙箱
+        # egress 到带此 label 的 Pod:3128。改这里必须同步改 networkpolicy。
+        app.kubernetes.io/component: egress-proxy
+      annotations:
+        # Roll the pods when the proxy policy changes.
+        checksum/config: {{ .Files.Get "files/squid/squid.conf" | sha256sum }}
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # The ubuntu/squid image starts as root then drops its workers to the
+        # unprivileged "proxy" user, which must be able to open its log/pid
+        # files on these volumes. Compose achieves this with tmpfs mode=1777;
+        # emptyDir mounts default to root:root 0755, so replicate that mode
+        # here (see deploy/squid/squid.conf logging comment).
+        - name: prepare-runtime-dirs
+          image: "{{ .Values.egressProxy.image }}"
+          imagePullPolicy: {{ .Values.egressProxy.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - mkdir -p /var/log/squid /var/spool/squid && chmod 1777 /var/log/squid /var/spool/squid /tmp
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: var-log
+              mountPath: /var/log/squid
+            - name: var-spool
+              mountPath: /var/spool/squid
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: squid
+          image: "{{ .Values.egressProxy.image }}"
+          imagePullPolicy: {{ .Values.egressProxy.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              # squid must switch its worker processes to the "proxy" user, so
+              # SETUID/SETGID are retained; everything else is dropped.
+              drop: ["ALL"]
+              add: ["SETUID", "SETGID"]
+          ports:
+            - name: proxy
+              containerPort: 3128
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.egressProxy.resources | nindent 12 }}
+          volumeMounts:
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+              readOnly: true
+            - name: var-log
+              mountPath: /var/log/squid
+            - name: var-spool
+              mountPath: /var/spool/squid
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: squid-config
+          configMap:
+            name: {{ include "opencitadel.fullname" . }}-egress-proxy
+        - name: var-log
+          emptyDir: {}
+        - name: var-spool
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

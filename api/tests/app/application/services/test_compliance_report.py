@@ -215,3 +215,66 @@ async def test_collect_metrics_returns_every_key_the_evaluators_read():
         "runtime_policy",
     }
     assert expected_keys <= metrics.keys()
+
+
+_MINIMAL_REPORT = {
+    "generated_at": "2026-07-03T00:00:00Z",
+    "start_at": None,
+    "end_at": None,
+    "summary": {"pass": 0, "gap": 0, "attention": 0, "not_verified": 0, "na": 0},
+    "chain_verification": {"ok": True},
+    "controls": [],
+}
+
+
+def _service_with(renderer) -> ComplianceService:
+    return ComplianceService(
+        _FakeEvidenceQuery(),
+        _FakeAudit(),
+        _FakeRunProjection(),
+        ComplianceRuntimeValues(
+            sandbox_driver="docker",
+            metrics_token_configured=True,
+            audit_signing_key_id="primary",
+            signing_key_is_default=False,
+        ),
+        MutablePolicyReader(),
+        renderer,
+    )
+
+
+def test_render_pdf_title_is_not_chinese_only() -> None:
+    renderer = FakeReportRenderer()
+    service = _service_with(renderer)
+
+    result = service.render_pdf(_MINIMAL_REPORT)
+
+    assert result == b"%PDF-test"
+    assert len(renderer.calls) == 1
+    _markdown, title = renderer.calls[0]
+    # Title must carry an English rendering for non-Chinese-locale auditors,
+    # not be hard-coded Chinese-only.
+    assert "Compliance Audit Report" in title
+
+
+def test_render_pdf_returns_none_when_renderer_raises() -> None:
+    class _RaisingRenderer:
+        def render_pdf(self, *, markdown: str, title: str):
+            raise OSError("cannot load library 'libgobject-2.0-0'")
+
+    service = _service_with(_RaisingRenderer())
+
+    # Native weasyprint import failures raise OSError (not ImportError); the
+    # service degrades to None so the route can return a graceful 501 instead
+    # of an unhandled 500.
+    result = service.render_pdf(_MINIMAL_REPORT)
+
+    assert result is None
+
+
+def test_render_pdf_returns_none_when_renderer_reports_unavailable() -> None:
+    service = _service_with(FakeReportRenderer(result=None))
+
+    result = service.render_pdf(_MINIMAL_REPORT)
+
+    assert result is None

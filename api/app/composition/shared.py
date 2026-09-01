@@ -30,7 +30,7 @@ from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
-from app.application.services.auth_service import AuthService
+from app.application.services.auth_service import AuthService, RedisAuthThrottleStore
 from app.application.services.capability_service import CapabilityService
 from app.application.services.compliance_service import (
     ADMIN_AUDIT_ACTION_PREFIX,
@@ -110,6 +110,7 @@ from app.infrastructure.adapters.redis_capabilities import (
     RedisSandboxActivityStore,
     RedisSandboxQuotaStore,
     RedisSessionListStreamFactory,
+    RedisWakeupAdapter,
 )
 from app.infrastructure.adapters.reporting_ports import (
     HmacEvidenceSigner,
@@ -343,7 +344,7 @@ def build_shared_services(
             secret_cipher=versioned_cipher,
             audit_signing_key=settings.audit_signing_key,
             audit_signing_key_id=settings.audit_signing_key_id,
-            database_authorization_signing_secret=settings.session_secret,
+            database_authorization_signing_secret=(settings.database_authorization_signing_secret),
         ),
     )
     runtime_policy_repository = runtime_policy_repository_factory(resources)
@@ -377,6 +378,7 @@ def build_shared_services(
         secret=settings.jwt_secret,
         access_ttl_seconds=settings.access_token_ttl_seconds,
         refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
+        previous_secrets=settings.jwt_previous_secrets,
     )
     token_codec = JwtTokenCodecAdapter(codec=jwt_service)
     secret_envelope = FernetSecretEnvelopeAdapter(cipher=cipher)
@@ -462,6 +464,16 @@ def build_shared_services(
         uow_factory=uow_factory,
         password_hasher=password_hasher,
         token_codec=token_codec,
+        # F13: activate account lockout in production. The store fails open on
+        # Redis outages (see RedisAuthThrottleStore), so a Redis blip degrades
+        # to the pre-F13 behaviour rather than locking anyone out.
+        throttle_store=RedisAuthThrottleStore(redis),
+        # Lockout tuning stays on AuthService's module defaults. TrafficPolicy
+        # only carries ``auth_requests_per_minute`` (a middleware rate-limit
+        # concept, not a per-identity lockout one) and RuntimePolicyReader is
+        # async, so sourcing threshold/window/backoff from live policy would
+        # need new TrafficPolicy fields plus request-time reads. See the TODO in
+        # AuthService.__init__.
     )
     audit_service = AuditService(
         uow_factory=uow_factory,
@@ -657,6 +669,11 @@ def build_shared_services(
         command_ingress=command_ingress,
         public_projection=public_projection,
         run_projection=run_projection,
+        # Event-driven chat SSE wakeup: subscribe to the same execution:wakeup
+        # stream the kernel OutboxDispatcher publishes to, instead of fixed DB
+        # polling. Requires the API's general_redis to point at the same Redis
+        # instance/DB as the kernel; falls back to bounded polling otherwise.
+        events_wakeup=RedisWakeupAdapter(redis),
     )
     a2a_server_service = A2AServerService(
         agent_service=agent_service,
@@ -665,6 +682,7 @@ def build_shared_services(
         inference_model_service=inference_model_service,
         policy_heads=runtime_policy_reader,
         breaker=llm_breaker,
+        run_projection=run_projection,
     )
     status_service = StatusService(
         checkers=[

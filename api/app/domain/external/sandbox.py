@@ -149,6 +149,11 @@ class Sandbox(Protocol):
         """只读属性，获取沙箱的vnc链接(远程桌面链接)"""
         ...
 
+    @property
+    def vnc_headers(self) -> dict[str, str]:
+        """VNC 反向代理需向沙箱数据面(:8080)携带的鉴权头（无 token 时为空）"""
+        return {}
+
     async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
         """Create a tar.gz snapshot of the browser profile directory."""
         ...

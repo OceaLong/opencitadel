@@ -106,7 +106,27 @@ class KnowledgeBaseRepository(Protocol):
         self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
     ) -> list[KnowledgeBase]: ...
 
-    async def delete_kb(self, kb_id: str) -> None: ...
+    async def delete_kb(self, kb_id: str) -> None:
+        """物理删除知识库及其级联数据（purge 底层原语）。"""
+        ...
+
+    async def list_deleted_kbs(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[KnowledgeBase]:
+        """回收站：仅返回已软删（``deleted_at`` 非空）的知识库，owner 作用域内。"""
+        ...
+
+    async def soft_delete(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """软删除：设置 ``deleted_at``；仅命中未删除的行；返回是否命中。"""
+        ...
+
+    async def restore(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """恢复：清空 ``deleted_at``；仅命中回收站中的行；返回是否命中。"""
+        ...
+
+    async def purge_kb(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """清除：物理删除回收站中的知识库（``deleted_at`` 非空，owner 作用域内）。"""
+        ...
 
     async def update_status(
         self,

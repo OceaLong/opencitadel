@@ -230,6 +230,7 @@ class ExecutionOutboxORM(Base):
             ondelete="RESTRICT",
         ),
         nullable=False,
+        index=True,  # execution_events RESTRICT FK integrity scan
     )
     destination: Mapped[str] = mapped_column(String(64), nullable=False)
     dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -329,6 +330,7 @@ class ExecutionActivityTaskORM(Base):
             ondelete="RESTRICT",
         ),
         nullable=False,
+        index=True,  # execution_events RESTRICT FK integrity scan
     )
     owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -361,6 +363,61 @@ class ExecutionActivityTaskORM(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+
+class ExecutionPoisonedRunORM(Base):
+    """Kernel-internal quarantine for Run projections that fail to decode.
+
+    A single corrupt projection row (state-hash mismatch, stale policy metadata,
+    or invalid state) must never abort the whole decision batch or crash every
+    kernel replica in a CrashLoopBackOff. The decision source records the
+    offending Run here, skips it, and excludes it from future ``load_ready``
+    scans so healthy Runs keep progressing. This is an operator diagnostic /
+    control table (no tenant RLS), written only by the execution kernel.
+    """
+
+    __tablename__ = "execution_poisoned_runs"
+    __table_args__ = (Index("ix_execution_poisoned_runs_last_seen", "last_seen_at"),)
+
+    run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+
+class ExecutionScopeHeadORM(Base):
+    """Per owner-scope high-water mark of appended event positions.
+
+    The formal projector's owner-scope discovery must never re-aggregate the
+    ever-growing ``execution_events`` table on every idle poll. The append path
+    keeps this compact head row (one per owner scope) current inside the same
+    transaction that writes the events, so ``list_pending`` degrades to an
+    indexed ``head_position > checkpoint`` lookup that is flat in the event
+    count. Kernel-internal control table (no tenant RLS, mirroring
+    ``execution_poisoned_runs``); it carries no event payload, only a
+    monotonically advancing position marker keyed by the owner-scope key.
+    """
+
+    __tablename__ = "execution_scope_head"
+
+    owner_scope_key: Mapped[str] = mapped_column(String(261), primary_key=True)
+    head_position: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -567,7 +624,9 @@ class ExecutionPublicEventORM(Base):
         ),
     )
 
-    position: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # The projector always writes position explicitly (mirrored from
+    # execution_events.position); it is never a locally generated sequence.
+    position: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     source_entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -639,7 +698,7 @@ class ExecutionApprovalProjectionORM(Base):
     __table_args__ = (
         _owner_scope_constraint("execution_approval_projection"),
         CheckConstraint(
-            "status IN ('pending', 'approved', 'rejected', 'cancelled')",
+            "status IN ('pending', 'approved', 'rejected', 'cancelled', 'expired')",
             name="ck_execution_approval_projection_status",
         ),
         Index(
@@ -690,11 +749,13 @@ __all__ = [
     "ExecutionCommandInboxORM",
     "ExecutionEventORM",
     "ExecutionOutboxORM",
+    "ExecutionPoisonedRunORM",
     "ExecutionProjectorCheckpointORM",
     "ExecutionPublicEventORM",
     "ExecutionResourceBuildProjectionORM",
     "ExecutionRunProjectionORM",
     "ExecutionScheduledCommandORM",
+    "ExecutionScopeHeadORM",
     "ExecutionSnapshotORM",
     "ExecutionStreamOwnerORM",
 ]

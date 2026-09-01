@@ -41,6 +41,25 @@ def test_operations_policy_rejects_unbounded_or_inconsistent_values() -> None:
         policy_module.OperationsPolicy.model_validate({"sandbox": {"memory_limit": "unbounded"}})
 
 
+def test_traffic_policy_exposes_configurable_bounded_auth_budget() -> None:
+    """The auth-specific per-minute budget is control-plane configurable through
+    the same OperationsPolicy JSON mechanism, defaults tighter than the general
+    budget, and stays bounded like every other traffic knob."""
+    policy_module = _runtime_policy_module()
+
+    default = policy_module.TrafficPolicy()
+    assert default.auth_requests_per_minute == 10
+    assert default.auth_requests_per_minute < default.requests_per_minute
+
+    configured = policy_module.OperationsPolicy.model_validate(
+        {"traffic": {"auth_requests_per_minute": 3}}
+    )
+    assert configured.traffic.auth_requests_per_minute == 3
+
+    with pytest.raises(ValidationError):
+        policy_module.OperationsPolicy.model_validate({"traffic": {"auth_requests_per_minute": 0}})
+
+
 def test_source_access_policy_normalizes_and_rejects_overlap() -> None:
     policy_module = _runtime_policy_module()
 

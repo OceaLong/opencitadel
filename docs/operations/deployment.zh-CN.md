@@ -44,13 +44,19 @@ docker compose ps
 - `API_KEY_SECRET_ID`、`API_KEY_SECRET`、`API_KEY_PREVIOUS_SECRETS`
 - `AUDIT_SIGNING_KEY_ID`、`AUDIT_SIGNING_KEY`、`AUDIT_PREVIOUS_SIGNING_KEYS`
 - `JWT_SECRET`、`SESSION_SECRET`
-- `SANDBOX_BROKER_TOKEN`
+- `SANDBOX_BROKER_TOKEN`、`SANDBOX_TOKEN_SEED`
 - `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS`
+
+`SANDBOX_TOKEN_SEED` 在生产环境必填且至少 32 个随机字节；API 与执行内核都由它派生每个沙箱的
+数据面 Token。`JWT_PREVIOUS_SECRETS`（默认 `{}`）与 `DATABASE_AUTHORIZATION_SIGNING_SECRET`
+（默认复用 `SESSION_SECRET`）为可选，详见*配置与 Secret*。运行 Ops Patrol Collector/Actuator
+时，还需设置强 `OPS_COLLECTOR_TOKEN` 与 `OPS_ACTUATOR_TOKEN`；缺失时对应 Server 拒绝启动。
 
 密码学密钥至少使用 32 个随机字节。除本地 HTTP 开发外保持 `COOKIE_SECURE=true`，将
 `FRONTEND_BASE_URL` 与 `OAUTH_REDIRECT_BASE` 设置为公网 HTTPS Origin，精确配置
 `TRUSTED_PROXY_CIDRS`，并收紧 `OUTBOUND_ALLOWED_PORTS` 与
-`OUTBOUND_PRIVATE_HOST_ALLOWLIST`。
+`OUTBOUND_PRIVATE_HOST_ALLOWLIST`。生产环境 `TRUSTED_PROXY_CIDRS` 在启动时校验，拒绝与
+沙箱/Pod 网络重叠的宽 RFC1918 段。
 
 ## 启动与恢复
 
@@ -89,7 +95,9 @@ Marker，并在关闭时删除。Readiness 还会校验 Runtime Policy、Schema 
 Compose 将 Docker 访问隔离在 `opencitadel-sandbox-broker`。API 和内核只拿到窄化、
 Token 认证的 HTTP 端点，不接触 Docker Socket。原生 Linux 需把 `DOCKER_SOCK_GID`
 设为 Socket Group。Kubernetes 使用执行内核专用 ServiceAccount 与受限 Sandbox Pod RBAC。
-保持沙箱 Egress Proxy 与 Allowlist 开启。
+保持 Squid 沙箱 Egress Proxy 与 Allowlist 开启。每个沙箱的数据面 Token 在 API 与内核两侧派生为
+`HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`；Seed 绝不进入沙箱容器，任何副本都能无共享 Token 状态
+地重新附着并认证。
 
 ## 配置与 Secret
 
@@ -105,8 +113,12 @@ Admin 通过 **设置 → 运行时策略** 或 `/api/runtime-policies` 管理�
 4. 轮换 Provider 凭据并保存受影响的 Endpoint/Integration；新写入使用当前 Key。
 5. 确认没有存量信封使用旧 ID 后，再删除旧 Key。
 
-审计签名密钥通过 `AUDIT_PREVIOUS_SIGNING_KEYS` 同样轮换。不得记录明文 Secret，
-也不得把它们写进 Runtime Policy。
+审计签名密钥通过 `AUDIT_PREVIOUS_SIGNING_KEYS` 同样轮换，Session JWT 通过
+`JWT_PREVIOUS_SECRETS` 轮换：把旧 Key 按其 ID 移入 previous map，设置新的 `JWT_SECRET`，
+再重启副本；在途 Token 在过期前继续验证。`DATABASE_AUTHORIZATION_SIGNING_SECRET` 默认回退
+`SESSION_SECRET`，保持现有部署与其 Seed 的 RLS `app.rls_signing_secret` 值不变；仅当需要把
+数据库授权信任域与 Session Cookie 拆分时才设置为独立强值，并与数据库签名密钥同步轮换。不得
+记录明文 Secret，也不得把它们写进 Runtime Policy。
 
 Bootstrap 后，通过 **设置 → 推理** 或 `/api/inference` 配置 Endpoint、类型化 Model 与用途
 Binding。Chat、Embedding、Rerank 消费者不存在环境变量 Key 回退；Binding 无法解析时通过
@@ -141,7 +153,15 @@ helm upgrade --install opencitadel deploy/helm/opencitadel \
 通过 Secret Manager 或受保护 values 文件提供全部 Secret。保持
 `networkPolicy.enabled=true`，分离 API/Kernel/Migration 数据库用户，并按 Activity 负载
 配置 `executionKernel.replicas` 与 HPA。可选 Ops Collector 与 Actuator 必须网络隔离；
-Actuator 只允许 API/Kernel 到达，且仍要求持久审批。
+Actuator 只允许 API/Kernel 到达，且仍要求持久审批。其 RBAC 是按允许 Namespace 渲染的
+Namespaced `Role`/`RoleBinding`，而非集群级 `ClusterRole`。
+
+Chart 以模板形式提供韧性与可观测基线：按工作负载的 `NetworkPolicy`（PostgreSQL、Redis、
+执行内核、Ops Collector/Actuator、Egress Proxy、Sandbox）、API 与执行内核的
+PodDisruptionBudget、将沙箱出站限制到 Allowlist 的 Squid `egress-proxy` Deployment、
+PostgreSQL 备份 `CronJob`，以及带审批超时、审计链验证失败、Outbox Lag、沙箱准入拒绝、5xx
+率、限流拒绝告警的 `PrometheusRule`。Reverse Proxy 还设置 HSTS/CSP/nosniff 响应头与
+`server_tokens off`。
 
 Chart 托管 PostgreSQL 时，`files/postgres/init-app-role.sh` 会在绿地迁移前创建互相独立的
 Migration、API 与 Kernel 角色。外部数据库必须在安装前配置等价角色。验证运行时角色的

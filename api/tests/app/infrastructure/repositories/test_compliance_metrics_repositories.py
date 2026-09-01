@@ -127,6 +127,7 @@ def _audit_log(
         resource_type="",
         resource_id="",
         team_id=None,
+        shard_key="system",
         request_id="",
         metadata_json=metadata or {},
         chain_seq=chain_seq,

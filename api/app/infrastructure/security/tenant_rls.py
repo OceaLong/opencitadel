@@ -207,11 +207,94 @@ _CUSTOM_OWNER_TABLES = {
     "notifications": "user_id",
     "service_api_keys": "owner_user_id",
     "user_quotas": "user_id",
+    # Identity credential tables: a principal may only ever see and mutate their
+    # own OAuth links and refresh tokens; every privileged auth/session flow that
+    # touches another user's rows runs under a system authorization scope.
+    "oauth_identities": "user_id",
+    "refresh_tokens": "user_id",
 }
 
 
 def _custom_owner_predicate(column: str) -> str:
     return f"({_system_or_admin()}) OR {_identifier(column)} = {_USER_ID}"
+
+
+def users_select_predicate() -> str:
+    """A user sees only themselves (and the system/admin scope).
+
+    Same-team peer visibility deliberately lives in the service layer, not here:
+    ``users`` cannot reference ``team_members`` in an RLS predicate without
+    dragging ``team_members``' own policy into the check, and because every
+    runtime role is ``NOBYPASSRLS`` that self-referential read recurses
+    infinitely. Flows that legitimately read other members' user rows (team
+    member listings) run under a system authorization scope instead.
+    """
+    return f"{_system_or_admin()} OR id = {_USER_ID}"
+
+
+def teams_select_predicate() -> str:
+    """A team is visible to its members (and system/admin).
+
+    The membership probe reads ``team_members`` (a different relation), which is
+    subject only to its own non-recursive policy, so this stays cycle-free.
+    """
+    return (
+        f"{_system_or_admin()} "
+        "OR EXISTS (SELECT 1 FROM team_members "
+        f"WHERE team_members.team_id = teams.id AND team_members.user_id = {_USER_ID})"
+    )
+
+
+def team_quotas_select_predicate() -> str:
+    """A team's quota row is visible to its members (and system/admin).
+
+    Writes stay system/admin only (quotas are set by platform admins); the
+    membership probe reads ``team_members`` (non-recursive), so this is
+    cycle-free like ``teams_select_predicate``.
+    """
+    return (
+        f"{_system_or_admin()} "
+        "OR EXISTS (SELECT 1 FROM team_members "
+        f"WHERE team_members.team_id = team_quotas.team_id AND team_members.user_id = {_USER_ID})"
+    )
+
+
+def team_members_select_predicate() -> str:
+    """A membership row is visible to its own subject (and system/admin).
+
+    The predicate intentionally does not probe ``team_members`` for co-members:
+    a self-referential RLS predicate recurses under ``NOBYPASSRLS`` roles.
+    Listing every member of a team runs under a system scope in the service.
+    """
+    return f"{_system_or_admin()} OR user_id = {_USER_ID}"
+
+
+def invitations_predicate() -> str:
+    """Team invitations are visible/writable to members of the target team.
+
+    Platform invitations carry a NULL ``team_id`` and remain system/admin only;
+    the acceptance/registration flows that must read an invitation before the
+    caller is a member run under a system authorization scope.
+    """
+    return (
+        f"{_system_or_admin()} "
+        "OR (team_id IS NOT NULL AND EXISTS (SELECT 1 FROM team_members "
+        f"WHERE team_members.team_id = invitations.team_id AND team_members.user_id = {_USER_ID}))"
+    )
+
+
+def audit_logs_select_predicate() -> str:
+    """Only system/admin may enumerate the audit trail (auditor read-all is
+    layered on centrally by ``policy_statements``)."""
+    return _system_or_admin()
+
+
+def audit_logs_write_predicate() -> str:
+    """Only system/admin scopes may append to the audit chain; all audit writes
+    are funneled through a system-scoped recorder (``AuditService.record`` and
+    the auth flows). UPDATE/DELETE stay blocked by the database immutability
+    trigger regardless of this predicate."""
+    return _system_or_admin()
 
 
 def apply_row_level_security(execute) -> None:
@@ -258,6 +341,53 @@ def apply_row_level_security(execute) -> None:
                 write_predicate=predicate,
             )
         )
+    # Identity / tenancy tables. Reads are scoped to the principal (self, peers,
+    # team members); every write predicate is system/admin only, because the
+    # legitimate multi-user mutations (login, registration, invitation
+    # acceptance, member management) run under a system authorization scope where
+    # the service layer is the authorization boundary.
+    execute(
+        policy_statements(
+            "users",
+            select_predicate=users_select_predicate(),
+            write_predicate=_system_or_admin(),
+        )
+    )
+    execute(
+        policy_statements(
+            "teams",
+            select_predicate=teams_select_predicate(),
+            write_predicate=_system_or_admin(),
+        )
+    )
+    execute(
+        policy_statements(
+            "team_members",
+            select_predicate=team_members_select_predicate(),
+            write_predicate=_system_or_admin(),
+        )
+    )
+    execute(
+        policy_statements(
+            "invitations",
+            select_predicate=invitations_predicate(),
+            write_predicate=invitations_predicate(),
+        )
+    )
+    execute(
+        policy_statements(
+            "audit_logs",
+            select_predicate=audit_logs_select_predicate(),
+            write_predicate=audit_logs_write_predicate(),
+        )
+    )
+    execute(
+        policy_statements(
+            "team_quotas",
+            select_predicate=team_quotas_select_predicate(),
+            write_predicate=_system_or_admin(),
+        )
+    )
 
 
 def disable_policy_statements(table_name: str) -> list[str]:

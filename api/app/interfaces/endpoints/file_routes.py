@@ -30,7 +30,9 @@ async def upload_file(
     quota_service: QuotaService = Depends(get_quota_service),
 ) -> Response[FileInfo]:
     """文件上传接口，传递文件返回文件的File信息"""
-    await quota_service.check_storage_quota(ctx.principal.user_id, incoming_bytes=file.size or 0)
+    await quota_service.check_storage_quota(
+        ctx.principal.user_id, incoming_bytes=file.size or 0, scope=ctx.scope
+    )
     fileinfo = await file_service.upload_file(upload_file=file, scope=ctx.scope)
     return Response.success(
         data=fileinfo,

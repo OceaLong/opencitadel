@@ -14,9 +14,13 @@ class SessionRepository(Protocol):
         ...
 
     async def get_all(
-        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+        search: str | None = None,
     ) -> list[Session]:
-        """获取所有会话列表信息"""
+        """获取所有会话列表信息；``search`` 非空时按标题/最新消息做关键词过滤"""
         ...
 
     async def count(self) -> int:
@@ -63,7 +67,28 @@ class SessionRepository(Protocol):
         ...
 
     async def delete_by_id(self, session_id: str) -> None:
-        """根据传递的会话id删除会话"""
+        """根据传递的会话id物理删除会话（purge 的底层原语）"""
+        ...
+
+    async def list_deleted(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+    ) -> list[Session]:
+        """回收站：仅返回已软删（``deleted_at`` 非空）的会话，owner 作用域内。"""
+        ...
+
+    async def soft_delete(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """软删除：设置 ``deleted_at``。仅命中未删除的行；返回是否命中。"""
+        ...
+
+    async def restore(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """恢复：清空 ``deleted_at``。仅命中回收站中的行；返回是否命中。"""
+        ...
+
+    async def purge(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """清除：物理删除回收站中的会话（``deleted_at`` 非空）；返回是否命中。"""
         ...
 
     async def update_title(self, session_id: str, title: str) -> None:

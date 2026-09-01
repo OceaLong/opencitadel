@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import socket
 import ssl
 from collections.abc import Iterable
 from typing import Any
@@ -40,27 +43,65 @@ class SSRFProtectedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
             allow_private_hosts if allow_private_hosts is not None else ()
         )
 
-    def connect_tcp(
+    async def connect_tcp(
         self,
         host: str,
         port: int,
-        timeout: float | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 (httpcore backend interface)
         local_address: str | None = None,
         socket_options=None,
     ):
         url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        # DNS is resolved on the event loop's default executor rather than
+        # synchronously, so a slow or hostile resolver cannot block the shared
+        # async worker (DoS). resolve_outbound_url still performs every URL,
+        # port and address check and pins the connection to a validated IP; the
+        # prefetched answers are handed to it via the resolver injection point,
+        # keeping the DNS-pinning semantics (resolve once, validate all answers,
+        # connect by IP, SNI stays the original host) unchanged.
+        resolver = await self._prefetch_resolver(host, port)
         target = resolve_outbound_url(
             f"http://{url_host}:{port}",
             allowed_ports=self._allowed_ports,
             allow_private_hosts=self._allow_private_hosts,
+            resolver=resolver,
         )
-        return self._inner.connect_tcp(
+        return await self._inner.connect_tcp(
             target.addresses[0],
             port,
             timeout=timeout,
             local_address=local_address,
             socket_options=socket_options,
         )
+
+    async def _prefetch_resolver(self, host: str, port: int):
+        """Resolve DNS off the event loop and return a resolver returning it.
+
+        IP literals need no lookup, so ``None`` is returned and
+        resolve_outbound_url handles the literal directly. Lookup failures are
+        replayed by the closure so resolve_outbound_url wraps them into its
+        standard OutboundURLRejected error after its own port/scheme checks.
+        """
+        try:
+            ipaddress.ip_address(host)
+            return None
+        except ValueError:
+            pass
+
+        loop = asyncio.get_running_loop()
+        answers: list[tuple] | None = None
+        error: OSError | None = None
+        try:
+            answers = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except (socket.gaierror, OSError) as exc:
+            error = exc
+
+        def _resolver(*_args: Any, **_kwargs: Any):
+            if error is not None:
+                raise error
+            return answers
+
+        return _resolver
 
     async def connect_unix_socket(self, *args, **kwargs):
         raise OutboundURLRejected("出站 HTTP 不允许 Unix Socket")

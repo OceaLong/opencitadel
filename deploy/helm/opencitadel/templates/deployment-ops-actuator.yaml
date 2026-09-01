@@ -41,6 +41,11 @@ spec:
               value: {{ .Values.opsActuator.allowedNamespaces | toJson | quote }}
             - name: OPS_ACTUATOR_ALLOWED_WORKLOADS
               value: {{ .Values.opsActuator.allowedWorkloads | toJson | quote }}
+            - name: OPS_ACTUATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "opencitadel.fullname" . }}-ops-actuator-secret
+                  key: OPS_ACTUATOR_TOKEN
           readinessProbe:
             tcpSocket: {port: mcp}
           livenessProbe:

@@ -1,0 +1,97 @@
+{{- if and .Values.backup.enabled .Values.postgresql.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-postgres-backup
+  labels:
+    app.kubernetes.io/component: postgres-backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.backup.storage }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-postgres-backup
+  labels:
+    app.kubernetes.io/component: postgres-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: postgres-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: {{ .Values.backup.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+                  out="/backups/opencitadel-${ts}.dump"
+                  echo "pg_dump -> ${out}"
+                  # -Fc: 自定义压缩格式，配合 pg_restore 使用。
+                  pg_dump -Fc -f "${out}"
+                  echo "backup complete: ${out}"
+                  # 保留策略：仅保留最新 N 份，删除其余。
+                  keep={{ .Values.backup.retention }}
+                  count=$(ls -1t /backups/opencitadel-*.dump 2>/dev/null | wc -l)
+                  if [ "${count}" -gt "${keep}" ]; then
+                    ls -1t /backups/opencitadel-*.dump | tail -n +$((keep + 1)) | while read -r f; do
+                      echo "pruning old backup: ${f}"
+                      rm -f "${f}"
+                    done
+                  fi
+              env:
+                - name: PGHOST
+                  value: {{ include "opencitadel.postgresHost" . | quote }}
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: {{ .Values.postgresql.database | quote }}
+                # 管理员凭据仅用于逻辑备份；与运行时 API/kernel 角色隔离。
+                - name: PGUSER
+                  value: {{ .Values.postgresql.adminUser | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "opencitadel.fullname" . }}-postgres-bootstrap-secret
+                      key: POSTGRES_ADMIN_PASSWORD
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ include "opencitadel.fullname" . }}-postgres-backup
+            - name: tmp
+              emptyDir: {}
+{{- end }}

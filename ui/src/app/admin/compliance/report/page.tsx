@@ -17,14 +17,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { type AdminTimeRange, getAdminDateRange } from "@/lib/admin-utils";
+import { isCapabilityAvailable } from "@/lib/api/capabilities";
 import { complianceApi, type ComplianceReport } from "@/lib/api/compliance";
 
 import { controlStatusVariant } from "./compliance-status";
 
 export default function AdminComplianceReportPage() {
   const t = useTranslations("compliance");
+  const tCap = useTranslations("capabilities");
+  const { capability } = useCapabilities();
+  const pdfState = capability("report_pdf");
+  const pdfAvailable = isCapabilityAvailable(pdfState);
+  // report_pdf 不可用时后端在本页作用域内回传的 reason_key 恒为 pdfRendererUnavailable,
+  // 直接映射到对应 i18n 文案作为禁用态 tooltip。
+  const pdfDisabledReason = tCap("reason.pdfRendererUnavailable");
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [framework, setFramework] = useState<string>("all");
   const [report, setReport] = useState<ComplianceReport | null>(null);
@@ -80,19 +90,34 @@ export default function AdminComplianceReportPage() {
               {t("exportMd")}
             </a>
           </Button>
-          <Button variant="outline" asChild>
-            <a
-              href={complianceApi.complianceReportUrl({
-                framework: framework === "all" ? undefined : framework,
-                start: dateParams.start_at,
-                end: dateParams.end_at,
-                format: "pdf",
-              })}
-            >
-              <Download className="mr-1 size-4" />
-              {t("exportPdf")}
-            </a>
-          </Button>
+          {pdfAvailable ? (
+            <Button variant="outline" asChild>
+              <a
+                href={complianceApi.complianceReportUrl({
+                  framework: framework === "all" ? undefined : framework,
+                  start: dateParams.start_at,
+                  end: dateParams.end_at,
+                  format: "pdf",
+                })}
+              >
+                <Download className="mr-1 size-4" />
+                {t("exportPdf")}
+              </a>
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* 禁用态用 span 包裹,保证 disabled 按钮仍能触发 tooltip */}
+                <span tabIndex={0}>
+                  <Button variant="outline" disabled>
+                    <Download className="mr-1 size-4" />
+                    {t("exportPdf")}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{pdfDisabledReason}</TooltipContent>
+            </Tooltip>
+          )}
         </CardContent>
       </Card>
 

@@ -49,6 +49,15 @@ class KnowledgeBaseModel(Base):
             deferrable=True,
             initially="DEFERRED",
         ),
+        # RLS predicate shape; leading team_id also serves the teams FK scan.
+        Index("ix_knowledge_bases_team_updated", "team_id", "updated_at"),
+        # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
+        Index(
+            "ix_knowledge_bases_owner_updated",
+            "owner_user_id",
+            "updated_at",
+            postgresql_where=text("team_id IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -66,6 +75,13 @@ class KnowledgeBaseModel(Base):
         String(255),
         nullable=True,
     )
+    # 投影器乐观守卫：最近应用到本行执行态列的 execution_events.position。
+    # 仅由 PostgresFormalProjector 写（带 last_event_position 单调守卫）；
+    # 领域模型与仓储层的普通写路径不触碰该列。
+    last_event_position: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -73,18 +89,22 @@ class KnowledgeBaseModel(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,  # users FK integrity scan (partial owner index only covers team_id IS NULL rows)
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
-    )
+    )  # indexed via ix_knowledge_bases_team_updated composite
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # 软删除时间戳；NULL 表示未删除。仓储层维护，不进入领域模型或 from_domain/to_domain。
 
     def to_domain(self) -> KnowledgeBase:
         return KnowledgeBase(
@@ -352,14 +372,23 @@ class KnowledgeRelationModel(Base):
         nullable=False,
     )
     src_entity_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
+        String(255),
+        ForeignKey("knowledge_entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,  # knowledge_entities CASCADE scan (composite indexes do not lead with src_entity_id)
     )
     dst_entity_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
+        String(255),
+        ForeignKey("knowledge_entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,  # knowledge_entities CASCADE scan (composite indexes do not lead with dst_entity_id)
     )
     relation: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     chunk_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("knowledge_chunks.id", ondelete="SET NULL"), nullable=True
+        String(255),
+        ForeignKey("knowledge_chunks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,  # knowledge_chunks SET NULL FK integrity scan
     )
 
     def to_domain(self) -> KnowledgeRelation:

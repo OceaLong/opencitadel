@@ -100,17 +100,40 @@
     "teamNameRequired": "团队名称不能为空",
     "teamAccessDenied": "无权访问该团队",
     "teamOwnerOnly": "只有团队所有者可执行此操作",
+    "teamDeleteStrategyUnsupported": "不支持该删除策略",
+    "teamTransferOwnerUnknown": "无法确定转移目标团队的所有者",
+    "transferTeamRequired": "请选择要转移资源的目标团队",
+    "tooManyLoginAttempts": "登录失败次数过多，请稍后再试",
     "adminRequired": "需要管理员权限",
     "workspaceAccessDenied": "无权访问该工作区",
     "modelNotFound": "指定模型不存在或无权访问",
     "kbIndexingInProgress": "知识库正在索引中，请等待当前任务完成后再删除",
     "urlNotAllowed": "不允许访问内网或本地地址",
     "pageLoadError": "页面加载失败",
-    "unknownError": "发生了未知错误，请重试或返回首页。"
+    "unknownError": "发生了未知错误，请重试或返回首页。",
+    "quota": {
+      "dailySessionLimit": "已达每日会话上限",
+      "maxConcurrentTasks": "并发活跃会话过多",
+      "monthlyTokenLimit": "已超月度 Token 配额",
+      "storageLimit": "已超存储配额"
+    }
   },
   "apiErrors": {
     "auth": {
       "oauthProfileUnavailable": "OAuth 提供方未返回可用的账户信息，请重试。"
+    },
+    "artifact": {
+      "notFound": "交付物不存在",
+      "sessionNotFound": "会话不存在",
+      "shareInvalid": "分享链接无效或已过期"
+    },
+    "compliance": {
+      "evidencePackageNotFound": "未找到证据包",
+      "pdfUnavailable": "PDF 渲染不可用，请使用 json 或 md 格式"
+    },
+    "metrics": {
+      "notFound": "未找到指标数据",
+      "unauthorized": "无权访问该指标数据"
     },
     "patrol": {
       "admissionPaused": "策略当前已暂停新的巡检运行",
@@ -165,8 +188,16 @@
       "workloadMissing": "未找到修复目标工作负载"
     },
     "scheduling": {
-      "jobUnavailable": "定时任务已不可用"
-    }
+      "jobNotFound": "定时任务不存在",
+      "jobUnavailable": "定时任务已不可用",
+      "secretRotationFailed": "无法轮换密钥，请重试",
+      "triggerFailed": "任务触发失败",
+      "triggerInvalid": "任务触发配置无效",
+      "webhookNotFound": "Webhook 不存在或无效",
+      "webhookSignatureInvalid": "Webhook 签名无效"
+    },
+    "rateLimited": "请求过于频繁，请稍后再试",
+    "rateLimitBackendUnavailable": "请求限流服务暂不可用，请稍后重试"
   },
   "inference": {
     "errors": {
@@ -298,12 +329,29 @@
     },
     "filterEmpty": "没有符合筛选条件的任务",
     "loadError": "加载任务失败",
-    "retry": "重试"
+    "retry": "重试",
+    "searchPlaceholder": "搜索任务…",
+    "searchEmpty": "没有匹配搜索的任务",
+    "recycleBinTitle": "回收站",
+    "recycleBinDescription": "恢复或彻底删除最近移除的任务。"
   },
   "sessions": {
     "fetchFailed": "获取会话列表失败",
     "streamDisconnected": "会话列表实时连接已断开，请手动刷新",
     "hookError": "useSessions 必须在 SessionsProvider 内使用"
+  },
+  "recycleBin": {
+    "loading": "加载中…",
+    "loadFailed": "加载回收站失败",
+    "empty": "回收站为空",
+    "restore": "恢复",
+    "purge": "彻底删除",
+    "restoreSuccess": "已恢复「{name}」",
+    "restoreFailed": "恢复失败",
+    "purgeSuccess": "已彻底删除「{name}」",
+    "purgeFailed": "彻底删除失败",
+    "purgeConfirmTitle": "确认彻底删除？",
+    "purgeConfirmDescription": "「{name}」将被彻底删除，此操作不可恢复。"
   },
   "sessionHeader": {
     "observationTitle": "工具: {tools} · 错误: {errors}",
@@ -471,8 +519,12 @@
     "activeMetadata": "活动版本 {sequence} · Head 版本 {version} · 更新人 {actor}",
     "note": "变更说明",
     "noteDescription": "必填审计说明，用于记录激活此版本的原因。",
-    "execution": { "title": "执行策略" },
-    "operations": { "title": "运维策略" },
+    "execution": {
+      "title": "执行策略"
+    },
+    "operations": {
+      "title": "运维策略"
+    },
     "actions": {
       "saveExecution": "保存执行策略",
       "saveOperations": "保存运维策略",
@@ -890,6 +942,10 @@
     "deleteStrategyAnonymize": "匿名化（保留资源）",
     "deleteStrategyCascade": "级联删除资源",
     "deleteStrategyTransfer": "转移到团队",
+    "transferTargetTeam": "目标团队",
+    "selectTeamPlaceholder": "选择团队",
+    "transferTeamRequired": "请选择要转移资源的目标团队",
+    "noTeamsAvailable": "暂无可转移的团队",
     "auditActivityDesc": "每日审计事件量",
     "auditActivityTitle": "审计活动",
     "callsTrendDesc": "LLM 调用量趋势",
@@ -1045,6 +1101,11 @@
     "roleOwner": "所有者",
     "roleAdmin": "管理员",
     "roleMember": "成员"
+  },
+  "capabilities": {
+    "reason": {
+      "pdfRendererUnavailable": "服务器未安装 PDF 渲染器，暂无法导出 PDF，请改用 Markdown 导出。"
+    }
   },
   "compliance": {
     "evidenceCenterTitle": "合规证据中心",
@@ -1237,7 +1298,10 @@
       "failed": "失败"
     },
     "statusDocCount": "{status} · {count} 篇文档",
-    "title": "文档知识库"
+    "title": "文档知识库",
+    "recycleBin": "回收站",
+    "recycleBinTitle": "回收站",
+    "recycleBinDescription": "恢复或彻底删除已移除的知识库。"
   },
   "mobileNav": {
     "label": "主导航",
@@ -1253,7 +1317,8 @@
     "title": "通知",
     "scheduledJobCompleted": "定时任务「{jobName}」已完成",
     "scheduledJobStarted": "定时任务「{jobName}」已开始执行",
-    "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}"
+    "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}",
+    "approvalWaiting": "「{subject}」需要审批"
   },
   "toolUse": {
     "statusRunning": "执行中",
@@ -1598,8 +1663,12 @@
     "shareLinkCopied": "分享链接已复制",
     "shareLinkFailed": "创建分享链接失败",
     "revokeShare": "撤销分享",
+    "reshare": "重新生成链接",
     "shareRevoked": "分享链接已撤销",
     "shareRevokeFailed": "撤销分享链接失败",
+    "sharedActive": "已分享",
+    "shareExpiresAt": "{date} 到期",
+    "shareTokenSuffix": "尾号 {suffix}",
     "statusDraft": "草稿",
     "statusFinal": "定稿",
     "statusUpdated": "已更新",
@@ -1676,7 +1745,17 @@
     "tokenLabel": "Token",
     "secretLabel": "Secret",
     "triggerTypeCronOption": "Cron",
-    "triggerTypeWebhookOption": "Webhook"
+    "triggerTypeWebhookOption": "Webhook",
+    "runsAction": "运行历史",
+    "runsTitle": "运行历史",
+    "runsSubtitle": "「{name}」的运行历史",
+    "runsLoading": "正在加载运行历史…",
+    "runsEmpty": "暂无运行记录",
+    "runsLoadFailed": "加载运行历史失败",
+    "runsLoadMore": "加载更多",
+    "runStartedAt": "开始：{time}",
+    "runFinishedAt": "结束：{time}",
+    "runError": "错误：{error}"
   },
   "contextSelector": {
     "clear": "清除上下文",

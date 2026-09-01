@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { ShieldCheck, ShieldX } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,12 +38,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { type PaginatedFetcher, usePaginatedList } from "@/hooks/use-paginated-list";
 import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog, type AuditLogDetail } from "@/lib/api/admin";
 import { type ChainVerifyResult, complianceApi } from "@/lib/api/compliance";
 import { IconCopy, IconDownload } from "@/lib/icons";
-
-const PAGE_SIZE = 20;
 
 function actionBadgeVariant(action: string): "secondary" | "destructive" | "warning" | "success" {
   const lower = action.toLowerCase();
@@ -62,13 +61,10 @@ function actionBadgeVariant(action: string): "secondary" | "destructive" | "warn
 export default function AdminAuditPage() {
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [actorFilter, setActorFilter] = useState("");
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [byDay, setByDay] = useState<Array<{ date: string; count: number }>>([]);
   const [byAction, setByAction] = useState<Array<{ action: string; count: number }>>([]);
   const [chain, setChain] = useState<ChainVerifyResult | null>(null);
@@ -81,7 +77,6 @@ export default function AdminAuditPage() {
   const listParams = useMemo(
     () => ({
       ...dateParams,
-      limit: PAGE_SIZE,
       action: actionFilter === "all" ? undefined : actionFilter,
       actor_user_id: actorFilter.trim() || undefined,
     }),
@@ -108,25 +103,31 @@ export default function AdminAuditPage() {
     }
   }, []);
 
-  const loadAudit = useCallback(
-    async (nextOffset: number) => {
-      setLoading(true);
-      try {
-        const [auditData, summary] = await Promise.all([
-          adminApi.audit({ ...listParams, offset: nextOffset }),
-          adminApi.auditSummary(dateParams),
-        ]);
-        setLogs(auditData.logs);
-        setTotal(auditData.total);
-        setOffset(nextOffset);
-        setByDay(summary.by_day);
-        setByAction(summary.by_action);
-      } finally {
-        setLoading(false);
-      }
+  const fetchAudit = useCallback<PaginatedFetcher<AuditLog>>(
+    async ({ limit, offset }) => {
+      const [auditData, summary] = await Promise.all([
+        adminApi.audit({ ...listParams, limit, offset }),
+        adminApi.auditSummary(dateParams),
+      ]);
+      setByDay(summary.by_day);
+      setByAction(summary.by_action);
+      return { items: auditData.logs, total: auditData.total };
     },
     [dateParams, listParams],
   );
+
+  const {
+    items: logs,
+    total,
+    loading,
+    totalPages,
+    currentPage,
+    canPrev,
+    canNext,
+    load: loadAudit,
+    nextPage,
+    prevPage,
+  } = usePaginatedList<AuditLog>(fetchAudit);
 
   const openDetail = useCallback(async (logId: string) => {
     setDetailLoading(true);
@@ -151,15 +152,15 @@ export default function AdminAuditPage() {
   );
 
   useEffect(() => {
+    // fetchAudit 在筛选条件（时间范围 / action / actor）变化时重建，
+    // 依赖它可在筛选变化时自动回到第一页重新加载。
     void loadAudit(0);
-  }, [loadAudit]);
+  }, [fetchAudit, loadAudit]);
 
   useEffect(() => {
     void verifyChain();
   }, [verifyChain]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
   const chainOk = chain?.ok ?? null;
 
   const chainStatusLabel =
@@ -173,7 +174,7 @@ export default function AdminAuditPage() {
               : ""
           }${
             chain?.checked_at
-              ? ` · ${t("chainCheckedAt", { time: formatDateTime(chain.checked_at) })}`
+              ? ` · ${t("chainCheckedAt", { time: formatDateTime(chain.checked_at, locale) })}`
               : ""
           }`;
 
@@ -307,7 +308,7 @@ export default function AdminAuditPage() {
                       </StatusBadge>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-dense font-mono">
-                      {formatDateTime(item.created_at)}
+                      {formatDateTime(item.created_at, locale)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {item.actor_user_id || t("system")}
@@ -357,16 +358,16 @@ export default function AdminAuditPage() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset === 0}
-                onClick={() => void loadAudit(Math.max(0, offset - PAGE_SIZE))}
+                disabled={!canPrev}
+                onClick={() => void prevPage()}
               >
                 {tCommon("previousPage")}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset + PAGE_SIZE >= total}
-                onClick={() => void loadAudit(offset + PAGE_SIZE)}
+                disabled={!canNext}
+                onClick={() => void nextPage()}
               >
                 {tCommon("nextPage")}
               </Button>
@@ -442,7 +443,7 @@ export default function AdminAuditPage() {
               </div>
               <div>
                 <dt className="text-muted-foreground text-xs">
-                  {formatDateTime(detail.created_at)}
+                  {formatDateTime(detail.created_at, locale)}
                 </dt>
               </div>
             </dl>

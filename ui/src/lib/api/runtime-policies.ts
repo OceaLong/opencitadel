@@ -1,10 +1,10 @@
 import { get, post } from "./fetch";
 import type { components } from "./generated/schema";
 
-export type ExecutionPolicy = components["schemas"]["ExecutionPolicy-Output"];
-export type ExecutionPolicyInput = components["schemas"]["ExecutionPolicy-Input"];
-export type OperationsPolicy = components["schemas"]["OperationsPolicy-Output"];
-export type OperationsPolicyInput = components["schemas"]["OperationsPolicy-Input"];
+export type ExecutionPolicy = components["schemas"]["ExecutionPolicy"];
+export type ExecutionPolicyInput = components["schemas"]["ExecutionPolicy"];
+export type OperationsPolicy = components["schemas"]["OperationsPolicy"];
+export type OperationsPolicyInput = components["schemas"]["OperationsPolicy"];
 export type ActiveExecutionPolicy = components["schemas"]["ActiveExecutionPolicyResponse"];
 export type ActiveOperationsPolicy = components["schemas"]["ActiveOperationsPolicyResponse"];
 export type RuntimePolicyHead = components["schemas"]["RuntimePolicyHeadResponse"];

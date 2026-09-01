@@ -1,0 +1,14 @@
+{{- if .Values.egressProxy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-egress-proxy
+  labels:
+    app.kubernetes.io/component: egress-proxy
+data:
+  # Sourced verbatim from deploy/squid/squid.conf so the K8s egress policy
+  # stays identical to the compose sandbox-egress proxy (private-range/metadata
+  # blacklist + Safe_ports, then allow). Update both copies together.
+  squid.conf: |-
+{{ .Files.Get "files/squid/squid.conf" | indent 4 }}
+{{- end }}

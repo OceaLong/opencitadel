@@ -13,13 +13,52 @@ spec:
         - protocol: TCP
           port: {{ .Values.executionKernel.metricsPort }}
   egress:
-    - ports:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
-    - ports:
+    # 集群内数据面：Postgres / Redis。
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: postgres
+      ports:
         - {protocol: TCP, port: 5432}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: redis
+      ports:
         - {protocol: TCP, port: 6379}
+    {{- if .Values.opsCollector.enabled }}
+    # 只读巡检 Collector 的推送端口。
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ops-collector
+      ports:
         - {protocol: TCP, port: 8090}
+    {{- end }}
+    # 外部出站（LLM 推理 / webhook 等）。仅公网，排除集群与私有网段，
+    # 防止经 80/443 横向访问集群内私有服务（纵深防御）。生产建议改为经
+    # 出站代理（如 squid）并把此处收敛到该代理的 podSelector。
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
         - {protocol: TCP, port: 80}
         - {protocol: TCP, port: 443}
 {{- end }}

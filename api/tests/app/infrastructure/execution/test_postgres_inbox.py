@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.application.execution.orchestrator import CommandResult
 from app.domain.execution.commands import CommandEnvelope
+from app.domain.execution.errors import CommandInProgressError
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.execution.models import ExecutionCommandInboxORM
 from app.infrastructure.execution.postgres_inbox import PostgresInbox
@@ -190,6 +191,88 @@ async def test_completed_result_is_returned_without_reprocessing(
         )
         assert duplicate.status == "completed"
         assert duplicate.result == result
+
+
+@pytest.mark.asyncio
+async def test_load_pending_claims_disjoint_batches_across_workers(inbox_database) -> None:
+    session_factory, command_ids = inbox_database
+    first_command = command()
+    second_command = command()
+    command_ids.extend([first_command.command_id, second_command.command_id])
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-disjoint-seed"),
+        )
+        inbox = PostgresInbox(session)
+        await inbox.receive(first_command)
+        await inbox.receive(second_command)
+        await session.commit()
+
+    source = PostgresInboxSource(
+        session_factory=session_factory,
+        authorization=AuthorizationContext.system("inbox-disjoint-source"),
+        claim_ttl=timedelta(seconds=30),
+    )
+
+    # Two sequential polls stand in for two replicas: the second must not
+    # re-load the command the first already claimed (marked ``processing``).
+    first_batch = await source.load_pending(now=NOW, limit=1)
+    second_batch = await source.load_pending(now=NOW, limit=1)
+
+    assert len(first_batch) == 1
+    assert len(second_batch) == 1
+    assert first_batch[0].command_id != second_batch[0].command_id
+    assert {first_batch[0].command_id, second_batch[0].command_id} == {
+        first_command.command_id,
+        second_command.command_id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_claim_on_locked_row_is_in_progress(inbox_database) -> None:
+    session_factory, command_ids = inbox_database
+    candidate = command()
+    command_ids.append(candidate.command_id)
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-lock-seed"),
+        )
+        await PostgresInbox(session).receive(candidate)
+        await session.commit()
+
+    async with session_factory() as session_a:
+        await configure_session_authorization(
+            session_a,
+            AuthorizationContext.system("inbox-lock-holder"),
+        )
+        # Hold a row lock without mutating the row (a mutation would make the
+        # rival's idempotent receive() block on the uncommitted write rather
+        # than exercise SKIP LOCKED).
+        locked = await session_a.scalar(
+            select(ExecutionCommandInboxORM)
+            .where(ExecutionCommandInboxORM.command_id == candidate.command_id)
+            .with_for_update()
+        )
+        assert locked is not None
+        # A concurrent claimer must skip the locked row (SKIP LOCKED) and surface
+        # a non-fatal CommandInProgressError instead of blocking on the lock.
+        async with session_factory() as session_b:
+            await configure_session_authorization(
+                session_b,
+                AuthorizationContext.system("inbox-lock-rival"),
+            )
+            with pytest.raises(CommandInProgressError):
+                await PostgresInbox(session_b).claim(
+                    candidate,
+                    now=NOW,
+                    claim_ttl=timedelta(seconds=30),
+                )
+            await session_b.rollback()
+        await session_a.rollback()
 
 
 @pytest.mark.asyncio

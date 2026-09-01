@@ -1,0 +1,1065 @@
+name: opencitadel
+services:
+  acceptance-inference:
+    profiles:
+      - acceptance
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/e2e/fixtures/inference-provider
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cap_drop:
+      - ALL
+    cpus: 0.25
+    environment:
+      ACCEPTANCE_PROVIDER_TOKEN: ""
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/healthz
+      timeout: 3s
+      interval: 5s
+      retries: 12
+    image: opencitadel-acceptance-inference
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "134217728"
+    networks:
+      opencitadel-network: null
+    pids_limit: 64
+    read_only: true
+    restart: 'no'
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
+    user: 1000:1000
+  opencitadel-api:
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/api
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+        WITH_K8S: "0"
+      target: api
+    cpus: 2
+    depends_on:
+      opencitadel-migrate:
+        condition: service_completed_successfully
+        required: true
+      opencitadel-postgres:
+        condition: service_healthy
+        required: true
+      opencitadel-redis:
+        condition: service_healthy
+        required: true
+      opencitadel-sandbox-broker:
+        condition: service_healthy
+        required: true
+    environment:
+      ACCESS_TOKEN_TTL_SECONDS: "900"
+      API_KEY_PREVIOUS_SECRETS: '{}'
+      API_KEY_SECRET: REDACTED_API_KEY_SECRET
+      API_KEY_SECRET_ID: primary
+      AUDIT_PREVIOUS_SIGNING_KEYS: '{}'
+      AUDIT_SIGNING_KEY: replace-with-openssl-rand-hex-32
+      AUDIT_SIGNING_KEY_ID: primary
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: replace-with-strong-admin-password
+      COMPOSE_PROFILES: ""
+      COMPOSE_PROJECT_NAME: opencitadel
+      COOKIE_DOMAIN: ""
+      COOKIE_SECURE: "true"
+      COS_BUCKET: ""
+      COS_DOMAIN: ""
+      COS_REGION: ap-guangzhou
+      COS_SECRET_ID: ""
+      COS_SECRET_KEY: ""
+      DOCKER_SOCK_GID: "0"
+      ENV: production
+      EXECUTION_KERNEL_METRICS_PORT: "9108"
+      FRONTEND_BASE_URL: https://example.com
+      GITHUB_CLIENT_ID: ""
+      GITHUB_CLIENT_SECRET: ""
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      HTTPS_ENABLED: "false"
+      JWT_SECRET: change-me-with-openssl-rand-hex-32
+      LOG_LEVEL: INFO
+      METRICS_TOKEN: ""
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_BUCKET: opencitadel
+      MINIO_ENDPOINT: opencitadel-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ""
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      NGINX_HTTPS_PORT: "443"
+      NGINX_PORT: "8088"
+      OAUTH_REDIRECT_BASE: https://example.com/api/auth/oauth
+      OPENCITADEL_DOMAIN: ""
+      OPENCITADEL_ENV_FILE: .env.example
+      OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS: "30"
+      OPS_ACTUATOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_ACTUATOR_TARGET_REF: opencitadel-local
+      OPS_ACTUATOR_TOKEN: replace-with-32-byte-random-actuator-token
+      OPS_COLLECTOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_COLLECTOR_TARGET_REF: opencitadel-local
+      OPS_COLLECTOR_TOKEN: replace-with-32-byte-random-collector-token
+      OUTBOUND_ALLOWED_PORTS: 80,443,8080,8443,8090,8091,11434
+      OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
+      POLICY_HEAD_REFRESH_INTERVAL_SECONDS: "5"
+      POLICY_MAX_STALENESS_SECONDS: "30"
+      POSTGRES_ADMIN_PASSWORD: ""
+      POSTGRES_ADMIN_USER: ""
+      POSTGRES_DB: opencitadel
+      POSTGRES_HOST: opencitadel-postgres
+      POSTGRES_KERNEL_PASSWORD: ""
+      POSTGRES_KERNEL_USER: ""
+      POSTGRES_MIGRATION_PASSWORD: ""
+      POSTGRES_MIGRATION_USER: ""
+      POSTGRES_PASSWORD: replace-with-strong-postgres-password
+      POSTGRES_USER: opencitadel_app
+      REDIS_DB: "0"
+      REDIS_HOST: opencitadel-redis
+      REDIS_PASSWORD: replace-with-strong-redis-password
+      REDIS_PORT: "6379"
+      REFRESH_TOKEN_TTL_SECONDS: "2592000"
+      SANDBOX_ADDRESS: ""
+      SANDBOX_BROKER_TOKEN: replace-with-32-byte-random-broker-token
+      SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
+      SANDBOX_CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
+      SANDBOX_DRIVER: auto
+      SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_IMAGE: opencitadel-sandbox
+      SANDBOX_K8S_NAMESPACE: default
+      SANDBOX_K8S_POD_LABEL: app=opencitadel-sandbox
+      SANDBOX_LABELS: '{}'
+      SANDBOX_NAME_PREFIX: opencitadel-sandbox
+      SANDBOX_NETWORK: opencitadel_opencitadel-sandbox-network
+      SANDBOX_NO_PROXY: localhost,127.0.0.1
+      SANDBOX_TOKEN_SEED: replace-with-32-byte-random-sandbox-token-seed
+      SESSION_SECRET: change-me-with-openssl-rand-hex-32
+      STORAGE_PROVIDER: cos
+      TRUSTED_PROXY_CIDRS: 127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12
+    extra_hosts:
+      - host.docker.internal=host-gateway
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://127.0.0.1:8000/api/health/ready
+      timeout: 10s
+      interval: 15s
+      retries: 5
+      start_period: 20s
+    image: opencitadel-api
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "671088640"
+    mem_reservation: "402653184"
+    networks:
+      opencitadel-network: null
+      opencitadel-ops-network: null
+      opencitadel-sandbox-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s
+  opencitadel-execution-kernel:
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/api
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+        WITH_K8S: "0"
+      target: execution-kernel
+    cpus: 2
+    command:
+      - python
+      - -m
+      - app.execution_kernel_main
+    depends_on:
+      opencitadel-migrate:
+        condition: service_completed_successfully
+        required: true
+      opencitadel-postgres:
+        condition: service_healthy
+        required: true
+      opencitadel-redis:
+        condition: service_started
+        required: true
+      opencitadel-sandbox-broker:
+        condition: service_healthy
+        required: true
+    environment:
+      ACCESS_TOKEN_TTL_SECONDS: "900"
+      API_KEY_PREVIOUS_SECRETS: '{}'
+      API_KEY_SECRET: REDACTED_API_KEY_SECRET
+      API_KEY_SECRET_ID: primary
+      AUDIT_PREVIOUS_SIGNING_KEYS: '{}'
+      AUDIT_SIGNING_KEY: replace-with-openssl-rand-hex-32
+      AUDIT_SIGNING_KEY_ID: primary
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: replace-with-strong-admin-password
+      COMPOSE_PROFILES: ""
+      COMPOSE_PROJECT_NAME: opencitadel
+      COOKIE_DOMAIN: ""
+      COOKIE_SECURE: "true"
+      COS_BUCKET: ""
+      COS_DOMAIN: ""
+      COS_REGION: ap-guangzhou
+      COS_SECRET_ID: ""
+      COS_SECRET_KEY: ""
+      DOCKER_SOCK_GID: "0"
+      ENV: production
+      EXECUTION_KERNEL_METRICS_PORT: "9108"
+      FRONTEND_BASE_URL: https://example.com
+      GITHUB_CLIENT_ID: ""
+      GITHUB_CLIENT_SECRET: ""
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      HTTPS_ENABLED: "false"
+      JWT_SECRET: change-me-with-openssl-rand-hex-32
+      LOG_LEVEL: INFO
+      METRICS_TOKEN: ""
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_BUCKET: opencitadel
+      MINIO_ENDPOINT: opencitadel-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ""
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      NGINX_HTTPS_PORT: "443"
+      NGINX_PORT: "8088"
+      OAUTH_REDIRECT_BASE: https://example.com/api/auth/oauth
+      OPENCITADEL_DOMAIN: ""
+      OPENCITADEL_ENV_FILE: .env.example
+      OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS: "30"
+      OPS_ACTUATOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_ACTUATOR_TARGET_REF: opencitadel-local
+      OPS_ACTUATOR_TOKEN: replace-with-32-byte-random-actuator-token
+      OPS_COLLECTOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_COLLECTOR_TARGET_REF: opencitadel-local
+      OPS_COLLECTOR_TOKEN: replace-with-32-byte-random-collector-token
+      OUTBOUND_ALLOWED_PORTS: 80,443,8080,8443,8090,8091,11434
+      OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
+      POLICY_HEAD_REFRESH_INTERVAL_SECONDS: "5"
+      POLICY_MAX_STALENESS_SECONDS: "30"
+      POSTGRES_ADMIN_PASSWORD: ""
+      POSTGRES_ADMIN_USER: ""
+      POSTGRES_DB: opencitadel
+      POSTGRES_HOST: opencitadel-postgres
+      POSTGRES_KERNEL_PASSWORD: replace-with-distinct-kernel-password
+      POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
+      POSTGRES_MIGRATION_PASSWORD: ""
+      POSTGRES_MIGRATION_USER: ""
+      POSTGRES_PASSWORD: replace-with-distinct-kernel-password
+      POSTGRES_USER: opencitadel_execution_kernel_runtime
+      REDIS_DB: "0"
+      REDIS_HOST: opencitadel-redis
+      REDIS_PASSWORD: replace-with-strong-redis-password
+      REDIS_PORT: "6379"
+      REFRESH_TOKEN_TTL_SECONDS: "2592000"
+      SANDBOX_ADDRESS: ""
+      SANDBOX_BROKER_TOKEN: replace-with-32-byte-random-broker-token
+      SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
+      SANDBOX_CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
+      SANDBOX_DRIVER: auto
+      SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_IMAGE: opencitadel-sandbox
+      SANDBOX_K8S_NAMESPACE: default
+      SANDBOX_K8S_POD_LABEL: app=opencitadel-sandbox
+      SANDBOX_LABELS: '{}'
+      SANDBOX_NAME_PREFIX: opencitadel-sandbox
+      SANDBOX_NETWORK: opencitadel_opencitadel-sandbox-network
+      SANDBOX_NO_PROXY: localhost,127.0.0.1
+      SANDBOX_TOKEN_SEED: replace-with-32-byte-random-sandbox-token-seed
+      SESSION_SECRET: change-me-with-openssl-rand-hex-32
+      STORAGE_PROVIDER: cos
+      TRUSTED_PROXY_CIDRS: 127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12
+    expose:
+      - "9108"
+    extra_hosts:
+      - host.docker.internal=host-gateway
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - app.execution_kernel_health
+        - readiness
+      timeout: 10s
+      interval: 30s
+      retries: 3
+      start_period: 15s
+    image: opencitadel-execution-kernel
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "1073741824"
+    mem_reservation: "536870912"
+    networks:
+      opencitadel-network: null
+      opencitadel-ops-network: null
+      opencitadel-sandbox-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s
+  opencitadel-migrate:
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/api
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+        WITH_K8S: "0"
+      target: api
+    command:
+      - python
+      - -m
+      - app.migrate
+    depends_on:
+      opencitadel-postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      ACCESS_TOKEN_TTL_SECONDS: "900"
+      API_KEY_PREVIOUS_SECRETS: '{}'
+      API_KEY_SECRET: REDACTED_API_KEY_SECRET
+      API_KEY_SECRET_ID: primary
+      AUDIT_PREVIOUS_SIGNING_KEYS: '{}'
+      AUDIT_SIGNING_KEY: replace-with-openssl-rand-hex-32
+      AUDIT_SIGNING_KEY_ID: primary
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: replace-with-strong-admin-password
+      COMPOSE_PROFILES: ""
+      COMPOSE_PROJECT_NAME: opencitadel
+      COOKIE_DOMAIN: ""
+      COOKIE_SECURE: "true"
+      COS_BUCKET: ""
+      COS_DOMAIN: ""
+      COS_REGION: ap-guangzhou
+      COS_SECRET_ID: ""
+      COS_SECRET_KEY: ""
+      DOCKER_SOCK_GID: "0"
+      ENV: production
+      EXECUTION_KERNEL_METRICS_PORT: "9108"
+      FRONTEND_BASE_URL: https://example.com
+      GITHUB_CLIENT_ID: ""
+      GITHUB_CLIENT_SECRET: ""
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      HTTPS_ENABLED: "false"
+      JWT_SECRET: change-me-with-openssl-rand-hex-32
+      LOG_LEVEL: INFO
+      METRICS_TOKEN: ""
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_BUCKET: opencitadel
+      MINIO_ENDPOINT: opencitadel-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ""
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      NGINX_HTTPS_PORT: "443"
+      NGINX_PORT: "8088"
+      OAUTH_REDIRECT_BASE: https://example.com/api/auth/oauth
+      OPENCITADEL_DOMAIN: ""
+      OPENCITADEL_ENV_FILE: .env.example
+      OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS: "30"
+      OPS_ACTUATOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_ACTUATOR_TARGET_REF: opencitadel-local
+      OPS_ACTUATOR_TOKEN: replace-with-32-byte-random-actuator-token
+      OPS_COLLECTOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_COLLECTOR_TARGET_REF: opencitadel-local
+      OPS_COLLECTOR_TOKEN: replace-with-32-byte-random-collector-token
+      OUTBOUND_ALLOWED_PORTS: 80,443,8080,8443,8090,8091,11434
+      OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
+      POLICY_HEAD_REFRESH_INTERVAL_SECONDS: "5"
+      POLICY_MAX_STALENESS_SECONDS: "30"
+      POSTGRES_ADMIN_PASSWORD: replace-with-distinct-migration-password
+      POSTGRES_ADMIN_USER: opencitadel_migration_runtime
+      POSTGRES_DB: opencitadel
+      POSTGRES_HOST: opencitadel-postgres
+      POSTGRES_KERNEL_PASSWORD: replace-with-distinct-kernel-password
+      POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
+      POSTGRES_MIGRATION_PASSWORD: replace-with-distinct-migration-password
+      POSTGRES_MIGRATION_USER: opencitadel_migration_runtime
+      POSTGRES_PASSWORD: replace-with-strong-postgres-password
+      POSTGRES_USER: opencitadel_app
+      REDIS_DB: "0"
+      REDIS_HOST: opencitadel-redis
+      REDIS_PASSWORD: replace-with-strong-redis-password
+      REDIS_PORT: "6379"
+      REFRESH_TOKEN_TTL_SECONDS: "2592000"
+      SANDBOX_ADDRESS: ""
+      SANDBOX_BROKER_TOKEN: replace-with-32-byte-random-broker-token
+      SANDBOX_CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
+      SANDBOX_DRIVER: auto
+      SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_IMAGE: opencitadel-sandbox
+      SANDBOX_K8S_NAMESPACE: default
+      SANDBOX_K8S_POD_LABEL: app=opencitadel-sandbox
+      SANDBOX_LABELS: '{}'
+      SANDBOX_NAME_PREFIX: opencitadel-sandbox
+      SANDBOX_NETWORK: ""
+      SANDBOX_NO_PROXY: localhost,127.0.0.1
+      SANDBOX_TOKEN_SEED: replace-with-32-byte-random-sandbox-token-seed
+      SESSION_SECRET: change-me-with-openssl-rand-hex-32
+      STORAGE_PROVIDER: cos
+      TRUSTED_PROXY_CIDRS: 127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12
+    image: opencitadel-migrate
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "536870912"
+    networks:
+      opencitadel-network: null
+    restart: 'no'
+    security_opt:
+      - no-new-privileges:true
+  opencitadel-minio:
+    profiles:
+      - local
+    cpus: 0.5
+    command:
+      - server
+      - /data
+    environment:
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: minioadmin
+    healthcheck:
+      test:
+        - CMD
+        - mc
+        - ready
+        - local
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: minio/minio:latest
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "536870912"
+    mem_reservation: "268435456"
+    networks:
+      opencitadel-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: minio_data
+        target: /data
+        volume: {}
+  opencitadel-nginx:
+    cpus: 0.5
+    depends_on:
+      opencitadel-api:
+        condition: service_healthy
+        required: true
+      opencitadel-ui:
+        condition: service_healthy
+        required: true
+    environment:
+      HTTPS_ENABLED: "false"
+      OPENCITADEL_DOMAIN: ""
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - --spider
+        - http://127.0.0.1/
+      timeout: 5s
+      interval: 30s
+      retries: 3
+    image: nginx:alpine
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "134217728"
+    mem_reservation: "67108864"
+    networks:
+      opencitadel-network: null
+    ports:
+      - mode: ingress
+        target: 80
+        published: "8088"
+        protocol: tcp
+      - mode: ingress
+        target: 443
+        published: "443"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /Users/longhaiyang/code/agent/opencitadel/nginx/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind: {}
+      - type: bind
+        source: /Users/longhaiyang/code/agent/opencitadel/nginx/templates
+        target: /etc/nginx/templates-src
+        read_only: true
+        bind: {}
+      - type: bind
+        source: /Users/longhaiyang/code/agent/opencitadel/nginx/generate-config.sh
+        target: /docker-entrypoint.d/40-generate-config.sh
+        read_only: true
+        bind: {}
+      - type: volume
+        source: nginx_conf
+        target: /etc/nginx/conf.d
+        volume: {}
+      - type: bind
+        source: /etc/letsencrypt
+        target: /etc/letsencrypt
+        read_only: true
+        bind: {}
+  opencitadel-ops-actuator:
+    profiles:
+      - actuator
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/ops-actuator
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cap_drop:
+      - ALL
+    cpus: 0.5
+    environment:
+      OPS_ACTUATOR_ALLOW_STDIO: "false"
+      OPS_ACTUATOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_ACTUATOR_TARGET_REF: opencitadel-local
+      OPS_ACTUATOR_TOKEN: replace-with-32-byte-random-actuator-token
+      OPS_ACTUATOR_TRANSPORT: streamable-http
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(('127.0.0.1', 8091), 2).close()
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 15s
+    image: opencitadel-ops-actuator
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "268435456"
+    mem_reservation: "134217728"
+    networks:
+      opencitadel-ops-network: null
+    pids_limit: 128
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    user: 10001:10001
+  opencitadel-ops-collector:
+    profiles:
+      - patrol
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/ops-collector
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cap_drop:
+      - ALL
+    cpus: 0.5
+    environment:
+      OPS_COLLECTOR_ALLOW_STDIO: "false"
+      OPS_COLLECTOR_ALLOWED_NAMESPACES: '["opencitadel"]'
+      OPS_COLLECTOR_DEPENDENCIES: '{"primary-dependencies":{"kind":"postgres","host":"opencitadel-postgres","port":5432},"demo-console-tcp":{"kind":"tcp","host":"ops-console","port":9099}}'
+      OPS_COLLECTOR_HTTP_PROBES: '{"primary-endpoint":{"url":"http://opencitadel-api:8000/api/status","expected_statuses":[200]},"demo-console":{"url":"http://ops-console:9099/health","expected_statuses":[200]}}'
+      OPS_COLLECTOR_TARGET_REF: opencitadel-local
+      OPS_COLLECTOR_TOKEN: replace-with-32-byte-random-collector-token
+      OPS_COLLECTOR_TRANSPORT: streamable-http
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(('127.0.0.1', 8090), 2).close()
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 15s
+    image: opencitadel-ops-collector
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "268435456"
+    mem_reservation: "134217728"
+    networks:
+      opencitadel-network: null
+      opencitadel-ops-network: null
+    pids_limit: 128
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    user: 10001:10001
+  opencitadel-postgres:
+    cpus: 1.5
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=100
+    environment:
+      OPENCITADEL_APP_PASSWORD: replace-with-strong-postgres-password
+      OPENCITADEL_APP_USER: opencitadel_app
+      OPENCITADEL_KERNEL_PASSWORD: replace-with-distinct-kernel-password
+      OPENCITADEL_KERNEL_USER: opencitadel_execution_kernel_runtime
+      OPENCITADEL_MIGRATION_PASSWORD: replace-with-distinct-migration-password
+      OPENCITADEL_MIGRATION_USER: opencitadel_migration_runtime
+      POSTGRES_DB: opencitadel
+      POSTGRES_PASSWORD: replace-with-distinct-admin-password
+      POSTGRES_USER: postgres
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d opencitadel
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: pgvector/pgvector:pg16
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "1073741824"
+    mem_reservation: "536870912"
+    networks:
+      opencitadel-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+        volume: {}
+      - type: bind
+        source: /Users/longhaiyang/code/agent/opencitadel/deploy/helm/opencitadel/files/postgres/init-app-role.sh
+        target: /docker-entrypoint-initdb.d/10-opencitadel-app-role.sh
+        read_only: true
+        bind: {}
+  opencitadel-redis:
+    cpus: 0.5
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+        $${REDIS_PASSWORD:+--requirepass "$${REDIS_PASSWORD}"}
+    environment:
+      REDIS_PASSWORD: replace-with-strong-redis-password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |-
+          if [ -n "$$REDIS_PASSWORD" ]; then
+            redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping;
+          else redis-cli ping; fi
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: redis:7-alpine
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "536870912"
+    mem_reservation: "268435456"
+    networks:
+      opencitadel-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: redis_data
+        target: /data
+        volume: {}
+  opencitadel-sandbox:
+    profiles:
+      - fixed-sandbox
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/sandbox
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cap_drop:
+      - ALL
+    cpus: 2
+    depends_on:
+      opencitadel-sandbox-egress:
+        condition: service_healthy
+        required: true
+    environment:
+      CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
+      HTTP_PROXY: http://opencitadel-sandbox-egress:3128
+      HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
+      NO_PROXY: localhost,127.0.0.1
+      http_proxy: http://opencitadel-sandbox-egress:3128
+      https_proxy: http://opencitadel-sandbox-egress:3128
+      no_proxy: localhost,127.0.0.1
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - -o
+        - /dev/null
+        - http://127.0.0.1:8080/openapi.json
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 20s
+    image: opencitadel-sandbox
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "1073741824"
+    memswap_limit: "1073741824"
+    networks:
+      opencitadel-sandbox-network: null
+    pids_limit: 512
+    read_only: true
+    restart: 'no'
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=256m,mode=1777
+      - /run:rw,nosuid,nodev,noexec,size=32m,mode=0755
+      - /home/ubuntu:rw,nosuid,nodev,size=768m,uid=1000,gid=1000,mode=0700
+    user: 1000:1000
+  opencitadel-sandbox-broker:
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/api
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+        WITH_K8S: "0"
+      target: api
+    cap_drop:
+      - ALL
+    cpus: 0.5
+    command:
+      - python
+      - -m
+      - app.infrastructure.external.sandbox.broker
+    depends_on:
+      opencitadel-sandbox-egress:
+        condition: service_healthy
+        required: true
+    environment:
+      SANDBOX_BROKER_TOKEN: replace-with-32-byte-random-broker-token
+      SANDBOX_CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
+      SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
+      SANDBOX_IMAGE: opencitadel-sandbox
+      SANDBOX_LABELS: '{}'
+      SANDBOX_NAME_PREFIX: opencitadel-sandbox
+      SANDBOX_NETWORK: opencitadel_opencitadel-sandbox-network
+      SANDBOX_NO_PROXY: localhost,127.0.0.1
+    group_add:
+      - "0"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://127.0.0.1:8090/healthz
+      timeout: 5s
+      interval: 15s
+      retries: 5
+    image: opencitadel-api
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "268435456"
+    mem_reservation: "134217728"
+    networks:
+      opencitadel-network: null
+    pids_limit: 128
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind: {}
+  opencitadel-sandbox-egress:
+    cpus: 0.5
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/3128
+      timeout: 5s
+      interval: 15s
+      retries: 5
+    image: ubuntu/squid:6.6-24.04_edge
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "268435456"
+    mem_reservation: "134217728"
+    networks:
+      opencitadel-egress-network: null
+      opencitadel-sandbox-network: null
+    pids_limit: 128
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+      - /var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=1777
+      - /var/spool/squid:rw,nosuid,nodev,noexec,size=64m,mode=1777
+    volumes:
+      - type: bind
+        source: /Users/longhaiyang/code/agent/opencitadel/deploy/squid/squid.conf
+        target: /etc/squid/squid.conf
+        read_only: true
+        bind: {}
+  opencitadel-ui:
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/ui
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cpus: 1
+    depends_on:
+      opencitadel-api:
+        condition: service_healthy
+        required: true
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - --spider
+        - http://127.0.0.1:3000/healthz
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 30s
+    image: opencitadel-ui
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "402653184"
+    mem_reservation: "201326592"
+    networks:
+      opencitadel-network: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  ops-console:
+    profiles:
+      - demo
+    build:
+      context: /Users/longhaiyang/code/agent/opencitadel/demo/ops-console
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        PIP_DEFAULT_TIMEOUT: "300"
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_RETRIES: "5"
+        PIP_TRUSTED_HOST: mirrors.aliyun.com
+        PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+        UV_HTTP_TIMEOUT: "300"
+        UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        UV_VERSION: 0.11.33
+    cpus: 0.5
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:9099/health')
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 10s
+    image: opencitadel-ops-console
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+    mem_limit: "268435456"
+    networks:
+      opencitadel-network: null
+      opencitadel-sandbox-network: null
+    ports:
+      - mode: ingress
+        target: 9099
+        published: "9099"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+networks:
+  opencitadel-egress-network:
+    name: opencitadel_opencitadel-egress-network
+    driver: bridge
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  opencitadel-network:
+    name: opencitadel_opencitadel-network
+    driver: bridge
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  opencitadel-ops-network:
+    name: opencitadel_opencitadel-ops-network
+    driver: bridge
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  opencitadel-sandbox-network:
+    name: opencitadel_opencitadel-sandbox-network
+    driver: bridge
+    internal: true
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+volumes:
+  minio_data:
+    name: opencitadel_minio_data
+    driver: local
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  nginx_conf:
+    name: opencitadel_nginx_conf
+    driver: local
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  postgres_data:
+    name: opencitadel_postgres_data
+    driver: local
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+  redis_data:
+    name: opencitadel_redis_data
+    driver: local
+    labels:
+      com.opencitadel.acceptance.project: none
+      com.opencitadel.acceptance.run: none
+x-ownership-labels:
+  com.opencitadel.acceptance.project: none
+  com.opencitadel.acceptance.run: none
+x-pip-build-args:
+  NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+  PIP_DEFAULT_TIMEOUT: "300"
+  PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+  PIP_RETRIES: "5"
+  PIP_TRUSTED_HOST: mirrors.aliyun.com
+  PYPI_FILES_MIRROR: https://mirrors.aliyun.com/pypi/packages/
+  UV_HTTP_TIMEOUT: "300"
+  UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+  UV_VERSION: 0.11.33

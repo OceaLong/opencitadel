@@ -110,6 +110,10 @@ class SandboxHostAccess:
     redis_port: int
     redis_db: int
     redis_password: str | None
+    # Seed used to derive per-sandbox data-plane bearer tokens. Defaults to ""
+    # so dev/test still yields a deterministic (if unauthenticated-strength)
+    # token; production enforces a strong value in DeploymentSettings.
+    token_seed: str = ""
 
     @classmethod
     def from_settings(cls, settings: DeploymentSettings) -> SandboxHostAccess:
@@ -121,6 +125,7 @@ class SandboxHostAccess:
             redis_port=settings.redis_port,
             redis_db=settings.redis_db,
             redis_password=settings.redis_password,
+            token_seed=settings.sandbox_token_seed,
         )
 
 

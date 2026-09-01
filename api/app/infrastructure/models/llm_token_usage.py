@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.llm_token_usage import LLMTokenUsage
@@ -12,6 +12,14 @@ class LLMTokenUsageORM(Base):
     """LLM token 使用记录 ORM。"""
 
     __tablename__ = "llm_token_usages"
+    __table_args__ = (
+        # Billing rollups by owner/team over a time range. Non-partial so the
+        # leading owner_user_id / team_id columns also serve their FK scans.
+        Index("ix_llm_token_usages_owner_created", "owner_user_id", "created_at"),
+        Index("ix_llm_token_usages_team_created", "team_id", "created_at"),
+        # Per-session usage lookup + sessions FK CASCADE scan.
+        Index("ix_llm_token_usages_session", "session_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     session_id: Mapped[str] = mapped_column(
@@ -25,6 +33,7 @@ class LLMTokenUsageORM(Base):
         String(255),
         ForeignKey("inference_models.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,  # inference_models FK integrity scan
     )
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     owner_user_id: Mapped[str | None] = mapped_column(

@@ -79,6 +79,19 @@ class DBUserRepository(UserRepository):
                 {"user_id": user_id},
             )
 
+    async def transfer_personal_resources_to_team(self, user_id: str, team_id: str) -> int:
+        moved = 0
+        for table in _OWNED_RESOURCE_TABLES:
+            result = await self.db_session.execute(
+                text(
+                    f"UPDATE {table} SET team_id = :team_id "
+                    "WHERE owner_user_id = :user_id AND team_id IS NULL"
+                ),
+                {"team_id": team_id, "user_id": user_id},
+            )
+            moved += result.rowcount or 0
+        return moved
+
     async def revoke_security_material(self, user_id: str) -> None:
         statements = (
             (

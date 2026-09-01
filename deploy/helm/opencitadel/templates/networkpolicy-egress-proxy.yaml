@@ -1,0 +1,62 @@
+{{- if and .Values.egressProxy.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-egress-proxy
+  labels:
+    app.kubernetes.io/component: egress-proxy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: egress-proxy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only sandbox Pods may reach the proxy on 3128. This mirrors the
+    # sandbox-side egress rule in networkpolicy-sandbox.yaml.
+    - from:
+        - podSelector:
+            matchLabels:
+              opencitadel.io/sandbox: "true"
+      ports:
+        - protocol: TCP
+          port: 3128
+  egress:
+    # DNS: the proxy resolves destinations before applying its ACLs.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Public Internet on the Safe_ports the squid.conf accepts. Private and
+    # link-local ranges are excluded here as a network-layer backstop to the
+    # squid blocked_dst ACLs (defense in depth: even if the proxy config
+    # regressed, the CNI still refuses cluster-internal / metadata targets).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+{{- end }}

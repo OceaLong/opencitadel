@@ -31,6 +31,10 @@ type SessionsContextValue = {
   /** 手动刷新（通过 REST 接口拉取一次） */
   refresh: () => Promise<void>;
   deleteSession: (sessionId: string) => Promise<boolean>;
+  /** 当前搜索关键词（经 `q` 传给列表/流接口），空串表示不过滤 */
+  query: string;
+  /** 更新搜索关键词；调用方需自行 debounce（见 SessionList 搜索框） */
+  setQuery: (query: string) => void;
 };
 
 const SessionsContext = createContext<SessionsContextValue | null>(null);
@@ -40,21 +44,42 @@ const SessionsContext = createContext<SessionsContextValue | null>(null);
 /**
  * 会话列表数据 Provider
  *
- * 放置在 root layout 中，确保不会因为侧边栏展开/折叠而重新挂载。
+ * 无条件挂载在 `AppShell` 顶层（见 `src/components/app-shell.tsx`），挂载位置
+ * 与激活模块无关，因此切换模块（进出 chat）不会卸载重挂本 Provider，
+ * 会话列表 SSE 长连接得以常驻、不再来回断连重拉。
+ *
+ * `enabled`（默认 true）控制是否**发起**数据流，用于避免用户从未进入 chat
+ * 模块时的无谓请求：
+ *  - `enabled=false` 且从未激活过：不 fetch、不建立 SSE。
+ *  - `enabled=true`：立即拉起 REST + SSE。
+ *  - 一旦激活过（曾经 enabled=true），即保持流常驻——之后 `enabled` 再变
+ *    false 也不会断开 SSE，优先避免来回切模块导致的重连风暴。
  *
  * 数据流:
- *  1. 挂载后立即通过 REST GET /sessions 获取初始数据（仅一次）
+ *  1. 首次激活后通过 REST GET /sessions 获取初始数据（仅一次）
  *  2. 同时建立 SSE POST /sessions/stream 长连接，接收实时推送
  *  3. SSE 断开后自动指数退避重连
  *  4. refresh() 可手动通过 REST 拉取
  */
-export function SessionsProvider({ children }: { children: React.ReactNode }) {
+export function SessionsProvider({
+  children,
+  enabled = true,
+}: {
+  children: React.ReactNode;
+  enabled?: boolean;
+}) {
   const t = useTranslations("sessions");
   const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** 搜索关键词（已在 UI 侧 debounce），经 `q` 传给 REST + SSE。 */
+  const [query, setQuery] = useState("");
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
   const messages = useMemo(
     () => ({
       fetchFailed: t("fetchFailed"),
@@ -75,12 +100,19 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     messagesRef.current = messages;
   }, [messages]);
 
+  // 一旦进入过 chat 模块（enabled=true）即拉起并保持会话流常驻，
+  // 之后 enabled 变回 false 也不断开，避免来回切换模块导致 SSE 反复重连。
+  const [streamStarted, setStreamStarted] = useState(enabled);
+  useEffect(() => {
+    if (enabled && !streamStarted) setStreamStarted(true);
+  }, [enabled, streamStarted]);
+
   // ---------- 手动刷新 ----------
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await sessionApi.getSessions();
+      const data = await sessionApi.getSessions(queryRef.current);
       setSessions(data.sessions);
     } catch (err) {
       setError(err instanceof Error ? err.message : messagesRef.current.fetchFailed);
@@ -89,9 +121,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // ---------- 初始 REST 请求（仅一次，登录后） ----------
+  // ---------- 初始 REST 请求（仅一次，登录后且流已激活） ----------
   useEffect(() => {
     if (authLoading) return;
+    if (!streamStarted) return;
     if (!userId) {
       setSessions([]);
       setLoading(false);
@@ -103,7 +136,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     initialFetchedRef.current = true;
 
     sessionApi
-      .getSessions()
+      .getSessions(queryRef.current)
       .then((data) => {
         // 仅在 SSE 尚未推送过数据时更新，防止用旧数据覆盖 SSE 已推送的新数据
         if (!sseReceivedRef.current) {
@@ -116,11 +149,46 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         setError(err instanceof Error ? err.message : messagesRef.current.fetchFailed);
         setLoading(false);
       });
-  }, [authLoading, userId]);
+  }, [authLoading, userId, streamStarted]);
+
+  // ---------- 搜索关键词变化时 REST 重新拉取（跳过首帧，避免与初始请求重复） ----------
+  // SSE 也会随 query 变化重连并推送过滤结果，但 REST 立即回填以获得更快的反馈。
+  const querySettledRef = useRef(false);
+  useEffect(() => {
+    if (!querySettledRef.current) {
+      querySettledRef.current = true;
+      return;
+    }
+    if (authLoading || !userId || !streamStarted) return;
+
+    let cancelled = false;
+    setLoading(true);
+    // 允许本次 REST 结果覆盖 UI（新的关键词对应一套全新列表）。
+    sseReceivedRef.current = false;
+    sessionApi
+      .getSessions(query)
+      .then((data) => {
+        if (cancelled) return;
+        if (!sseReceivedRef.current) {
+          setSessions(data.sessions);
+        }
+        setLoading(false);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : messagesRef.current.fetchFailed);
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, authLoading, userId, streamStarted]);
 
   // ---------- SSE 实时订阅 ----------
   useEffect(() => {
-    if (authLoading || !userId) return;
+    if (authLoading || !userId || !streamStarted) return;
 
     let mounted = true;
     let retryCount = 0;
@@ -174,6 +242,8 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           retryCount++;
           retryTimerRef.current = setTimeout(connect, delay);
         },
+        // 关键词随 effect 依赖 query 变化而重连，携带最新过滤条件
+        query,
       );
 
       cleanupRef.current = cleanup;
@@ -192,7 +262,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         retryTimerRef.current = null;
       }
     };
-  }, [authLoading, userId]);
+  }, [authLoading, userId, streamStarted, query]);
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -206,8 +276,8 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const contextValue = useMemo(
-    () => ({ sessions, loading, error, refresh, deleteSession }),
-    [sessions, loading, error, refresh, deleteSession],
+    () => ({ sessions, loading, error, refresh, deleteSession, query, setQuery }),
+    [sessions, loading, error, refresh, deleteSession, query],
   );
 
   return <SessionsContext.Provider value={contextValue}>{children}</SessionsContext.Provider>;

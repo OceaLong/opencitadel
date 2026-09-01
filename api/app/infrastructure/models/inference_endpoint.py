@@ -30,6 +30,7 @@ class InferenceEndpointORM(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),

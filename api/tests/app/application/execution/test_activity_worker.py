@@ -514,3 +514,83 @@ async def test_lost_claim_cancels_inflight_handler_without_reporting_an_outcome(
     assert len(handler.calls) == 1
     assert [item[0].command_type for item in service.commands] == ["MarkActivityCallStarted"]
     assert stats.stale == 1
+
+
+class ThrottleHandler(Handler):
+    """Records the peak number of handlers executing at once."""
+
+    def __init__(self, release) -> None:
+        super().__init__(idempotent=True)
+        self._release = release
+        self.active = 0
+        self.peak = 0
+        self.started = 0
+
+    async def execute(self, request, context):
+        self.calls.append((request, context))
+        self.active += 1
+        self.started += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            await self._release.wait()
+        finally:
+            self.active -= 1
+        return ActivityOutcome.succeeded(
+            result_ref=f"object://{request.activity_id}",
+            result_summary="ok",
+        )
+
+
+@pytest.mark.asyncio
+async def test_semaphore_bounds_concurrent_claim_execution_to_configured_ceiling() -> None:
+    import asyncio
+
+    max_concurrency = 2
+    claims = tuple(
+        claim(activity_id=UUID(f"40000000-0000-0000-0000-00000000010{index}")) for index in range(5)
+    )
+    store = FakeStore(claims)
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    release = asyncio.Event()
+    handler = ThrottleHandler(release)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+        max_concurrency=max_concurrency,
+    )
+
+    running = asyncio.create_task(worker.run_once(now=NOW, limit=len(claims)))
+    # Let the event loop fill every available semaphore slot.
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if handler.active >= max_concurrency:
+            break
+    # The Semaphore must hold execution at the ceiling even though 5 were claimed.
+    assert handler.active == max_concurrency
+    assert handler.started == max_concurrency
+    release.set()
+    stats = await running
+
+    assert stats.claimed == len(claims)
+    assert stats.succeeded == len(claims)
+    assert handler.peak == max_concurrency
+
+
+@pytest.mark.asyncio
+async def test_worker_rejects_non_positive_max_concurrency() -> None:
+    store = FakeStore(())
+    registry = ActivityRegistry()
+    with pytest.raises(ValueError, match="max_concurrency"):
+        ActivityWorker(
+            store=store,
+            run_contexts=FakeRunContexts(),
+            run_service=FakeRunService(),
+            registry=registry,
+            worker_id="worker-1",
+            max_concurrency=0,
+        )

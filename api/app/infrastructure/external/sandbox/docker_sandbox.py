@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import io
 import logging
-import secrets
 import socket
 import time
 import uuid
@@ -31,6 +30,7 @@ from app.infrastructure.external.sandbox.settings import (
     SandboxEffectiveSettings,
     SandboxHostAccess,
 )
+from app.infrastructure.external.sandbox.token import derive_sandbox_token
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,7 @@ class DockerSandbox(Sandbox):
         self.settings = settings
         self._host = host
         self._quota = quota
+        self._access_token = access_token
         self._base_url = f"http://{ip}:8080"
         self._vnc_url = f"ws://{ip}:5901"
         self._cdp_url = f"http://{ip}:9222"
@@ -162,6 +163,13 @@ class DockerSandbox(Sandbox):
     @property
     def cdp_url(self) -> str:
         return self._cdp_url
+
+    @property
+    def vnc_headers(self) -> dict[str, str]:
+        """Auth headers the api VNC proxy must forward to the sandbox :8080."""
+        if not self._access_token:
+            return {}
+        return {"Authorization": f"Bearer {self._access_token}"}
 
     @classmethod
     @alru_cache(maxsize=128, typed=True)
@@ -270,10 +278,12 @@ class DockerSandbox(Sandbox):
     ) -> Self:
         deployment = settings.deployment
         container: Model | None = None
-        # Per-sandbox bearer token for the data-plane HTTP API. Injected into the
-        # container env and sent on every kernel->sandbox request. The sandbox
-        # only enforces it when the env var is present (backward compatible).
-        access_token = secrets.token_urlsafe(32)
+        # Per-sandbox bearer token for the data-plane HTTP API. Derived
+        # statelessly from the deployment seed + sandbox id so any replica that
+        # later re-attaches via get() recomputes the identical token; it is
+        # injected into the container env and sent on every kernel->sandbox
+        # request, and the sandbox rejects requests that do not present it.
+        access_token = derive_sandbox_token(host.token_seed, container_name)
         try:
             if _broker_url(host):
                 payload = _broker_create(host, container_name, settings, access_token)
@@ -329,7 +339,17 @@ class DockerSandbox(Sandbox):
         deployment = settings.deployment
         if deployment.address:
             ip = await cls._resolve_hostname_to_ip(deployment.address)
-            return cls(settings=settings, host=host, quota=quota, ip=ip)
+            # Fixed-address (dev "fixed-sandbox") mode: the sandbox has the
+            # stable id below; its container must be started with the matching
+            # SANDBOX_ACCESS_TOKEN = derive_sandbox_token(seed, id).
+            access_token = derive_sandbox_token(host.token_seed, "opencitadel-sandbox")
+            return cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                access_token=access_token,
+            )
         if not deployment.name_prefix:
             raise RuntimeError("sandbox name prefix is not configured")
         container_name = f"{deployment.name_prefix}-{str(uuid.uuid4())[:8]}"
@@ -547,6 +567,10 @@ class DockerSandbox(Sandbox):
     ) -> Self | None:
         """根据传递的id获取沙箱实例"""
         deployment = settings.deployment
+        # Re-derive the same data-plane token the sandbox was created with so
+        # re-attachment authenticates. Without this, get() previously fell back
+        # to the constructor default "" and every re-attached call failed auth.
+        access_token = derive_sandbox_token(host.token_seed, sandbox_id)
         if deployment.address:
             try:
                 ip = await cls._resolve_hostname_to_ip(deployment.address)
@@ -556,6 +580,7 @@ class DockerSandbox(Sandbox):
                     quota=quota,
                     ip=ip,
                     container_name=sandbox_id,
+                    access_token=access_token,
                 )
             except (OSError, RuntimeError, ValueError) as e:
                 logger.error("解析沙箱地址失败: %s", e)
@@ -577,6 +602,7 @@ class DockerSandbox(Sandbox):
                 quota=quota,
                 ip=ip,
                 container_name=sandbox_id,
+                access_token=access_token,
             )
         except (OSError, RuntimeError, ValueError) as e:
             # 8.其他错误统一捕获
@@ -594,6 +620,7 @@ class DockerSandbox(Sandbox):
             vision_enabled=bool(llm and llm.capabilities.vision),
             vision_llm=llm,
             allowed_domains=allowed_domains,
+            cdp_headers=self.vnc_headers,
         )
 
     async def ensure_sandbox(self, max_retries: int | None = None) -> None:

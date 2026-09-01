@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -15,6 +16,7 @@ from app.application.execution.public_projection import (
     PublicExecutionEvent,
 )
 from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
+from app.application.ports.streams import WakeupPort
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunFamily
 from app.domain.models.file import File
@@ -23,6 +25,24 @@ from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.uow import IUnitOfWork
 
 _TERMINAL_EVENTS = frozenset({"done", "error"})
+
+# Destination the OutboxDispatcher stamps on every appended execution event
+# (see the execution orchestrator). The chat SSE loop treats any wakeup as a
+# cue to re-query; the destination is documented here for intent, not filtering.
+_EVENTS_DESTINATION = "execution.events"
+
+
+def _is_terminal(event: PublicExecutionEvent) -> bool:
+    """Whether this event ends the chat stream (terminal, blocking approval,
+    or a session status that will not produce further turn events)."""
+    return (
+        event.event_type in _TERMINAL_EVENTS
+        or (event.event_type == "approval" and bool(event.payload.get("options")))
+        or (
+            event.event_type == "session_status"
+            and event.payload.get("status") in {"waiting", "cancelled", "failed"}
+        )
+    )
 
 
 class AgentService:
@@ -36,18 +56,27 @@ class AgentService:
         command_ingress: CommandIngress,
         public_projection: PublicProjectionPort,
         run_projection: RunProjectionPort,
+        events_wakeup: WakeupPort | None = None,
         poll_interval_seconds: float = 0.2,
         idle_timeout_seconds: float = 120.0,
+        fallback_poll_seconds: float = 30.0,
     ) -> None:
         if poll_interval_seconds <= 0 or idle_timeout_seconds <= 0:
             raise ValueError("poll and idle timeouts must be positive")
+        if fallback_poll_seconds <= 0:
+            raise ValueError("fallback poll interval must be positive")
         self._uow_factory = uow_factory
         self._admission = admission_service
         self._commands = command_ingress
         self._public = public_projection
         self._run_projection = run_projection
+        # Optional Redis wake-up subscription over the outbox's
+        # ``execution.events`` stream. When absent (not wired / Redis down) the
+        # chat SSE degrades to the legacy fixed-interval DB poll.
+        self._events_wakeup = events_wakeup
         self._poll_interval = poll_interval_seconds
         self._idle_timeout = idle_timeout_seconds
+        self._fallback_poll = fallback_poll_seconds
 
     async def chat(
         self,
@@ -199,12 +228,18 @@ class AgentService:
                         idempotency_key=idempotency_key,
                         command_sink=uow.execution_commands,
                     )
-                    locked_session.active_execution_run_id = admitted_run_id
-                    locked_session.active_execution_request_id = request_id
+                    locked_session.attach_run(admitted_run_id, request_id)
                     await uow.session.save(locked_session)
                 await uow.commit()
 
+        # Event-driven fan-out. The first pass is an unconditional catch-up
+        # query that drains everything already persisted; thereafter the loop
+        # blocks on the Redis ``execution.events`` wake-up stream and only
+        # re-queries the DB when hinted (or when the long fallback timeout
+        # fires, guarding against a lost hint). With no wake-up port injected
+        # it falls back to the legacy fixed-interval poll unchanged.
         idle = 0.0
+        wakeup_cursor = "$"
         while True:
             page = await self.list_events(
                 session_id,
@@ -218,20 +253,43 @@ class AgentService:
                 for event in page.events:
                     cursor = event.cursor
                     yield event
-                    if (
-                        event.event_type in _TERMINAL_EVENTS
-                        or (event.event_type == "approval" and bool(event.payload.get("options")))
-                        or (
-                            event.event_type == "session_status"
-                            and event.payload.get("status") in {"waiting", "cancelled", "failed"}
-                        )
-                    ):
+                    if _is_terminal(event):
                         return
                 continue
-            await asyncio.sleep(self._poll_interval)
-            idle += self._poll_interval
+            if self._events_wakeup is None:
+                await asyncio.sleep(self._poll_interval)
+                idle += self._poll_interval
+            else:
+                wakeup_cursor, waited = await self._await_events(wakeup_cursor)
+                idle += waited
             if idle >= self._idle_timeout:
                 return
+
+    async def _await_events(self, cursor: str) -> tuple[str, float]:
+        """Block on the outbox ``execution.events`` wake-up stream until a hint
+        arrives or the fallback timeout elapses.
+
+        Returns the advanced stream cursor and the wall-clock seconds waited so
+        the caller can account idle time toward the connection idle budget. The
+        stream is global, so unrelated events also wake us; rapid wakeups are
+        coalesced to the base poll interval so a busy system can never drive a
+        single session's DB re-query rate above the legacy cadence. On Redis
+        unavailability it paces with a short sleep instead of hot-looping.
+        """
+        assert self._events_wakeup is not None
+        started = time.monotonic()
+        batch = await self._events_wakeup.read(
+            cursor,
+            block_milliseconds=int(self._fallback_poll * 1000),
+        )
+        if not batch.connectivity.available:
+            await asyncio.sleep(self._poll_interval)
+            return cursor, time.monotonic() - started
+        elapsed = time.monotonic() - started
+        if elapsed < self._poll_interval:
+            await asyncio.sleep(self._poll_interval - elapsed)
+            elapsed = time.monotonic() - started
+        return batch.cursor, elapsed
 
     async def list_events(
         self,

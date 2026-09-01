@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -19,30 +20,51 @@ from .base import Base
 
 class ScheduledJobModel(Base):
     __tablename__ = "scheduled_jobs"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_scheduled_jobs_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_scheduled_jobs_id"),
+        # RLS predicate shape; leading team_id also serves the teams FK scan.
+        Index("ix_scheduled_jobs_team_updated", "team_id", "updated_at"),
+        # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
+        Index(
+            "ix_scheduled_jobs_owner_updated",
+            "owner_user_id",
+            "updated_at",
+            postgresql_where=text("team_id IS NULL"),
+        ),
+        # Webhook triggers are looked up by token; it must be unique when present.
+        Index(
+            "uq_scheduled_jobs_webhook_token",
+            "webhook_token",
+            unique=True,
+            postgresql_where=text("webhook_token IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(255), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_user_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="CASCADE")
+        String(255),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,  # users FK CASCADE scan (partial owner index only covers team_id IS NULL rows)
     )
     team_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )  # indexed via ix_scheduled_jobs_team_updated composite
     trigger_type: Mapped[str] = mapped_column(String(32), nullable=False)
     trigger_spec: Mapped[str] = mapped_column(String(512), nullable=False, server_default="")
     prompt_template: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     skill_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("skills.id", ondelete="SET NULL")
+        String(255), ForeignKey("skills.id", ondelete="SET NULL"), index=True
     )
     model_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("inference_models.id", ondelete="SET NULL")
+        String(255), ForeignKey("inference_models.id", ondelete="SET NULL"), index=True
     )
     knowledge_base_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
+        index=True,
     )
     notify_channels: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")

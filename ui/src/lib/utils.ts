@@ -8,6 +8,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * 将应用 locale（"zh" / "en"）映射为 `Intl` / `toLocaleString` 使用的 BCP 47 标签。
+ * 未提供或未知 locale 时回退到 "en-US"。
+ */
+export function toBcp47(locale?: string): "zh-CN" | "en-US" {
+  return locale === "zh" ? "zh-CN" : "en-US";
+}
+
 const WEEKDAY_KEYS = [
   "common.dates.weekdaySun",
   "common.dates.weekdayMon",

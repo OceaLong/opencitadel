@@ -19,7 +19,7 @@ class AgentTracer:
         self._tracer = None
         if self._enabled:
             try:
-                from app.infrastructure.observability.otel import get_tracer
+                from app.observability.otel import get_tracer
 
                 self._tracer = get_tracer("opencitadel.agent")
             except (OSError, RuntimeError, ValueError):

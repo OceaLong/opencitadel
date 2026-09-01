@@ -10,6 +10,7 @@ import app.execution_kernel_main as kernel_main
 from app.application.ports.coordination import RedisConnectivity
 from app.application.ports.streams import WakeupBatch
 from app.execution_kernel_main import ExecutionKernelProcess
+from core.config import DeploymentSettings
 
 
 class _FailingWakeup:
@@ -95,6 +96,39 @@ class _BlockingActivityRuntime(_IdleRuntime):
         self._activity_started.set()
         await self._stopping.wait()
         return SimpleNamespace(claimed=1)
+
+
+class _FailingLaneRuntime(_IdleRuntime):
+    def __init__(self, stopping) -> None:
+        super().__init__(stopping)
+        self.decision_calls = 0
+
+    async def run_decisions_once(self, **_kwargs):
+        self.decision_calls += 1
+        raise RuntimeError("poison decision lane")
+
+
+@pytest.mark.asyncio
+async def test_control_plane_survives_a_single_lane_failure():
+    """A raising lane must not tear down the whole control-plane process."""
+    import asyncio
+
+    stopping = asyncio.Event()
+    runtime = _FailingLaneRuntime(stopping)
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        idle_poll_seconds=0,
+    )
+
+    # Returns normally (no propagated exception) despite every decision lane
+    # raising, and the inbox lane keeps advancing across iterations.
+    await process.run()
+
+    assert runtime.decision_calls >= 2
+    assert runtime.inbox_calls == 2
 
 
 @pytest.mark.asyncio
@@ -244,8 +278,8 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
             observed.append("closed")
 
     class _ImmediateProcess:
-        def __init__(self, *, runtime, wakeup, policy_reader, stopping):
-            observed.append(("process", runtime, wakeup, policy_reader))
+        def __init__(self, *, runtime, wakeup, policy_reader, stopping, batch_size):
+            observed.append(("process", runtime, wakeup, policy_reader, batch_size))
             self._stopping = stopping
 
         async def run(self):
@@ -268,8 +302,167 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
     await kernel_main.run_kernel(settings, runtime_factory=runtime_factory)
 
     assert observed[0] == ("open", settings)
-    assert observed[1] == ("process", execution, wakeup, policy_reader)
+    assert observed[1] == (
+        "process",
+        execution,
+        wakeup,
+        policy_reader,
+        settings.execution_activity_batch_size,
+    )
     assert observed[2] == ("signals", supervisor.request_stop)
     assert set(observed[3:-1]) == {"run", "heartbeat"}
     assert observed[-1] == "closed"
     assert supervisor.pending_names == ()
+
+
+class _CaptureStart:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, environ, start_response):
+        self.calls.append((environ, start_response))
+        start_response("200 OK", [])
+        return [b"# metrics\n"]
+
+
+def _wsgi_environ(auth: str | None):
+    environ = {"HTTP_HOST": "localhost"}
+    if auth is not None:
+        environ["HTTP_AUTHORIZATION"] = auth
+    return environ
+
+
+def test_token_guarded_metrics_app_rejects_missing_token(monkeypatch):
+    inner = _CaptureStart()
+    monkeypatch.setattr(kernel_main, "make_wsgi_app", lambda *a, **k: inner, raising=False)
+    import prometheus_client
+
+    monkeypatch.setattr(prometheus_client, "make_wsgi_app", lambda *a, **k: inner)
+
+    app = kernel_main._token_guarded_metrics_app("s3cret")
+    statuses = []
+    body = app(_wsgi_environ(None), lambda status, headers: statuses.append(status))
+    assert statuses == ["401 Unauthorized"]
+    assert b"Unauthorized" in b"".join(body)
+    assert inner.calls == []
+
+
+def test_token_guarded_metrics_app_rejects_wrong_token(monkeypatch):
+    inner = _CaptureStart()
+    import prometheus_client
+
+    monkeypatch.setattr(prometheus_client, "make_wsgi_app", lambda *a, **k: inner)
+
+    app = kernel_main._token_guarded_metrics_app("s3cret")
+    statuses = []
+    app(_wsgi_environ("Bearer wrong"), lambda status, headers: statuses.append(status))
+    assert statuses == ["401 Unauthorized"]
+    assert inner.calls == []
+
+
+def test_token_guarded_metrics_app_passes_correct_token(monkeypatch):
+    inner = _CaptureStart()
+    import prometheus_client
+
+    monkeypatch.setattr(prometheus_client, "make_wsgi_app", lambda *a, **k: inner)
+
+    app = kernel_main._token_guarded_metrics_app("s3cret")
+    statuses = []
+    app(_wsgi_environ("Bearer s3cret"), lambda status, headers: statuses.append(status))
+    assert statuses == ["200 OK"]
+    assert len(inner.calls) == 1
+
+
+def test_start_kernel_metrics_server_disabled_when_port_zero(monkeypatch):
+    called = []
+    import prometheus_client
+
+    monkeypatch.setattr(
+        prometheus_client, "start_http_server", lambda *a, **k: called.append(("http", a, k))
+    )
+    kernel_main.start_kernel_metrics_server(DeploymentSettings(execution_kernel_metrics_port=0))
+    assert called == []
+
+
+def test_start_kernel_metrics_server_loopback_without_token(monkeypatch):
+    called = []
+    import prometheus_client
+
+    monkeypatch.setattr(
+        prometheus_client, "start_http_server", lambda *a, **k: called.append((a, k))
+    )
+    kernel_main.start_kernel_metrics_server(
+        DeploymentSettings(execution_kernel_metrics_port=9108, metrics_token="")
+    )
+    assert called == [((9108,), {"addr": "127.0.0.1"})]
+
+
+def test_start_kernel_metrics_server_token_protected(monkeypatch):
+    served = []
+
+    class _FakeServer:
+        def serve_forever(self):
+            pass
+
+    def _fake_make_server(host, port, app, handler_class):
+        served.append((host, port, app, handler_class))
+        return _FakeServer()
+
+    started_threads = []
+
+    class _FakeThread:
+        def __init__(self, *, target, name, daemon):
+            started_threads.append((target, name, daemon))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(kernel_main, "make_server", _fake_make_server, raising=False)
+    import wsgiref.simple_server as simple_server
+
+    monkeypatch.setattr(simple_server, "make_server", _fake_make_server)
+    monkeypatch.setattr("threading.Thread", _FakeThread)
+
+    kernel_main.start_kernel_metrics_server(
+        DeploymentSettings(execution_kernel_metrics_port=9108, metrics_token="s3cret")
+    )
+    assert len(served) == 1
+    assert served[0][0] == "0.0.0.0"
+    assert served[0][1] == 9108
+    assert len(started_threads) == 1
+    assert started_threads[0][1] == "kernel-metrics-server"
+    assert started_threads[0][2] is True
+
+
+@pytest.mark.asyncio
+async def test_main_wires_observability_and_metrics(monkeypatch):
+    observed = {}
+
+    monkeypatch.setattr(
+        kernel_main, "load_deployment_settings", lambda: DeploymentSettings(env="test")
+    )
+    monkeypatch.setattr(
+        kernel_main, "setup_logging", lambda settings: observed.setdefault("log", settings)
+    )
+    monkeypatch.setattr(
+        kernel_main,
+        "setup_observability",
+        lambda *, settings: observed.setdefault("otel", settings),
+    )
+    monkeypatch.setattr(
+        kernel_main,
+        "start_kernel_metrics_server",
+        lambda settings: observed.setdefault("metrics", settings),
+    )
+
+    async def _fake_run_kernel(settings):
+        observed["ran"] = settings
+
+    monkeypatch.setattr(kernel_main, "run_kernel", _fake_run_kernel)
+
+    await kernel_main.main()
+
+    assert "otel" in observed
+    assert observed["otel"] is observed["log"]
+    assert observed["metrics"] is observed["log"]
+    assert observed["ran"] is observed["log"]

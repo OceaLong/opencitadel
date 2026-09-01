@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete, insert
@@ -20,8 +21,16 @@ from app.domain.models.scope import OwnerScope
 from app.domain.services.resource_version_provider import (
     ResourceVersionProviderRegistry,
 )
+from app.infrastructure.models.knowledge_base import KnowledgeBaseModel
+from app.infrastructure.models.knowledge_version import KnowledgeBaseVersionORM
 from app.infrastructure.models.session import SessionModel
 from app.infrastructure.models.user import UserORM
+from app.infrastructure.repositories.db_knowledge_base_repository import (
+    DBKnowledgeBaseRepository,
+)
+from app.infrastructure.repositories.db_knowledge_version_repository import (
+    DBKnowledgeVersionRepository,
+)
 from app.infrastructure.repositories.db_session_repository import (
     DBSessionRepository,
 )
@@ -70,6 +79,8 @@ class _BindingUow:
         )
         self.session = DBSessionRepository(self.db_session)
         self.resource_bindings = DBSessionResourceBindingRepository(self.db_session)
+        self.knowledge_base = DBKnowledgeBaseRepository(db_session=self.db_session)
+        self.knowledge_version = DBKnowledgeVersionRepository(db_session=self.db_session)
         return self
 
     async def commit(self) -> None:
@@ -99,6 +110,7 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current()
     )
     user_id = f"binding-user-{uuid.uuid4()}"
     session_id = f"binding-session-{uuid.uuid4()}"
+    kb_id = f"binding-kb-{uuid.uuid4()}"
     scope = OwnerScope.personal(user_id)
     provider = _Provider()
     service = ResourceBindingService(
@@ -125,20 +137,38 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current()
                     status="pending",
                 )
             )
+            await setup.execute(
+                insert(KnowledgeBaseModel).values(
+                    id=kb_id,
+                    name=kb_id,
+                    owner_user_id=user_id,
+                )
+            )
+            for version_id in ("kbv1", "kbv2"):
+                await setup.execute(
+                    insert(KnowledgeBaseVersionORM).values(
+                        id=version_id,
+                        knowledge_base_id=kb_id,
+                        build_id=f"build-{version_id}",
+                        request_key=f"req-{version_id}",
+                        state="ready",
+                        published_at=datetime.now(UTC),
+                    )
+                )
             await setup.commit()
 
         initial_left, initial_right = await asyncio.gather(
             service.bind_initial(
                 session_id,
                 ResourceKind.KNOWLEDGE_BASE,
-                "kb1",
+                kb_id,
                 None,
                 scope,
             ),
             service.bind_initial(
                 session_id,
                 ResourceKind.KNOWLEDGE_BASE,
-                "kb1",
+                kb_id,
                 None,
                 scope,
             ),
@@ -177,6 +207,7 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current()
                 AuthorizationContext.system("resource-binding-postgres-cleanup"),
             )
             await cleanup.execute(delete(SessionModel).where(SessionModel.id == session_id))
+            await cleanup.execute(delete(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id))
             await cleanup.execute(delete(UserORM).where(UserORM.id == user_id))
             await cleanup.commit()
         await engine.dispose()

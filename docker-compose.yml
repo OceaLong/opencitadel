@@ -19,6 +19,8 @@ services:
 
   opencitadel-redis:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     image: redis:7-alpine
     restart: unless-stopped
     mem_limit: 512m
@@ -50,6 +52,8 @@ services:
 
   opencitadel-postgres:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     mem_limit: 1024m
@@ -94,6 +98,8 @@ services:
       - local
     image: minio/minio:latest
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 512m
     mem_reservation: 256m
     cpus: "0.50"
@@ -186,6 +192,20 @@ services:
     depends_on:
       opencitadel-sandbox-egress:
         condition: service_healthy
+    healthcheck:
+      # curl is present in the sandbox image (installed in sandbox/Dockerfile).
+      # Every /api/* route is gated by a fail-closed Bearer-token middleware
+      # (sandbox/app/core/middleware.py), and this fixed-sandbox profile injects
+      # no SANDBOX_ACCESS_TOKEN, so an unauthenticated probe to
+      # /api/supervisor/status returns 401/503 and can never report healthy.
+      # FastAPI's own /openapi.json is served outside the /api prefix, needs no
+      # token, and returning it confirms the ASGI app is up and handling
+      # requests (a stronger signal than a raw TCP connect).
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/openapi.json"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # The only service allowed to access Docker. It receives no database,
   # provider, OAuth, or application secrets and exposes a narrow token-
@@ -254,6 +274,8 @@ services:
 
   opencitadel-migrate:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -281,6 +303,8 @@ services:
 
   opencitadel-api:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -326,6 +350,7 @@ services:
     networks:
       - opencitadel-network
       - opencitadel-sandbox-network
+      - opencitadel-ops-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health/ready"]
       interval: 15s
@@ -337,6 +362,8 @@ services:
 
   opencitadel-execution-kernel:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -383,6 +410,7 @@ services:
     networks:
       - opencitadel-network
       - opencitadel-sandbox-network
+      - opencitadel-ops-network
     command: ["python", "-m", "app.execution_kernel_main"]
     healthcheck:
       test: ["CMD", "python", "-m", "app.execution_kernel_health", "readiness"]
@@ -395,6 +423,8 @@ services:
 
   opencitadel-ui:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     build:
       context: ./ui
       dockerfile: Dockerfile
@@ -446,13 +476,19 @@ services:
       OPS_COLLECTOR_ALLOWED_NAMESPACES: '${OPS_COLLECTOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
       OPS_COLLECTOR_TRANSPORT: streamable-http
       OPS_COLLECTOR_ALLOW_STDIO: "false"
+      OPS_COLLECTOR_TOKEN: ${OPS_COLLECTOR_TOKEN:?set a strong OPS_COLLECTOR_TOKEN}
       OPS_COLLECTOR_HTTP_PROBES: >-
         ${OPS_COLLECTOR_HTTP_PROBES:-{"primary-endpoint":{"url":"http://opencitadel-api:8000/api/status","expected_statuses":[200]},"demo-console":{"url":"http://ops-console:9099/health","expected_statuses":[200]}}}
       OPS_COLLECTOR_DEPENDENCIES: >-
         ${OPS_COLLECTOR_DEPENDENCIES:-{"primary-dependencies":{"kind":"postgres","host":"opencitadel-postgres","port":5432},"demo-console-tcp":{"kind":"tcp","host":"ops-console","port":9099}}}
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    # Callers (api + execution-kernel) reach the Collector over the dedicated
+    # ops network. It stays on opencitadel-network as well because its probes
+    # dial other compose services (api, postgres, ops-console); bearer-token
+    # auth is the primary boundary for the read-only surface.
     networks:
+      - opencitadel-ops-network
       - opencitadel-network
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8090), 2).close()"]
@@ -490,10 +526,14 @@ services:
       OPS_ACTUATOR_ALLOWED_NAMESPACES: '${OPS_ACTUATOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
       OPS_ACTUATOR_TRANSPORT: streamable-http
       OPS_ACTUATOR_ALLOW_STDIO: "false"
+      OPS_ACTUATOR_TOKEN: ${OPS_ACTUATOR_TOKEN:?set a strong OPS_ACTUATOR_TOKEN}
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    # Reachable only over the dedicated ops network (api + execution-kernel).
+    # The Actuator has no other compose-service dependency, so keeping it off
+    # opencitadel-network removes it from the reach of every unrelated container.
     networks:
-      - opencitadel-network
+      - opencitadel-ops-network
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8091), 2).close()"]
       interval: 15s
@@ -505,6 +545,8 @@ services:
 
   ops-console:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     profiles:
       - demo
     build:
@@ -567,6 +609,8 @@ services:
 
   opencitadel-nginx:
     labels: *ownership-labels
+    security_opt:
+      - no-new-privileges:true
     image: nginx:alpine
     restart: unless-stopped
     mem_limit: 128m
@@ -623,6 +667,12 @@ volumes:
 # ==================== 网络 ====================
 networks:
   opencitadel-network:
+    labels: *ownership-labels
+    driver: bridge
+  # Dedicated segment for the write-scoped Ops Actuator / read-only Ops
+  # Collector MCP surfaces. Only api and execution-kernel join it, so no
+  # unrelated container can dial these servers over the shared network.
+  opencitadel-ops-network:
     labels: *ownership-labels
     driver: bridge
   opencitadel-sandbox-network:

@@ -30,6 +30,22 @@ spec:
               drop: ["ALL"]
           ports:
             - containerPort: 5432
+          # 参考 docker-compose.yml postgres 段的 healthcheck。POSTGRES_USER 在此
+          # StatefulSet 中即 adminUser，POSTGRES_DB 为业务库名。
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
           env:
             - name: POSTGRES_USER
               value: {{ .Values.postgresql.adminUser | quote }}

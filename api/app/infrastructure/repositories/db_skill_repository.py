@@ -13,8 +13,17 @@ class DBSkillRepository(SkillRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    def _apply_scope(self, stmt, scope: OwnerScope | None):
+    def _apply_scope(self, stmt, scope: OwnerScope | None, *, global_only: bool = False):
+        if global_only:
+            # Safe default for unauthenticated/public surfaces (e.g. the A2A
+            # agent-card discovery endpoint): expose only globally-visible
+            # Skills, never tenant-private/team ones, regardless of scope.
+            return stmt.where(SkillORM.visibility == "global")
         if scope is None:
+            # WARNING: scope=None returns every tenant's rows unfiltered. This is
+            # only safe for trusted internal callers (e.g. startup seeding).
+            # Never reach this branch from an anonymous/unauthenticated request —
+            # pass an explicit scope or global_only=True instead.
             return stmt
         if scope.type == OwnerScopeType.TEAM:
             owner_filter = SkillORM.team_id == scope.team_id
@@ -23,9 +32,15 @@ class DBSkillRepository(SkillRepository):
         return stmt.where(or_(SkillORM.visibility == "global", owner_filter))
 
     async def get_all(
-        self, enabled_only: bool = False, scope: OwnerScope | None = None
+        self,
+        enabled_only: bool = False,
+        scope: OwnerScope | None = None,
+        *,
+        global_only: bool = False,
     ) -> list[Skill]:
-        stmt = self._apply_scope(select(SkillORM), scope).order_by(SkillORM.category, SkillORM.name)
+        stmt = self._apply_scope(select(SkillORM), scope, global_only=global_only).order_by(
+            SkillORM.category, SkillORM.name
+        )
         if enabled_only:
             stmt = stmt.where(SkillORM.enabled.is_(True))
         result = await self.db_session.execute(stmt)

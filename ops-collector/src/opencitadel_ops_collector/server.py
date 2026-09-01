@@ -8,6 +8,7 @@ from mcp.types import ToolAnnotations
 from .capabilities import capability_manifest
 from .collector import OpsCollector
 from .config import CollectorSettings
+from .http_auth import BearerTokenMiddleware, require_http_token
 
 READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
@@ -88,3 +89,28 @@ def create_server(settings: CollectorSettings | None = None) -> FastMCP:
         return await collector.dependency_status(dependency_id)
 
     return server
+
+
+def build_http_app(settings: CollectorSettings | None = None):
+    """Return the streamable-http ASGI app wrapped in mandatory bearer auth.
+
+    The token is validated eagerly so a mis-provisioned process fails to start
+    instead of silently exposing the read-only probes to any network peer.
+    """
+    cfg = settings or CollectorSettings()
+    token = require_http_token(cfg.token)
+    app = create_server(cfg).streamable_http_app()
+    app.add_middleware(BearerTokenMiddleware, token=token)
+    return app
+
+
+def run_server(settings: CollectorSettings, transport: str) -> None:
+    """Run the Collector over the selected transport, enforcing auth on HTTP."""
+    if transport == "stdio":
+        create_server(settings).run(transport="stdio")
+        return
+
+    import uvicorn
+
+    app = build_http_app(settings)
+    uvicorn.run(app, host=settings.host, port=settings.port, access_log=False)

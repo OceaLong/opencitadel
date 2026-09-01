@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -30,6 +30,7 @@ import { useClientDataScope } from "@/providers/client-data-provider";
 export default function TeamsPage() {
   const t = useTranslations("teams");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const { setWorkspaceId } = useClientDataScope();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,7 +131,7 @@ export default function TeamsPage() {
                       <CardDescription className="mt-1">{team.description}</CardDescription>
                     ) : null}
                     <div className="text-muted-foreground mt-2 text-xs">
-                      {t("createdAt", { date: formatDateTime(team.created_at) })}
+                      {t("createdAt", { date: formatDateTime(team.created_at, locale) })}
                     </div>
                   </div>
                   <Button variant="outline" size="sm" asChild>

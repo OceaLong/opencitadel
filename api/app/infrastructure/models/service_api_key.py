@@ -16,13 +16,15 @@ class ServiceApiKeyORM(Base):
         String(255), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     owner_user_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     prefix: Mapped[str] = mapped_column(String(32), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NULL means the key never expires (backward compatible).
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -37,6 +39,7 @@ class ServiceApiKeyORM(Base):
             prefix=key.prefix,
             last_used_at=key.last_used_at,
             revoked_at=key.revoked_at,
+            expires_at=key.expires_at,
             created_at=key.created_at,
         )
 
@@ -46,6 +49,7 @@ class ServiceApiKeyORM(Base):
         self.prefix = key.prefix
         self.last_used_at = key.last_used_at
         self.revoked_at = key.revoked_at
+        self.expires_at = key.expires_at
 
     def to_domain(self) -> ServiceApiKey:
         return ServiceApiKey(
@@ -56,5 +60,6 @@ class ServiceApiKeyORM(Base):
             prefix=self.prefix,
             last_used_at=self.last_used_at,
             revoked_at=self.revoked_at,
+            expires_at=self.expires_at,
             created_at=self.created_at,
         )

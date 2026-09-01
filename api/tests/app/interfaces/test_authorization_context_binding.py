@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.application.security.authorization_context import (
@@ -21,7 +23,8 @@ async def test_workspace_dependency_binds_team_authorization_context():
     )
     authorization_token = set_authorization_context(AuthorizationContext.anonymous())
     try:
-        context = await get_workspace_context("team-1")
+        request = SimpleNamespace(state=SimpleNamespace())
+        context = await get_workspace_context(request, "team-1")
 
         authorization = get_authorization_context()
         assert context.scope.team_id == "team-1"

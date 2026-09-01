@@ -20,7 +20,7 @@ class TeamORM(Base):
         String(1024), nullable=False, server_default=text("''")
     )
     created_by: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -65,7 +65,10 @@ class TeamMemberORM(Base):
         String(255), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
     )
     user_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        String(255),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,  # users FK scan + "teams for a user" lookup (not leading in the composite PK)
     )
     role: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'member'"))
     joined_at: Mapped[datetime] = mapped_column(

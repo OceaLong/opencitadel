@@ -2,13 +2,14 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.ports.streams import NotificationStreamFactory
 from app.application.security.authorization_context import authorization_scope
 from app.application.services.notification_service import NotificationService
 from app.application.services.scheduled_job_service import ScheduledJobService
+from app.domain.errors import BadRequestError, NotFoundError, UnauthorizedError
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scheduled_job import NotifyChannel
 from app.domain.models.scope import WorkspaceContext
@@ -21,6 +22,8 @@ from app.interfaces.schemas.notification import (
 from app.interfaces.schemas.scheduled_job import (
     CreateScheduledJobRequest,
     CreateScheduledJobResponse,
+    RunHistoryItem,
+    RunHistoryListResponse,
     ScheduledJobListResponse,
     ScheduledJobResponse,
     UpdateScheduledJobRequest,
@@ -114,7 +117,7 @@ async def update_job(
         timezone=body.timezone,
     )
     if not job:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        raise NotFoundError("任务不存在", error_key="apiErrors.scheduling.jobNotFound")
     return ApiResponse.success(_job_response(job))
 
 
@@ -126,7 +129,7 @@ async def delete_job(
 ):
     job = await service.get_job(job_id, scope=ctx.scope)
     if not job:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        raise NotFoundError("任务不存在", error_key="apiErrors.scheduling.jobNotFound")
     await service.delete_job(job_id, scope=ctx.scope)
     return ApiResponse.success({"deleted": True})
 
@@ -139,10 +142,10 @@ async def rotate_secret(
 ):
     job = await service.get_job(job_id, scope=ctx.scope)
     if not job:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        raise NotFoundError("任务不存在", error_key="apiErrors.scheduling.jobNotFound")
     secret, token = await service.rotate_webhook_secret(job_id, scope=ctx.scope)
     if not secret or not token:
-        raise HTTPException(status_code=400, detail="无法轮换密钥")
+        raise BadRequestError("无法轮换密钥", error_key="apiErrors.scheduling.secretRotationFailed")
     return ApiResponse.success(WebhookSecretResponse(webhook_secret=secret, webhook_token=token))
 
 
@@ -155,7 +158,7 @@ async def trigger_job_now(
 ):
     job = await service.get_job(job_id, scope=ctx.scope)
     if not job:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        raise NotFoundError("任务不存在", error_key="apiErrors.scheduling.jobNotFound")
     try:
         session_id = await service.manual_trigger(
             job_id,
@@ -163,10 +166,43 @@ async def trigger_job_now(
             scope=ctx.scope,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequestError(str(exc), error_key="apiErrors.scheduling.triggerInvalid") from exc
     if not session_id:
-        raise HTTPException(status_code=400, detail="任务触发失败")
+        raise BadRequestError("任务触发失败", error_key="apiErrors.scheduling.triggerFailed")
     return ApiResponse.success({"session_id": session_id})
+
+
+@scheduled_router.get("/{job_id}/runs", response_model=ApiResponse[RunHistoryListResponse])
+async def list_job_runs(
+    job_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ScheduledJobService = Depends(get_scheduled_job_service),
+):
+    """Return the authoritative execution-run history for a scheduled job.
+
+    Ownership is enforced by the scoped job lookup inside the service; a job
+    outside the caller's workspace scope yields a 404.
+    """
+    runs = await service.list_runs(job_id, ctx.scope, limit=limit, offset=offset)
+    if runs is None:
+        raise NotFoundError("任务不存在", error_key="apiErrors.scheduling.jobNotFound")
+    return ApiResponse.success(
+        RunHistoryListResponse(
+            runs=[
+                RunHistoryItem(
+                    run_id=entry.run_id,
+                    family=entry.family,
+                    status=entry.status.value,
+                    started_at=entry.created_at,
+                    finished_at=entry.terminal_at,
+                    error=entry.failure_code,
+                )
+                for entry in runs
+            ]
+        )
+    )
 
 
 @notification_router.get("", response_model=ApiResponse[NotificationListResponse])
@@ -249,7 +285,9 @@ async def webhook_trigger(
             payload,
         )
     if error == "unauthorized":
-        raise HTTPException(status_code=401, detail="Webhook 签名无效")
+        raise UnauthorizedError(
+            "Webhook 签名无效", error_key="apiErrors.scheduling.webhookSignatureInvalid"
+        )
     if error == "not_found" or not session_id:
-        raise HTTPException(status_code=404, detail="Webhook 无效")
+        raise NotFoundError("Webhook 无效", error_key="apiErrors.scheduling.webhookNotFound")
     return {"session_id": session_id, "duplicate": error == "duplicate"}

@@ -6,6 +6,13 @@ server {
     # 避免上游容器（opencitadel-ui / opencitadel-api）重建后 IP 变化导致 502。
     resolver 127.0.0.11 valid=10s ipv6=off;
 
+    # 安全响应头（纵深防御）。HSTS 只在 HTTPS 模板声明，纯 HTTP 部署下发 HSTS
+    # 无意义甚至有害，故此处不加。其余头对所有 location 生效（本文件 location 无
+    # 自身 add_header，故继承此处声明）。
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
+
     # ----------------------------------------------------------
     # API 接口代理（含 WebSocket / SSE 支持）
     # ----------------------------------------------------------

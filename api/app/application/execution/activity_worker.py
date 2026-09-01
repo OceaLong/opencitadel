@@ -26,8 +26,22 @@ from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.context import RunExecutionContext
 from app.domain.models.scope import OwnerScopeType
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
+from app.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
+_tracer = get_tracer("opencitadel.execution.activity")
+
+# Default per-process concurrency ceiling for executing claims (P1-3 backpressure).
+# Each ``_execute_claim`` checks out several DB connections (run-context load,
+# mark-call-started, outcome submit, heartbeats), so unbounded ``gather`` over a
+# 100-row batch stampedes the connection pool (pool_size + overflow == 10 by
+# default) and creates a deadlock vector. Callers should pass
+# ``settings.execution_activity_max_concurrency`` (kept <= pool capacity).
+# TODO(P1-3 wiring): thread ``settings.execution_activity_max_concurrency`` from
+# ``build_execution_kernel_runtime`` (app/infrastructure/adapters/execution_ports.py,
+# out of this change's scope) into ``ActivityWorker(max_concurrency=...)`` so the
+# ceiling is deployment-configurable instead of relying on this default.
+DEFAULT_ACTIVITY_MAX_CONCURRENCY = 8
 
 
 class ActivityStore(Protocol):
@@ -93,17 +107,24 @@ class ActivityWorker:
         registry: ActivityRegistry,
         worker_id: str,
         claim_ttl: timedelta = timedelta(seconds=30),
+        max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("worker_id must not be empty")
         if claim_ttl <= timedelta(0):
             raise ValueError("claim_ttl must be positive")
+        if max_concurrency <= 0:
+            raise ValueError("max_concurrency must be positive")
         self._store = store
         self._run_contexts = run_contexts
         self._run_service = run_service
         self._registry = registry
         self._worker_id = worker_id
         self._claim_ttl = claim_ttl
+        self._max_concurrency = max_concurrency
+        # Bounds concurrent claim execution (and therefore concurrent connection
+        # demand) regardless of the claim batch size. See module docstring above.
+        self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def run_once(
         self,
@@ -133,6 +154,34 @@ class ActivityWorker:
         return ActivityBatchStats(**counts)
 
     async def _execute_claim(
+        self,
+        claim: ActivityClaim,
+        *,
+        now: datetime,
+    ) -> str:
+        # Backpressure: cap the number of claims executing at once (P1-3). The
+        # whole batch is still ``gather``-ed, but only ``max_concurrency`` claims
+        # hold their DB connections at any moment. The tracing span and status
+        # accounting are unchanged inside the guard.
+        async with self._semaphore:
+            return await self._execute_claim_span(claim, now=now)
+
+    async def _execute_claim_span(
+        self,
+        claim: ActivityClaim,
+        *,
+        now: datetime,
+    ) -> str:
+        with _tracer.start_as_current_span("activity.execute") as span:
+            span.set_attribute("opencitadel.run_id", claim.request.aggregate_id)
+            span.set_attribute("opencitadel.activity_id", str(claim.request.activity_id))
+            span.set_attribute("opencitadel.activity_type", claim.request.activity_type)
+            span.set_attribute("opencitadel.worker_id", self._worker_id)
+            status = await self._execute_claim_traced(claim, now=now)
+            span.set_attribute("opencitadel.activity_status", status)
+            return status
+
+    async def _execute_claim_traced(
         self,
         claim: ActivityClaim,
         *,

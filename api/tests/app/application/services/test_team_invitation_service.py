@@ -33,6 +33,19 @@ class InMemoryInvitationRepo:
                 return invitation
         return None
 
+    async def get_pending_platform_invitation(self, email: str):
+        normalized = email.strip().lower()
+        now = datetime.now(UTC)
+        for invitation in self.invitations.values():
+            if (
+                invitation.type == InvitationType.PLATFORM
+                and invitation.email == normalized
+                and invitation.accepted_at is None
+                and invitation.expires_at > now
+            ):
+                return invitation
+        return None
+
     async def list(self, invitation_type=None, limit: int = 100, offset: int = 0):
         items = list(self.invitations.values())
         if invitation_type is not None:
@@ -155,7 +168,7 @@ def _build_service(
     team_repo = InMemoryTeamRepo([team])
     user_repo = InMemoryUserRepo(users or [])
     return TeamService(
-        uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo),
+        uow_factory=lambda **_: FakeUow(invitation_repo, team_repo, user_repo),
         password_hasher=PasswordHasher(),
         application_urls=ApplicationUrls(frontend_base_url="https://app.example.test"),
     )
@@ -263,7 +276,7 @@ async def test_create_team_invitation_rejects_duplicate_pending_email(monkeypatc
     )
     user_repo = InMemoryUserRepo()
     service = TeamService(
-        uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo),
+        uow_factory=lambda **_: FakeUow(invitation_repo, team_repo, user_repo),
         password_hasher=PasswordHasher(),
         application_urls=ApplicationUrls(frontend_base_url="http://localhost:8088"),
     )
@@ -324,7 +337,7 @@ async def test_leave_team_keeps_all_repository_calls_inside_unit_of_work():
             return False
 
     service = TeamService(
-        uow_factory=lambda: GuardedUow(
+        uow_factory=lambda **_: GuardedUow(
             InMemoryInvitationRepo(),
             team_repo,
             InMemoryUserRepo(),

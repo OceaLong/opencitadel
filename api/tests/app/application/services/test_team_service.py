@@ -12,7 +12,10 @@ test_team_invitation_service.py's InMemory*Repo/FakeUow pattern.
 import pytest
 
 from app.application.ports.crypto import ApplicationUrls
-from app.application.services.team_service import TeamService
+from app.application.services.team_service import (
+    TeamDeletionResult,
+    TeamService,
+)
 from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.domain.models.invitation import Invitation
 from app.domain.models.team import Team, TeamMember, TeamRole
@@ -38,6 +41,9 @@ class InMemoryTeamRepo:
         self.teams = {team.id: team for team in (teams or [])}
         self.members = {(member.team_id, member.user_id): member for member in (members or [])}
         self.deleted_team_ids: list[str] = []
+        self.transfer_calls: list[tuple[str, str]] = []
+        self.delete_resource_calls: list[str] = []
+        self.resource_count_by_team: dict[str, int] = {}
 
     async def get_by_id(self, team_id: str):
         return self.teams.get(team_id)
@@ -67,6 +73,14 @@ class InMemoryTeamRepo:
     async def delete_by_id(self, team_id: str) -> None:
         self.deleted_team_ids.append(team_id)
         self.teams.pop(team_id, None)
+
+    async def transfer_resources_to_owner(self, team_id: str, owner_user_id: str) -> int:
+        self.transfer_calls.append((team_id, owner_user_id))
+        return self.resource_count_by_team.get(team_id, 0)
+
+    async def delete_resources(self, team_id: str) -> int:
+        self.delete_resource_calls.append(team_id)
+        return self.resource_count_by_team.get(team_id, 0)
 
     async def remove_member(self, team_id: str, user_id: str) -> None:
         self.members.pop((team_id, user_id), None)
@@ -142,7 +156,7 @@ def _build_service(
     team_repo: InMemoryTeamRepo, user_repo: InMemoryUserRepo | None = None
 ) -> TeamService:
     return TeamService(
-        uow_factory=lambda: FakeUow(
+        uow_factory=lambda **_: FakeUow(
             InMemoryInvitationRepo(), team_repo, user_repo or InMemoryUserRepo()
         ),
         password_hasher=PasswordHasher(),
@@ -395,11 +409,55 @@ async def test_delete_team_by_owner_succeeds():
     _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
     )
+    team_repo.resource_count_by_team["team-1"] = 3
     service = _build_service(team_repo)
 
-    await service.delete_team(team_id="team-1", actor_user_id="owner-1")
+    result = await service.delete_team(team_id="team-1", actor_user_id="owner-1")
 
+    # Default strategy is the explicit, audited transfer_to_owner — never the
+    # implicit DB SET NULL that silently scatters resources.
+    assert isinstance(result, TeamDeletionResult)
+    assert result.strategy == "transfer_to_owner"
+    assert result.transferred_to_user_id == "owner-1"
+    assert result.affected_resources == 3
+    assert team_repo.transfer_calls == [("team-1", "owner-1")]
+    assert team_repo.delete_resource_calls == []
     assert "team-1" in team_repo.deleted_team_ids
+
+
+@pytest.mark.anyio
+async def test_delete_team_cascade_deletes_resources_without_transfer():
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
+    team_repo.resource_count_by_team["team-1"] = 5
+    service = _build_service(team_repo)
+
+    result = await service.delete_team(
+        team_id="team-1", actor_user_id="owner-1", strategy="cascade"
+    )
+
+    assert result.strategy == "cascade"
+    assert result.transferred_to_user_id is None
+    assert result.affected_resources == 5
+    assert team_repo.delete_resource_calls == ["team-1"]
+    assert team_repo.transfer_calls == []
+    assert "team-1" in team_repo.deleted_team_ids
+
+
+@pytest.mark.anyio
+async def test_delete_team_unsupported_strategy_rejected_before_any_write():
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
+    service = _build_service(team_repo)
+
+    with pytest.raises(BadRequestError, match="不支持的团队删除策略"):
+        await service.delete_team(team_id="team-1", actor_user_id="owner-1", strategy="archive")
+
+    assert team_repo.deleted_team_ids == []
+    assert team_repo.transfer_calls == []
+    assert team_repo.delete_resource_calls == []
 
 
 @pytest.mark.anyio
@@ -438,10 +496,35 @@ async def test_admin_delete_team_removes_existing_team():
     _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
     )
+    team_repo.resource_count_by_team["team-1"] = 2
     service = _build_service(team_repo)
 
-    await service.admin_delete_team("team-1")
+    result = await service.admin_delete_team("team-1")
 
+    # Admin teardown resolves the team's owner as the explicit transfer target
+    # rather than leaning on the DB's implicit SET NULL.
+    assert result.strategy == "transfer_to_owner"
+    assert result.transferred_to_user_id == "owner-1"
+    assert result.affected_resources == 2
+    assert team_repo.transfer_calls == [("team-1", "owner-1")]
+    assert "team-1" in team_repo.deleted_team_ids
+
+
+@pytest.mark.anyio
+async def test_admin_delete_team_cascade_strategy():
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
+        TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
+    )
+    team_repo.resource_count_by_team["team-1"] = 7
+    service = _build_service(team_repo)
+
+    result = await service.admin_delete_team("team-1", strategy="cascade")
+
+    assert result.strategy == "cascade"
+    assert result.affected_resources == 7
+    assert team_repo.delete_resource_calls == ["team-1"]
+    assert team_repo.transfer_calls == []
     assert "team-1" in team_repo.deleted_team_ids
 
 

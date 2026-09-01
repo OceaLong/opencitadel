@@ -3,14 +3,25 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "opencitadel.fullname" . }}-ops-collector
+{{- /*
+  Namespaced Role/RoleBinding per allowed namespace instead of a cluster-wide
+  ClusterRole. Every namespaced resource the Collector reads (pods, pods/log,
+  events, services, pvc, workloads, jobs) is scoped exactly to
+  opsCollector.allowedNamespaces. Nodes are the sole exception: they are a
+  cluster-scoped resource and cannot be granted through a namespaced Role, so a
+  minimal read-only ClusterRole below grants nodes get/list/watch and nothing
+  else.
+*/}}
+{{- range $ns := .Values.opsCollector.allowedNamespaces }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: {{ include "opencitadel.fullname" . }}-ops-collector-readonly
+  name: {{ include "opencitadel.fullname" $ }}-ops-collector-readonly
+  namespace: {{ $ns }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "events", "services", "persistentvolumeclaims", "nodes"]
+    resources: ["pods", "pods/log", "events", "services", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
@@ -20,9 +31,33 @@ rules:
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "opencitadel.fullname" $ }}-ops-collector-readonly
+  namespace: {{ $ns }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "opencitadel.fullname" $ }}-ops-collector
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "opencitadel.fullname" $ }}-ops-collector-readonly
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-ops-collector-nodes-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "opencitadel.fullname" . }}-ops-collector-readonly
+  name: {{ include "opencitadel.fullname" . }}-ops-collector-nodes-readonly
 subjects:
   - kind: ServiceAccount
     name: {{ include "opencitadel.fullname" . }}-ops-collector
@@ -30,5 +65,5 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "opencitadel.fullname" . }}-ops-collector-readonly
+  name: {{ include "opencitadel.fullname" . }}-ops-collector-nodes-readonly
 {{- end }}

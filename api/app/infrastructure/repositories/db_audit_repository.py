@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.models.audit_log import AuditLog
 from app.domain.repositories.audit_repository import AuditRepository
 from app.domain.services.audit_chain import (
-    ADVISORY_LOCK_KEY,
     GENESIS,
     compute_entry_hash,
     entry_fields,
+    shard_key_for,
 )
 from app.infrastructure.models.audit_log import AuditLogORM
 
@@ -33,12 +33,20 @@ class DBAuditRepository(AuditRepository):
         self._signing_key_id = signing_key_id
 
     async def add(self, log: AuditLog) -> None:
+        shard_key = shard_key_for(team_id=log.team_id, actor_user_id=log.actor_user_id)
+        # Per-shard transactional advisory lock: writers to different shards
+        # (distinct teams/users/system) take different locks and never queue on
+        # each other, removing the platform-wide serialization bottleneck.
+        # Writers to the *same* shard still serialize, which is what keeps that
+        # shard's chain_seq gap-free and its prev_hash links well-ordered.
+        # hashtext() is computed in-DB so the lock key matches across replicas.
         await self.db_session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": ADVISORY_LOCK_KEY},
+            text("SELECT pg_advisory_xact_lock(hashtext(:shard_key))"),
+            {"shard_key": shard_key},
         )
         last_stmt = (
             select(AuditLogORM.chain_seq, AuditLogORM.entry_hash)
+            .where(AuditLogORM.shard_key == shard_key)
             .where(AuditLogORM.chain_seq.isnot(None))
             .order_by(AuditLogORM.chain_seq.desc())
             .limit(1)
@@ -123,7 +131,10 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
         if session_id:
             stmt = stmt.where(AuditLogORM.session_id == session_id)
-        stmt = stmt.order_by(AuditLogORM.chain_seq.asc())
+        # Group each shard's rows contiguously and ascending by chain_seq so the
+        # per-shard verification walk (verify_chain_logs) sees every shard's
+        # chain in order. chain_seq is only monotonic within a shard now.
+        stmt = stmt.order_by(AuditLogORM.shard_key.asc(), AuditLogORM.chain_seq.asc())
         if limit is not None:
             stmt = stmt.limit(max(1, limit))
         result = await self.db_session.execute(stmt)

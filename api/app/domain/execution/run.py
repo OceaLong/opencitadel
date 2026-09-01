@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -38,6 +38,13 @@ class RunStatus(StrEnum):
 
 
 TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED})
+
+# Default human-approval time-to-live in minutes. This is the pure aggregate's
+# fallback when no per-tenant override is threaded in. The configurable surface
+# lives on ``OperationsPolicy.approval.ttl_minutes`` (runtime_policy/operations);
+# TODO(E3): thread that operations-policy value into RequestApproval at command
+# build time (owned by the decision loop) so tenants can override this default.
+DEFAULT_APPROVAL_TTL_MINUTES = 1440
 
 
 class InvalidRunTransitionError(ValueError):
@@ -195,6 +202,10 @@ class DecideApprovalPayload(_Payload):
     feedback: Annotated[str, Field(max_length=2048)] = ""
 
 
+class ExpireApprovalPayload(_Payload):
+    approval_id: UUID
+
+
 _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "CreateRun": CreateRunPayload,
     "StartRun": EmptyPayload,
@@ -212,6 +223,7 @@ _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "MarkActivityOutcomeUnknown": ActivityFailurePayload,
     "RequestApproval": RequestApprovalPayload,
     "DecideApproval": DecideApprovalPayload,
+    "ExpireApproval": ExpireApprovalPayload,
 }
 
 _EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
@@ -233,6 +245,7 @@ _EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "ActivityCancelled": ActivityFailurePayload,
     "ApprovalRequested": RequestApprovalPayload,
     "ApprovalDecided": DecideApprovalPayload,
+    "ApprovalExpired": ExpireApprovalPayload,
 }
 
 
@@ -343,6 +356,20 @@ class RunAggregate:
             approval_id = UUID(str(payload["approval_id"]))
             decisions = dict(state.approval_decisions)
             decisions[approval_id] = str(payload["decision"])
+            return state.model_copy(
+                update={
+                    **common,
+                    "pending_approval_id": None,
+                    "pending_approval_activity_id": None,
+                    "approval_decisions": tuple(
+                        sorted(decisions.items(), key=lambda item: str(item[0]))
+                    ),
+                }
+            )
+        if event.event_type == "ApprovalExpired":
+            approval_id = UUID(str(payload["approval_id"]))
+            decisions = dict(state.approval_decisions)
+            decisions[approval_id] = "expired"
             return state.model_copy(
                 update={
                     **common,
@@ -529,9 +556,20 @@ class RunAggregate:
             }[state.status]
             if command.command_type == matching:
                 return Decision(events=())
+            # A durable approval-timeout timer may still fire after the Run has
+            # already terminated (its cancellation raced the timer claim). The
+            # expiry is moot, so absorb it idempotently instead of dead-lettering.
+            if command.command_type == "ExpireApproval":
+                return Decision(events=())
             raise InvalidRunTransitionError(
                 f"cannot handle {command.command_type} from terminal {state.status}"
             )
+
+        # RequestApproval schedules a timeout command whose due time is derived
+        # from the issuing command's clock; the handler needs the envelope's
+        # issued_at, so it is dispatched explicitly rather than by name.
+        if command.command_type == "RequestApproval":
+            return self._decide_RequestApproval(state, payload, issued_at=command.issued_at)
 
         handler = getattr(self, f"_decide_{command.command_type}", None)
         if handler is None:
@@ -600,13 +638,92 @@ class RunAggregate:
     def _decide_RequestApproval(
         state: RunState,
         payload: RequestApprovalPayload,
+        *,
+        issued_at: datetime,
     ) -> Decision:
         if state.status != RunStatus.RUNNING or state.active_activity_ids:
             raise InvalidRunTransitionError("approval requires an idle running Run")
         prior = dict(state.approval_decisions).get(payload.approval_id)
         if prior is not None:
             raise InvalidRunTransitionError("approval identity was already decided")
-        return RunAggregate._event("ApprovalRequested", payload.model_dump(mode="json"))
+        # Mirror the Activity-request timeout: a durable, self-cancelling command
+        # fences the WAITING state so an unanswered approval cannot pin the Run
+        # forever. The timer cancels itself the moment the approval is decided or
+        # the Run reaches any terminal state.
+        due_at = issued_at + timedelta(minutes=DEFAULT_APPROVAL_TTL_MINUTES)
+        timer_id = uuid5(
+            NAMESPACE_URL,
+            f"opencitadel:approval-timeout:{payload.approval_id}",
+        )
+        timeout = ScheduledCommandRequest(
+            timer_id=timer_id,
+            due_at=due_at,
+            command=CommandEnvelope(
+                command_id=timer_id,
+                command_type="ExpireApproval",
+                command_schema_version=1,
+                stream_type="run",
+                stream_id=str(state.run_id),
+                expected_stream_version=None,
+                owner_user_id=state.owner_user_id,
+                team_id=state.team_id,
+                correlation_id=state.correlation_id or payload.approval_id,
+                causation_id=payload.approval_id,
+                issued_at=due_at,
+                payload={"approval_id": str(payload.approval_id)},
+            ),
+            cancellation_event_types=frozenset(
+                {
+                    "ApprovalDecided",
+                    "RunCompleted",
+                    "RunFailed",
+                    "RunCancelled",
+                }
+            ),
+            cancellation_activity_id=None,
+        )
+        return Decision(
+            events=(
+                NewEvent(
+                    event_type="ApprovalRequested",
+                    event_schema_version=1,
+                    public_payload=payload.model_dump(mode="json"),
+                    internal_payload={},
+                ),
+            ),
+            scheduled_commands=(timeout,),
+        )
+
+    @staticmethod
+    def _decide_ExpireApproval(
+        state: RunState,
+        payload: ExpireApprovalPayload,
+    ) -> Decision:
+        # Idempotent: if the approval was decided (or the Run otherwise moved on)
+        # before the timer fired, the expiry is a no-op. Only an approval that is
+        # still the pending one is expired.
+        if (
+            state.status != RunStatus.WAITING
+            or state.wait_reason != "approval"
+            or state.pending_approval_id != payload.approval_id
+        ):
+            return Decision(events=())
+        # TODO(E3): escalation/reassignment. For now an expired approval follows
+        # "rejected" semantics -- it advances the Run to a terminal CANCELLED
+        # state so it is no longer stuck WAITING.
+        expired = NewEvent(
+            event_type="ApprovalExpired",
+            event_schema_version=1,
+            public_payload=payload.model_dump(mode="json"),
+            internal_payload={},
+        )
+        cancelled = NewEvent(
+            event_type="RunCancelled",
+            event_schema_version=1,
+            public_payload={"reason": "approval_expired"},
+            internal_payload={},
+        )
+        return Decision(events=(expired, cancelled))
 
     @staticmethod
     def _decide_DecideApproval(

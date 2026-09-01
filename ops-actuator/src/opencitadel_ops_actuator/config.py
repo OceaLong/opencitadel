@@ -23,6 +23,10 @@ class ActuatorSettings(BaseSettings):
     target_ref: str = "opencitadel-local"
     allowed_namespaces: list[str] = Field(default_factory=lambda: ["opencitadel"])
     allowed_workloads: dict[str, dict[str, WorkloadTarget]] = Field(default_factory=dict)
+    # Static bearer token (env OPS_ACTUATOR_TOKEN). Empty is only tolerated for
+    # stdio transport; every streamable-http process must present a strong token
+    # or refuse to start (see http_auth.require_http_token).
+    token: str = Field(default="")
     transport: Literal["streamable-http", "stdio"] = "streamable-http"
     allow_stdio: bool = False
     host: str = "0.0.0.0"

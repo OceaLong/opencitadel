@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.models.artifact import Artifact, ArtifactKind, ArtifactStatus
+from app.domain.models.audit_log import AuditLog
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
@@ -340,7 +341,11 @@ class ArtifactService:
         ttl_hours: int = 168,
         *,
         scope: OwnerScope | None = None,
-    ) -> str:
+    ) -> tuple[str, datetime]:
+        """创建/轮换公开分享令牌，返回 (完整令牌, 到期时间)。
+
+        完整令牌是未鉴权访问凭据，仅在此处返回一次供调用方展示/复制。
+        """
         token = secrets.token_urlsafe(24)
         expires = datetime.now(UTC) + timedelta(hours=ttl_hours)
         async with self._uow_factory() as uow:
@@ -354,8 +359,19 @@ class ArtifactService:
             artifact.share_token = token
             artifact.share_expires_at = expires
             await uow.artifact.save(artifact)
+            await self._record_share_audit(
+                uow,
+                action="artifact.share.create",
+                artifact=artifact,
+                scope=scope,
+                metadata={
+                    "ttl_hours": ttl_hours,
+                    "share_expires_at": expires.isoformat(),
+                    "share_token_preview": token[-4:],
+                },
+            )
             await uow.commit()
-        return token
+        return token, expires
 
     async def revoke_share_link(
         self,
@@ -372,10 +388,44 @@ class ArtifactService:
                 session = await uow.session.get_metadata(artifact.session_id, scope=scope)
                 if not session:
                     raise PermissionError(f"无权撤销交付物[{artifact_id}]的分享")
+            previous_expires = artifact.share_expires_at
             artifact.share_token = None
             artifact.share_expires_at = None
             await uow.artifact.save(artifact)
+            await self._record_share_audit(
+                uow,
+                action="artifact.share.revoke",
+                artifact=artifact,
+                scope=scope,
+                metadata={
+                    "previous_share_expires_at": (
+                        previous_expires.isoformat() if previous_expires else None
+                    ),
+                },
+            )
             await uow.commit()
+
+    async def _record_share_audit(
+        self,
+        uow: IUnitOfWork,
+        *,
+        action: str,
+        artifact: Artifact,
+        scope: OwnerScope | None,
+        metadata: dict,
+    ) -> None:
+        """在同一事务内写入分享/撤销的审计记录(治理合规:公开链接可盘点、可追溯)。"""
+        await uow.audit.add(
+            AuditLog(
+                actor_user_id=scope.user_id if scope else None,
+                action=action,
+                resource_type="artifact",
+                resource_id=artifact.id,
+                team_id=scope.team_id if scope else None,
+                session_id=artifact.session_id,
+                metadata=metadata,
+            )
+        )
 
     async def get_by_share_token(self, token: str) -> Artifact | None:
         async with self._uow_factory() as uow:

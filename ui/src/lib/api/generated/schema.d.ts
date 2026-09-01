@@ -467,6 +467,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Approvals */
+        get: operations["list_approvals_api_approvals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/artifacts/{artifact_id}": {
         parameters: {
             query?: never;
@@ -1094,6 +1111,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/knowledge-bases/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Knowledge Bases
+         * @description 获取回收站（已软删除）知识库列表
+         */
+        get: operations["list_deleted_knowledge_bases_api_knowledge_bases_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge-bases/{kb_id}": {
         parameters: {
             query?: never;
@@ -1105,7 +1142,10 @@ export interface paths {
         get: operations["get_knowledge_base_api_knowledge_bases__kb_id__get"];
         put?: never;
         post?: never;
-        /** Delete Knowledge Base */
+        /**
+         * Delete Knowledge Base
+         * @description 软删除知识库；记录进入回收站，可恢复。
+         */
         delete: operations["delete_knowledge_base_api_knowledge_bases__kb_id__delete"];
         options?: never;
         head?: never;
@@ -1209,6 +1249,46 @@ export interface paths {
         get: operations["ingest_stream_api_knowledge_bases__kb_id__ingest_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge-bases/{kb_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Knowledge Base
+         * @description 彻底清除回收站中的知识库及其级联数据（不可恢复）。
+         */
+        delete: operations["purge_knowledge_base_api_knowledge_bases__kb_id__purge_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge-bases/{kb_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Knowledge Base
+         * @description 从回收站恢复已软删除的知识库。
+         */
+        post: operations["restore_knowledge_base_api_knowledge_bases__kb_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1871,6 +1951,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scheduled-jobs/{job_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Job Runs
+         * @description Return the authoritative execution-run history for a scheduled job.
+         *
+         *     Ownership is enforced by the scoped job lookup inside the service; a job
+         *     outside the caller's workspace scope yields a 404.
+         */
+        get: operations["list_job_runs_api_scheduled_jobs__job_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-jobs/{job_id}/trigger": {
         parameters: {
             query?: never;
@@ -1941,6 +2044,26 @@ export interface paths {
          * @description 创建一个空白的新任务会话
          */
         post: operations["create_session_api_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取回收站会话列表
+         * @description 获取当前工作区内已软删除、可恢复的任务会话列表
+         */
+        get: operations["list_deleted_sessions_api_sessions_deleted_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2055,8 +2178,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 删除指定任务会话
-         * @description 根据传递的会话id删除指定任务会话
+         * 删除指定任务会话（软删除，进入回收站）
+         * @description 根据传递的会话id软删除任务会话；记录进入回收站，可恢复
          */
         post: operations["delete_session_api_sessions__session_id__delete_post"];
         delete?: never;
@@ -2125,6 +2248,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 彻底清除回收站中的任务会话
+         * @description 根据传递的会话id物理删除回收站中的任务会话（不可恢复）
+         */
+        post: operations["purge_session_api_sessions__session_id__purge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/resource-bindings": {
         parameters: {
             query?: never;
@@ -2170,6 +2313,26 @@ export interface paths {
         put?: never;
         /** Upgrade Resource Binding */
         post: operations["upgrade_resource_binding_api_sessions__session_id__resource_bindings__resource_kind__upgrade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 从回收站恢复任务会话
+         * @description 根据传递的会话id恢复已软删除的任务会话
+         */
+        post: operations["restore_session_api_sessions__session_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2589,11 +2752,69 @@ export interface components {
              */
             max_retries: number;
         };
+        /** ApprovalInboxItem */
+        ApprovalInboxItem: {
+            /**
+             * Approval Id
+             * Format: uuid
+             */
+            approval_id: string;
+            /** Approval Kind */
+            approval_kind: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By User Id */
+            decided_by_user_id: string | null;
+            /** Decision */
+            decision: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Risk Summary */
+            risk_summary: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Entity Type */
+            source_entity_type: string;
+            /** Status */
+            status: string;
+            /**
+             * Subject Activity Id
+             * Format: uuid
+             */
+            subject_activity_id: string;
+            /** Subject Label */
+            subject_label: string;
+        };
+        /** ApprovalInboxResponse */
+        ApprovalInboxResponse: {
+            /** Items */
+            items: components["schemas"]["ApprovalInboxItem"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
         /**
          * ApprovalMode
          * @enum {string}
          */
         ApprovalMode: "never" | "policy" | "always";
+        /** ApprovalOperationsPolicy */
+        ApprovalOperationsPolicy: {
+            /**
+             * Ttl Minutes
+             * @default 1440
+             */
+            ttl_minutes: number;
+        };
         /** ApprovalOutcomes */
         ApprovalOutcomes: {
             /**
@@ -2650,12 +2871,21 @@ export interface components {
             /** Id */
             id: string;
             /**
+             * Is Shared
+             * @default false
+             */
+            is_shared: boolean;
+            /**
              * Kind
              * @enum {string}
              */
             kind: "doc" | "web";
             /** Session Id */
             session_id: string;
+            /** Share Expires At */
+            share_expires_at?: string | null;
+            /** Share Token Preview */
+            share_token_preview?: string | null;
             /**
              * Status
              * @enum {string}
@@ -2675,6 +2905,8 @@ export interface components {
         };
         /** ArtifactShareResponse */
         ArtifactShareResponse: {
+            /** Share Expires At */
+            share_expires_at?: string | null;
             /** Share Token */
             share_token: string;
             /** Share Url */
@@ -2908,7 +3140,7 @@ export interface components {
             expected_head_version: number;
             /** Note */
             note: string;
-            policy: components["schemas"]["ExecutionPolicy-Input"];
+            policy: components["schemas"]["ExecutionPolicy"];
         };
         /** CreateKnowledgeBaseRequest */
         CreateKnowledgeBaseRequest: {
@@ -2990,7 +3222,7 @@ export interface components {
             expected_head_version: number;
             /** Note */
             note: string;
-            policy: components["schemas"]["OperationsPolicy-Input"];
+            policy: components["schemas"]["OperationsPolicy"];
         };
         /** CreatePatrolPackRequest */
         CreatePatrolPackRequest: {
@@ -3285,18 +3517,10 @@ export interface components {
             stream_version: number;
         };
         /** ExecutionPolicy */
-        "ExecutionPolicy-Input": {
+        ExecutionPolicy: {
             activity?: components["schemas"]["ActivityExecutionPolicy"];
             agent?: components["schemas"]["AgentExecutionPolicy"];
-            knowledge_base?: components["schemas"]["KnowledgeBaseExecutionPolicy-Input"];
-            memory?: components["schemas"]["MemoryExecutionPolicy"];
-            model_resilience?: components["schemas"]["ModelResiliencePolicy"];
-        };
-        /** ExecutionPolicy */
-        "ExecutionPolicy-Output": {
-            activity?: components["schemas"]["ActivityExecutionPolicy"];
-            agent?: components["schemas"]["AgentExecutionPolicy"];
-            knowledge_base?: components["schemas"]["KnowledgeBaseExecutionPolicy-Output"];
+            knowledge_base?: components["schemas"]["KnowledgeBaseExecutionPolicy"];
             memory?: components["schemas"]["MemoryExecutionPolicy"];
             model_resilience?: components["schemas"]["ModelResiliencePolicy"];
         };
@@ -3327,7 +3551,7 @@ export interface components {
             id: string;
             /** Note */
             note: string;
-            policy: components["schemas"]["ExecutionPolicy-Output"];
+            policy: components["schemas"]["ExecutionPolicy"];
             /** Restored From Id */
             restored_from_id: string | null;
             /** Schema Version */
@@ -3797,21 +4021,7 @@ export interface components {
          */
         KBStatus: "pending" | "parsing" | "chunking" | "indexing" | "graph_building" | "ready" | "failed";
         /** KnowledgeBaseExecutionPolicy */
-        "KnowledgeBaseExecutionPolicy-Input": {
-            chunk?: components["schemas"]["KnowledgeChunkPolicy"];
-            document?: components["schemas"]["KnowledgeDocumentPolicy"];
-            graphrag?: components["schemas"]["KnowledgeGraphRagPolicy"];
-            ocr?: components["schemas"]["KnowledgeOcrPolicy"];
-            rerank?: components["schemas"]["KnowledgeRerankPolicy"];
-            retrieval?: components["schemas"]["KnowledgeRetrievalPolicy"];
-            /**
-             * Vector Enabled
-             * @default true
-             */
-            vector_enabled: boolean;
-        };
-        /** KnowledgeBaseExecutionPolicy */
-        "KnowledgeBaseExecutionPolicy-Output": {
+        KnowledgeBaseExecutionPolicy: {
             chunk?: components["schemas"]["KnowledgeChunkPolicy"];
             document?: components["schemas"]["KnowledgeDocumentPolicy"];
             graphrag?: components["schemas"]["KnowledgeGraphRagPolicy"];
@@ -4580,17 +4790,8 @@ export interface components {
             type: string;
         };
         /** OperationsPolicy */
-        "OperationsPolicy-Input": {
-            patrol?: components["schemas"]["PatrolOperationsPolicy"];
-            patrol_retention?: components["schemas"]["PatrolRetentionPolicy"];
-            resource_gc?: components["schemas"]["ResourceGcPolicy"];
-            sandbox?: components["schemas"]["SandboxOperationsPolicy"];
-            scheduler?: components["schemas"]["SchedulerPolicy"];
-            source_access?: components["schemas"]["SourceAccessPolicy"];
-            traffic?: components["schemas"]["TrafficPolicy"];
-        };
-        /** OperationsPolicy */
-        "OperationsPolicy-Output": {
+        OperationsPolicy: {
+            approval?: components["schemas"]["ApprovalOperationsPolicy"];
             patrol?: components["schemas"]["PatrolOperationsPolicy"];
             patrol_retention?: components["schemas"]["PatrolRetentionPolicy"];
             resource_gc?: components["schemas"]["ResourceGcPolicy"];
@@ -4626,7 +4827,7 @@ export interface components {
             id: string;
             /** Note */
             note: string;
-            policy: components["schemas"]["OperationsPolicy-Output"];
+            policy: components["schemas"]["OperationsPolicy"];
             /** Restored From Id */
             restored_from_id: string | null;
             /** Schema Version */
@@ -4811,28 +5012,7 @@ export interface components {
             remediation: components["schemas"]["PatrolRemediationMode"];
         };
         /** PatrolPackConfig */
-        "PatrolPackConfig-Input": {
-            /** Checks */
-            checks: components["schemas"]["PatrolCheck"][];
-            defaults?: components["schemas"]["PatrolDefaults"];
-            schedule?: components["schemas"]["PatrolSchedule"];
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
-            scope: components["schemas"]["PatrolScope"];
-            /** Target Ref */
-            target_ref: string;
-            /**
-             * Timezone
-             * @default UTC
-             */
-            timezone: string;
-        };
-        /** PatrolPackConfig */
-        "PatrolPackConfig-Output": {
+        PatrolPackConfig: {
             /** Checks */
             checks: components["schemas"]["PatrolCheck"][];
             defaults?: components["schemas"]["PatrolDefaults"];
@@ -4883,7 +5063,7 @@ export interface components {
         };
         /** PatrolPackResponse */
         PatrolPackResponse: {
-            config: components["schemas"]["PatrolPackConfig-Output"];
+            config: components["schemas"]["PatrolPackConfig"];
             /**
              * Created At
              * Format: date-time
@@ -5489,6 +5669,32 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["AdminUserResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[ApprovalInboxResponse] */
+        Response_ApprovalInboxResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["ApprovalInboxResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -7172,6 +7378,32 @@ export interface components {
              */
             msg: string;
         };
+        /** Response[RunHistoryListResponse] */
+        Response_RunHistoryListResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["RunHistoryListResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
         /** Response[ScheduledJobListResponse] */
         Response_ScheduledJobListResponse_: {
             /**
@@ -7686,6 +7918,32 @@ export interface components {
             expected_head_version: number;
             /** Note */
             note: string;
+        };
+        /** RunHistoryItem */
+        RunHistoryItem: {
+            /** Error */
+            error?: string | null;
+            /** Family */
+            family: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+        };
+        /** RunHistoryListResponse */
+        RunHistoryListResponse: {
+            /** Runs */
+            runs: components["schemas"]["RunHistoryItem"][];
         };
         /**
          * RunStatus
@@ -8391,6 +8649,11 @@ export interface components {
         /** TrafficPolicy */
         TrafficPolicy: {
             /**
+             * Auth Requests Per Minute
+             * @default 10
+             */
+            auth_requests_per_minute: number;
+            /**
              * Rate Limit Enabled
              * @default true
              */
@@ -8462,7 +8725,7 @@ export interface components {
         };
         /** UpdatePatrolPackRequest */
         UpdatePatrolPackRequest: {
-            config?: components["schemas"]["PatrolPackConfig-Input"] | null;
+            config?: components["schemas"]["PatrolPackConfig"] | null;
             /** Mcp Server Id */
             mcp_server_id?: string | null;
             /** Name */
@@ -9164,7 +9427,9 @@ export interface operations {
     };
     delete_team_admin_api_admin_teams__team_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                strategy?: string;
+            };
             header?: never;
             path: {
                 team_id: string;
@@ -9466,6 +9731,7 @@ export interface operations {
         parameters: {
             query?: {
                 strategy?: string;
+                team_id?: string | null;
             };
             header?: never;
             path: {
@@ -9620,6 +9886,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_DecideApprovalResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_approvals_api_approvals_get: {
+        parameters: {
+            query?: {
+                /** @description 按审批状态过滤；缺省返回全部状态 */
+                status?: ("pending" | "approved" | "rejected" | "cancelled" | "expired") | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ApprovalInboxResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -11202,6 +11504,40 @@ export interface operations {
             };
         };
     };
+    list_deleted_knowledge_bases_api_knowledge_bases_deleted_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ListKnowledgeBasesResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_knowledge_base_api_knowledge_bases__kb_id__get: {
         parameters: {
             query?: never;
@@ -11498,6 +11834,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_knowledge_base_api_knowledge_bases__kb_id__purge_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_knowledge_base_api_knowledge_bases__kb_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
                 };
             };
             /** @description Validation Error */
@@ -13133,6 +13535,42 @@ export interface operations {
             };
         };
     };
+    list_job_runs_api_scheduled_jobs__job_id__runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_RunHistoryListResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_job_now_api_scheduled_jobs__job_id__trigger_post: {
         parameters: {
             query?: never;
@@ -13259,6 +13697,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description 按标题/最新消息关键词过滤会话 */
+                q?: string | null;
             };
             header?: {
                 "X-Workspace-Id"?: string | null;
@@ -13323,11 +13763,47 @@ export interface operations {
             };
         };
     };
+    list_deleted_sessions_api_sessions_deleted_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ListSessionResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stream_sessions_api_sessions_stream_post: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description 按标题/最新消息关键词过滤会话 */
+                q?: string | null;
             };
             header?: {
                 "X-Workspace-Id"?: string | null;
@@ -13675,6 +14151,39 @@ export interface operations {
             };
         };
     };
+    purge_session_api_sessions__session_id__purge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_resource_bindings_api_sessions__session_id__resource_bindings_get: {
         parameters: {
             query?: never;
@@ -13767,6 +14276,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_UpgradeResourceBindingResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_session_api_sessions__session_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
                 };
             };
             /** @description Validation Error */
@@ -14226,7 +14768,9 @@ export interface operations {
     };
     delete_team_api_teams__team_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                strategy?: string;
+            };
             header?: never;
             path: {
                 team_id: string;

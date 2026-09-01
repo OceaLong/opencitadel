@@ -77,6 +77,10 @@ EXECUTION_REPLAY_FAILURES = Counter(
     "Replay, hash-chain and projection integrity failures",
     ("reason",),
 )
+EXECUTION_POISONED_RUNS = Counter(
+    "execution_poisoned_runs_total",
+    "Run projections quarantined for failing to decode during decisions",
+)
 
 
 class ExecutionMetrics:
@@ -205,11 +209,17 @@ def record_replay_failure(reason: str) -> None:
     EXECUTION_REPLAY_FAILURES.labels(reason=reason).inc()
 
 
+def record_poisoned_run() -> None:
+    EXECUTION_POISONED_RUNS.inc()
+
+
 __all__ = [
     "EXECUTION_ACTIVITY_ROWS",
     "EXECUTION_INBOX_ROWS",
+    "EXECUTION_POISONED_RUNS",
     "EXECUTION_PROJECTOR_CURSOR_LAG",
     "ExecutionMetrics",
     "record_optimistic_conflict",
+    "record_poisoned_run",
     "record_replay_failure",
 ]

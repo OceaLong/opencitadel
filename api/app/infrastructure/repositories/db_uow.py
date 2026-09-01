@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Self
@@ -50,6 +51,25 @@ from .db_user_repository import DBUserRepository
 
 logger = logging.getLogger(__name__)
 
+# Task-local guard against nested write Units of Work (P1-2). A write UoW opened
+# while another write UoW is already active *in the same asyncio task* checks out
+# a second connection from the same pool while the first is still held; under load
+# that exhausts the pool and deadlocks. ``contextvars`` gives us exactly the right
+# scope: a child task started via ``asyncio.create_task`` copies the context at
+# creation and mutates its own copy, so genuinely independent tasks never trip
+# this, while a synchronous nested ``async with uow`` (callbacks, service-in-
+# service reuse) does. Read-only UoWs are exempted (``read_only=True``) pending
+# the broader P1-8 ReadOnlyUnitOfWork rollout that would let query-side reads nest
+# safely; today no caller sets it, so the guard covers every write UoW.
+_active_write_uow: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "opencitadel_active_write_uow",
+    default=0,
+)
+
+
+class NestedUnitOfWorkError(UnitOfWorkStateError):
+    """Raised when a write Unit of Work is entered inside another in one task."""
+
 
 class DBUnitOfWork(IUnitOfWork):
     """基于Postgres数据库的UoW实例"""
@@ -66,11 +86,14 @@ class DBUnitOfWork(IUnitOfWork):
         database_authorization_signing_secret: str,
         authorization_context: AuthorizationContext | None = None,
         cleanup_timeout_seconds: float = 10.0,
+        read_only: bool = False,
     ) -> None:
         """构造函数，完成UoW类初始化"""
         if cleanup_timeout_seconds <= 0:
             raise ValueError("cleanup_timeout_seconds must be positive")
         self.session_factory = session_factory
+        self._read_only = read_only
+        self._nesting_guarded = False
         self._secret_cipher = secret_cipher
         self._audit_signing_key = audit_signing_key
         self._audit_signing_key_id = audit_signing_key_id
@@ -98,8 +121,15 @@ class DBUnitOfWork(IUnitOfWork):
     async def __aenter__(self) -> Self:
         """进入UoW操作上下文管理器的逻辑"""
         self._require_state(UnitOfWorkState.NEW)
+        # 0. Fail fast on a nested write UoW *before* checking out a connection,
+        # so the regression surfaces as a clear error rather than a pool stall.
+        self._enter_nesting_guard()
         # 1.为每个上下文开启一个新的会话
-        self.db_session = self.session_factory()
+        try:
+            self.db_session = self.session_factory()
+        except BaseException:
+            self._exit_nesting_guard()
+            raise
         self.state = UnitOfWorkState.ACTIVE
         self._active_authorization_context = (
             self.authorization_context or get_authorization_context()
@@ -111,6 +141,7 @@ class DBUnitOfWork(IUnitOfWork):
                 await self._finish_cleanup(self._close_session)
             finally:
                 self.state = UnitOfWorkState.CLOSED
+                self._exit_nesting_guard()
             raise
 
         # 2.初始化所有数据库仓库
@@ -190,6 +221,7 @@ class DBUnitOfWork(IUnitOfWork):
             except Exception as error:  # noqa: BLE001 - session cleanup boundary
                 cleanup_error = cleanup_error or error
             self.state = UnitOfWorkState.CLOSED
+            self._exit_nesting_guard()
 
         if cancellation is not None:
             raise cancellation
@@ -201,6 +233,30 @@ class DBUnitOfWork(IUnitOfWork):
                 type(exc_val).__name__,
                 cleanup_error,
             )
+
+    def _enter_nesting_guard(self) -> None:
+        if self._read_only:
+            return
+        if _active_write_uow.get() > 0:
+            raise NestedUnitOfWorkError(
+                "a write unit of work is already active in this task; "
+                "nesting a second write UoW checks out a second pooled connection "
+                "and risks pool exhaustion. Reuse the outer UoW or hoist the read "
+                "out of the write transaction."
+            )
+        # Set the flag directly (not via Token.reset): __aenter__ and __aexit__
+        # may run in different Contexts (e.g. a manually driven __aexit__ inside
+        # asyncio.create_task), and a Token can only be reset in the Context that
+        # created it. Because we raise above whenever the value is already > 0,
+        # the depth never exceeds 1, so a plain set(0) on exit is exact.
+        _active_write_uow.set(1)
+        self._nesting_guarded = True
+
+    def _exit_nesting_guard(self) -> None:
+        if not self._nesting_guarded:
+            return
+        self._nesting_guarded = False
+        _active_write_uow.set(0)
 
     def _require_state(self, expected: UnitOfWorkState) -> None:
         if self.state is not expected:

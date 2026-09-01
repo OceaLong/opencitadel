@@ -23,8 +23,11 @@ from app.domain.runtime_policy import (
 from app.infrastructure.adapters.redis_capabilities import RedisLeaseManager
 from app.infrastructure.external.scheduler.job_scheduler import (
     KNOWLEDGE_VERSION_GC_LEASE_KEY,
+    SCHEDULER_LEADER_KEY,
     run_knowledge_version_gc_tick,
     run_scheduler_loop,
+    run_under_renewed_lease,
+    try_become_scheduler_leader,
 )
 from tests.runtime_policy_support import MutablePolicyReader
 
@@ -551,3 +554,75 @@ async def test_two_workers_cannot_overlap_gc_past_original_lease_expiry():
 
     assert first.collected_version_ids == ("old-a",)
     assert redis.owner(KNOWLEDGE_VERSION_GC_LEASE_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_leader_lease_renewed_across_long_tick_blocks_peer():
+    """A leader tick that outlives one lease TTL keeps SCHEDULER_LEADER_KEY so a
+    peer replica cannot acquire leadership and double-trigger jobs (P1-4 双主)."""
+    redis = _ExactLeaseRedis()
+    leases = RedisLeaseManager(redis)
+    assert await try_become_scheduler_leader(leases, worker_id="worker-a", lease_seconds=0.12)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def long_leader_tick() -> None:
+        started.set()
+        await release.wait()
+
+    tick = asyncio.create_task(
+        run_under_renewed_lease(
+            long_leader_tick(),
+            leases=leases,
+            key=SCHEDULER_LEADER_KEY,
+            owner_token="worker-a",
+            lease_seconds=0.12,
+            lost_message="scheduler leader lease ended mid-tick",
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    # Exceed the lease TTL acquired at tick start; the keepalive must retain it.
+    await asyncio.sleep(0.2)
+    assert not await try_become_scheduler_leader(leases, worker_id="worker-b", lease_seconds=0.12)
+    assert redis.owner(SCHEDULER_LEADER_KEY) == "worker-a"
+    release.set()
+    await asyncio.wait_for(tick, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_leader_tick_aborts_when_lease_is_stolen_mid_flight():
+    """If the leader lease is lost mid-tick, run_under_renewed_lease cancels the
+    work and raises so the caller can abandon the tick without leadership."""
+    redis = _ExactLeaseRedis()
+    leases = RedisLeaseManager(redis)
+    assert await try_become_scheduler_leader(leases, worker_id="worker-a", lease_seconds=0.08)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def long_leader_tick() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    tick = asyncio.create_task(
+        run_under_renewed_lease(
+            long_leader_tick(),
+            leases=leases,
+            key=SCHEDULER_LEADER_KEY,
+            owner_token="worker-a",
+            lease_seconds=0.08,
+            lost_message="scheduler leader lease ended mid-tick",
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    # Steal the lease so worker-a's keepalive renew starts failing.
+    redis._values[SCHEDULER_LEADER_KEY] = (
+        "worker-b",
+        asyncio.get_running_loop().time() + 5,
+    )
+    with pytest.raises(RuntimeError, match="scheduler lease lost"):
+        await asyncio.wait_for(tick, timeout=1)
+    assert cancelled.is_set()

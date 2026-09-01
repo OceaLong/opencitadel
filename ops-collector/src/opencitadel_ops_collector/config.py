@@ -45,6 +45,11 @@ class CollectorSettings(BaseSettings):
     certificate_probes: dict[str, HttpTarget] = Field(default_factory=dict)
     backups: dict[str, BackupTarget] = Field(default_factory=dict)
     dependencies: dict[str, DependencyTarget | list[DependencyTarget]] = Field(default_factory=dict)
+    # Static bearer token (env OPS_COLLECTOR_TOKEN). Empty is only tolerated for
+    # stdio transport; every streamable-http process must present a strong token
+    # or refuse to start (see http_auth.require_http_token). Read-only probes are
+    # still gated to prevent unauthorized reconnaissance of the cluster.
+    token: str = Field(default="")
     transport: Literal["streamable-http", "stdio"] = "streamable-http"
     allow_stdio: bool = False
     host: str = "0.0.0.0"

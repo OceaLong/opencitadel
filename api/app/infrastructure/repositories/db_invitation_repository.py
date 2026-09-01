@@ -34,6 +34,20 @@ class DBInvitationRepository(InvitationRepository):
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
+    async def get_pending_platform_invitation(self, email: str) -> Invitation | None:
+        normalized_email = email.strip().lower()
+        now = datetime.now(UTC)
+        result = await self.db_session.execute(
+            select(InvitationORM).where(
+                InvitationORM.type == InvitationType.PLATFORM.value,
+                InvitationORM.email == normalized_email,
+                InvitationORM.accepted_at.is_(None),
+                InvitationORM.expires_at > now,
+            )
+        )
+        record = result.scalars().first()
+        return record.to_domain() if record else None
+
     async def list(
         self, invitation_type: InvitationType | None = None, limit: int = 100, offset: int = 0
     ) -> list[Invitation]:

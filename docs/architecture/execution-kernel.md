@@ -49,6 +49,29 @@ polling pending PostgreSQL rows.
 and activity projections, and `execution_public_events` are rebuildable. They
 may lag but cannot create facts or decide terminal state.
 
+## Horizontal scale and single-writer projection
+
+Multiple execution-kernel replicas run safely against the same database:
+
+- **Inbox `SKIP LOCKED`.** Command-inbox claiming uses `FOR UPDATE SKIP LOCKED`,
+  so replicas claim disjoint rows instead of contending on the same batch.
+- **Safe-watermark projection.** Projectors only advance over positions below a
+  stable snapshot watermark (`pg_snapshot_xmin`), so an event committed out of
+  order behind an in-flight transaction is never skipped. A per-owner-scope
+  `execution_scope_head` table records each scope's head position; pending-scope
+  discovery degrades to a `head > checkpoint` index lookup instead of scanning.
+- **Single-writer product state.** Execution-authoritative columns on product
+  tables (session/patrol status, `active_execution_run_id`, and similar) are
+  written only by the projector. Application services read the projection. Every
+  such projected row carries a `last_event_position` column and the projector's
+  `UPDATE` is guarded by `WHERE last_event_position IS NULL OR < :position`, so a
+  slow or duplicated projection can never overwrite newer state.
+- **Poison isolation.** A decision row that cannot be processed is quarantined
+  by `run_id` in `execution_poisoned_runs` and counted
+  (`execution_poisoned_runs_total`) rather than aborting the whole batch; each
+  control-plane lane also isolates its own failures so one lane cannot crash the
+  others.
+
 ## Run and Activity protocol
 
 Every production behavior is a `Run` in one of six families: `agent`, `ask`,

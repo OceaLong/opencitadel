@@ -51,6 +51,11 @@ spec:
               value: {{ .Values.opsCollector.registeredBackups | toJson | quote }}
             - name: OPS_COLLECTOR_DEPENDENCIES
               value: {{ .Values.opsCollector.registeredDependencies | toJson | quote }}
+            - name: OPS_COLLECTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "opencitadel.fullname" . }}-ops-collector-secret
+                  key: OPS_COLLECTOR_TOKEN
           readinessProbe:
             tcpSocket: {port: mcp}
           livenessProbe:

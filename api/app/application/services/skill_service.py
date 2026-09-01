@@ -205,10 +205,16 @@ class SkillService:
                 raise BadRequestError("全局 Skill 只能引用全局 A2A server")
 
     async def list_skills(
-        self, enabled_only: bool = False, scope: OwnerScope | None = None
+        self,
+        enabled_only: bool = False,
+        scope: OwnerScope | None = None,
+        *,
+        global_only: bool = False,
     ) -> list[Skill]:
         async with self._uow_factory() as uow:
-            return await uow.skill.get_all(enabled_only=enabled_only, scope=scope)
+            return await uow.skill.get_all(
+                enabled_only=enabled_only, scope=scope, global_only=global_only
+            )
 
     async def get_skill(self, skill_id: str, scope: OwnerScope | None = None) -> Skill:
         async with self._uow_factory() as uow:

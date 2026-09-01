@@ -49,14 +49,24 @@ At minimum, set strong distinct values for:
 - `API_KEY_SECRET_ID`, `API_KEY_SECRET`, `API_KEY_PREVIOUS_SECRETS`
 - `AUDIT_SIGNING_KEY_ID`, `AUDIT_SIGNING_KEY`, `AUDIT_PREVIOUS_SIGNING_KEYS`
 - `JWT_SECRET`, `SESSION_SECRET`
-- `SANDBOX_BROKER_TOKEN`
+- `SANDBOX_BROKER_TOKEN`, `SANDBOX_TOKEN_SEED`
 - `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS`
+
+`SANDBOX_TOKEN_SEED` is required and must be at least 32 random bytes in
+production; the API and execution kernel both derive each sandbox's data-plane
+token from it. `JWT_PREVIOUS_SECRETS` (default `{}`) and
+`DATABASE_AUTHORIZATION_SIGNING_SECRET` (default: reuse `SESSION_SECRET`) are
+optional and covered under *Configuration and secrets*. When you run the Ops
+Patrol Collector/Actuator, also set strong `OPS_COLLECTOR_TOKEN` and
+`OPS_ACTUATOR_TOKEN` values; each server refuses to start without one.
 
 Use at least 32 random bytes for cryptographic keys. Keep `COOKIE_SECURE=true`
 outside local HTTP development. Set `FRONTEND_BASE_URL` and
 `OAUTH_REDIRECT_BASE` to the public HTTPS origin, configure
 `TRUSTED_PROXY_CIDRS` precisely, and restrict `OUTBOUND_ALLOWED_PORTS` and
-`OUTBOUND_PRIVATE_HOST_ALLOWLIST`.
+`OUTBOUND_PRIVATE_HOST_ALLOWLIST`. In production `TRUSTED_PROXY_CIDRS` is
+validated at startup and rejects broad RFC1918 ranges that overlap the
+sandbox/pod network.
 
 ## Startup and recovery
 
@@ -104,7 +114,10 @@ Compose isolates Docker access in `opencitadel-sandbox-broker`. API and kernel
 receive only its narrow token-authenticated HTTP endpoint, never the Docker
 socket. On native Linux set `DOCKER_SOCK_GID` to the socket group. Kubernetes
 uses a dedicated execution-kernel ServiceAccount and restricted sandbox Pod
-RBAC. Keep the sandbox egress proxy and allowlist enabled.
+RBAC. Keep the Squid sandbox egress proxy and allowlist enabled. Each sandbox's
+data-plane token is derived as `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)` on both the
+API and kernel side; the seed never enters the sandbox container, so any replica
+can re-attach and authenticate without shared token state.
 
 ## Configuration and secrets
 
@@ -124,8 +137,15 @@ envelopes. For key rotation:
    new writes use the active key.
 5. Remove the old key only after no stored envelope uses its id.
 
-Rotate audit signing keys similarly with `AUDIT_PREVIOUS_SIGNING_KEYS`. Never
-log plaintext secrets or copy them into Runtime Policy.
+Rotate audit signing keys similarly with `AUDIT_PREVIOUS_SIGNING_KEYS`, and
+session JWTs with `JWT_PREVIOUS_SECRETS`: move the old key under its id into the
+previous map, set the new `JWT_SECRET`, and restart replicas; tokens still in
+flight keep validating until they expire. `DATABASE_AUTHORIZATION_SIGNING_SECRET`
+defaults to `SESSION_SECRET`, which keeps existing deployments and their seeded
+RLS `app.rls_signing_secret` value unchanged; set it to a distinct strong value
+only to split the DB authorization trust domain from the session cookie one, and
+rotate it in lockstep with the database's signing secret. Never log plaintext
+secrets or copy them into Runtime Policy.
 
 After bootstrap, configure endpoint, typed model, and purpose bindings through
 **Settings → Inference** or `/api/inference`. Chat, embedding, and rerank
@@ -164,7 +184,18 @@ Supply all secrets through a secret manager or protected values file. Keep
 and configure `executionKernel.replicas` plus its HPA for Activity volume.
 Optional Ops Collector and Actuator workloads must remain network-separated;
 the Actuator is reachable only from API/kernel and still requires a persisted
-approval.
+approval. Their RBAC is a namespaced `Role`/`RoleBinding` rendered per allowed
+namespace, not a cluster-wide `ClusterRole`.
+
+The chart ships the resilience and observability baseline as templates:
+per-workload `NetworkPolicy` objects (PostgreSQL, Redis, execution kernel, Ops
+Collector/Actuator, egress proxy, sandbox), PodDisruptionBudgets for the API and
+execution kernel, a Squid `egress-proxy` Deployment that confines sandbox
+outbound traffic to an allowlist, a PostgreSQL backup `CronJob`, and a
+`PrometheusRule` with alerts for approval timeouts, audit-chain verification
+failure, outbox lag, sandbox admission rejection, 5xx rate, and rate-limit
+rejections. The reverse proxy also sets HSTS/CSP/nosniff response headers and
+`server_tokens off`.
 
 For chart-managed PostgreSQL, `files/postgres/init-app-role.sh` creates the
 distinct migration, API, and kernel roles before the greenfield migration.

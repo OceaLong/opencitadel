@@ -55,3 +55,44 @@ def test_malformed_forwarded_chain_fails_closed_to_socket_peer():
         )
         == "10.0.0.2"
     )
+
+
+def test_single_trusted_layer_ignores_forged_leading_hops():
+    # One ingress proxy (10.0.0.9) appends the real peer it saw. A client that
+    # prepends extra forged XFF entries cannot impersonate them: the walk stops
+    # at the first untrusted hop from the right (the address the proxy appended).
+    request = _request("10.0.0.9", "8.8.8.8, 9.9.9.9, 203.0.113.7")
+
+    assert (
+        get_client_ip(
+            request,
+            trusted_proxy_cidrs=("10.0.0.9/32",),
+        )
+        == "203.0.113.7"
+    )
+
+
+def test_no_forwarded_header_uses_socket_peer():
+    request = _request("10.0.0.2")
+
+    assert (
+        get_client_ip(
+            request,
+            trusted_proxy_cidrs=("10.0.0.0/8",),
+        )
+        == "10.0.0.2"
+    )
+
+
+def test_untrusted_peer_with_narrow_config_uses_socket_peer():
+    # A sandbox dialing the API directly is not within the (narrow) ingress CIDR,
+    # so its forged X-Forwarded-For is disregarded and the socket peer wins.
+    request = _request("172.20.0.5", "1.2.3.4")
+
+    assert (
+        get_client_ip(
+            request,
+            trusted_proxy_cidrs=("10.0.0.9/32",),
+        )
+        == "172.20.0.5"
+    )

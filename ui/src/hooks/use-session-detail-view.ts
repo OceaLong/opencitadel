@@ -124,6 +124,18 @@ export function useSessionDetailView({
     previewTool !== null ||
     (sessionArtifacts.length > 0 && !artifactsPreviewDismissed);
 
+  // Artifacts only change when a build activity reports or the run completes.
+  // Keying the refetch effect on `events.length` re-fetched artifacts once per
+  // streamed SSE event (e.g. 300 events => 300 GETs); this signal advances only
+  // on `resource_build`/`done` events so the effect fires event-driven instead.
+  const artifactBuildSignal = useMemo(() => {
+    let signal = 0;
+    for (const ev of events) {
+      if (ev.type === "resource_build" || ev.type === "done") signal += 1;
+    }
+    return signal;
+  }, [events]);
+
   useEffect(() => {
     let cancelled = false;
     void artifactsApi
@@ -147,7 +159,7 @@ export function useSessionDetailView({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, events.length, session?.status]);
+  }, [sessionId, artifactBuildSignal, session?.status]);
 
   const resolvedPreviewTool = useMemo(() => {
     if (!previewTool) return null;

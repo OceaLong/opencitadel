@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy import case, delete, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.execution import FormalProjectorResult
@@ -25,6 +30,7 @@ from app.domain.execution.serialization import (
     canonical_state_hash,
 )
 from app.domain.models.authorization import AuthorizationContext
+from app.domain.models.notification import Notification
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.infrastructure.execution.models import (
     ExecutionActivityProjectionORM,
@@ -43,10 +49,74 @@ from app.infrastructure.models.patrol import (
     PatrolRunModel,
 )
 from app.infrastructure.models.session import SessionModel
+from app.infrastructure.repositories.db_notification_repository import DBNotificationRepository
 from app.infrastructure.security.db_authorization import configure_session_authorization
+
+logger = logging.getLogger(__name__)
 
 _CHECKPOINT_NAME = "formal"
 _CHECKPOINT_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ApprovalWaitingNotice:
+    """One approval that just entered the pending state and needs a reviewer."""
+
+    user_id: str
+    approval_id: UUID
+    run_id: UUID
+    session_id: str | None
+    subject_label: str
+
+
+@runtime_checkable
+class ApprovalNotifierPort(Protocol):
+    """Collaborator that turns a projected approval fact into a reviewer ping."""
+
+    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None: ...
+
+
+class PostgresApprovalNotifier:
+    """Persist an ``approval_waiting`` notification and publish a realtime hint.
+
+    Runs entirely outside the projection transaction: a failure here is logged
+    and swallowed so it can never stall or corrupt the durable projection. The
+    projector's system authorization scope is reused so the cross-tenant insert
+    into ``notifications`` passes row-level security.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_factory: async_sessionmaker[AsyncSession],
+        authorization: AuthorizationContext,
+        publisher: object | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._authorization = authorization
+        self._publisher = publisher
+
+    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None:
+        notification = Notification(
+            user_id=notice.user_id,
+            type="approval_waiting",
+            message=f"审批等待处理：{notice.subject_label}",
+            i18n_key="notifications.approvalWaiting",
+            i18n_params={"subject": notice.subject_label},
+            session_id=notice.session_id,
+        )
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            await DBNotificationRepository(session).save(notification)
+            await session.commit()
+        if self._publisher is not None:
+            try:
+                await self._publisher.publish(
+                    notice.user_id,
+                    json.dumps(notification.model_dump(mode="json")),
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                logger.warning("审批通知 Redis 发布失败 user=%s: %s", notice.user_id, exc)
 
 
 class PostgresFormalProjector:
@@ -55,9 +125,11 @@ class PostgresFormalProjector:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         authorization: AuthorizationContext,
+        notifier: ApprovalNotifierPort | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._authorization = authorization
+        self._notifier = notifier
         self._aggregate = RunAggregate()
 
     async def run_once(
@@ -66,10 +138,12 @@ class PostgresFormalProjector:
         *,
         limit: int,
         through_position: int | None = None,
+        notify: bool = True,
     ) -> FormalProjectorResult:
         if limit <= 0:
             raise ValueError("limit must be positive")
         key, owner_user_id, team_id = self._scope_parts(owner_scope)
+        notices: list[ApprovalWaitingNotice] = []
         async with self._session_factory() as session:
             try:
                 await configure_session_authorization(session, self._authorization)
@@ -84,7 +158,7 @@ class PostgresFormalProjector:
                     through_position=through_position,
                 )
                 for event in events:
-                    await self._project_event(session, event)
+                    await self._project_event(session, event, notices)
                     last_position = event.position
                 self._write_checkpoint(
                     session,
@@ -98,10 +172,34 @@ class PostgresFormalProjector:
             except (OSError, RuntimeError, ValueError):
                 await session.rollback()
                 raise
+        # Notifications are dispatched only after the projection is durably
+        # committed, and never during a rebuild (which replays history). A
+        # notifier failure must not fail the projection, so it is isolated.
+        if notify:
+            await self._dispatch_approval_notices(notices)
         return FormalProjectorResult(
             processed=len(events),
             last_position=last_position,
         )
+
+    async def _dispatch_approval_notices(
+        self,
+        notices: list[ApprovalWaitingNotice],
+    ) -> None:
+        if self._notifier is None:
+            return
+        for notice in notices:
+            try:
+                await self._notifier.approval_waiting(notice)
+            except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
+                # The projection is already committed; a reviewer ping is
+                # best-effort and must never fail (or retry) the projection.
+                logger.warning(
+                    "审批等待通知失败 approval=%s user=%s: %s",
+                    notice.approval_id,
+                    notice.user_id,
+                    exc,
+                )
 
     async def rebuild(
         self,
@@ -141,6 +239,7 @@ class PostgresFormalProjector:
                 owner_scope,
                 limit=batch_size,
                 through_position=target,
+                notify=False,
             )
             processed += batch.processed
             last_position = batch.last_position
@@ -155,6 +254,7 @@ class PostgresFormalProjector:
         self,
         session: AsyncSession,
         event: StoredEvent,
+        notices: list[ApprovalWaitingNotice],
     ) -> None:
         run_state: RunState | None = None
         if event.stream_type == "run":
@@ -162,7 +262,37 @@ class PostgresFormalProjector:
             await self._project_activity(session, event, run_state)
             await self._project_approval(session, event, run_state)
             await self._project_resource_build(session, event, run_state)
+            self._collect_approval_notice(event, run_state, notices)
         await self._project_public_event(session, event, run_state)
+
+    @staticmethod
+    def _collect_approval_notice(
+        event: StoredEvent,
+        run_state: RunState,
+        notices: list[ApprovalWaitingNotice],
+    ) -> None:
+        if event.event_type != "ApprovalRequested":
+            return
+        # Personal-scope runs notify their owner. Team-scope runs carry no single
+        # reviewer identity here; owner_user_id may still be set (the initiating
+        # user), so notify that. TODO(E3): fan out to all team reviewers when the
+        # run is purely team-owned (owner_user_id is None).
+        user_id = event.owner_user_id
+        if not user_id:
+            return
+        payload = event.public_payload
+        session_id = (
+            run_state.source_entity_id if run_state.source_entity_type == "session" else None
+        )
+        notices.append(
+            ApprovalWaitingNotice(
+                user_id=user_id,
+                approval_id=UUID(str(payload["approval_id"])),
+                run_id=run_state.run_id,
+                session_id=session_id,
+                subject_label=str(payload["subject_label"]),
+            )
+        )
 
     async def _project_run(
         self,
@@ -234,7 +364,13 @@ class PostgresFormalProjector:
                 if event.owner_user_id is not None
                 else SessionModel.team_id == event.team_id
             )
-            session_values: dict[str, object] = {"status": session_status}
+            session_values: dict[str, object] = {
+                "status": session_status,
+                # Optimistic monotonic guard: never let a replayed/out-of-order
+                # older event regress the session's execution status. Paired with
+                # the WHERE last_event_position guard below.
+                "last_event_position": event.position,
+            }
             if state.status in {
                 RunStatus.COMPLETED,
                 RunStatus.FAILED,
@@ -254,6 +390,10 @@ class PostgresFormalProjector:
                     or_(
                         SessionModel.active_execution_run_id.is_(None),
                         SessionModel.active_execution_run_id == state.run_id,
+                    ),
+                    or_(
+                        SessionModel.last_event_position.is_(None),
+                        SessionModel.last_event_position < event.position,
                     ),
                 )
                 .values(**session_values)
@@ -299,6 +439,10 @@ class PostgresFormalProjector:
                     PatrolPackModel.id.in_(pack_scope),
                     PatrolPackModel.status == "validating",
                     PatrolPackModel.validation_run_id == str(state.run_id),
+                    or_(
+                        PatrolPackModel.last_event_position.is_(None),
+                        PatrolPackModel.last_event_position < event.position,
+                    ),
                 )
                 .values(
                     status="invalid",
@@ -314,6 +458,7 @@ class PostgresFormalProjector:
                         "enabled_tools": [],
                         "dry_run": {},
                     },
+                    last_event_position=event.position,
                     updated_at=event.occurred_at,
                 )
             )
@@ -330,6 +475,10 @@ class PostgresFormalProjector:
                     PatrolRunModel.id == state.source_entity_id,
                     PatrolRunModel.pack_id.in_(pack_scope),
                     PatrolRunModel.status.in_(("queued", "running")),
+                    or_(
+                        PatrolRunModel.last_event_position.is_(None),
+                        PatrolRunModel.last_event_position < event.position,
+                    ),
                 )
                 .values(
                     status=product_status,
@@ -340,6 +489,7 @@ class PostgresFormalProjector:
                             "Formal execution terminated before Patrol result finalization"
                         ),
                     },
+                    last_event_position=event.position,
                     updated_at=event.occurred_at,
                 )
             )
@@ -364,6 +514,10 @@ class PostgresFormalProjector:
                 PatrolRemediationModel.id == remediation_id,
                 PatrolRemediationModel.run_id.in_(owned_patrol_runs),
                 PatrolRemediationModel.status.in_(("proposed", "executing")),
+                or_(
+                    PatrolRemediationModel.last_event_position.is_(None),
+                    PatrolRemediationModel.last_event_position < event.position,
+                ),
             )
             .values(
                 status=product_status,
@@ -371,6 +525,7 @@ class PostgresFormalProjector:
                 error_message=(
                     "Formal remediation execution terminated before a durable outcome was recorded"
                 ),
+                last_event_position=event.position,
                 updated_at=event.occurred_at,
             )
         )
@@ -511,7 +666,29 @@ class PostgresFormalProjector:
                 )
             )
             return
+        if event.event_type == "ApprovalExpired":
+            payload = event.public_payload
+            await session.execute(
+                update(ExecutionApprovalProjectionORM)
+                .where(
+                    ExecutionApprovalProjectionORM.approval_id == UUID(str(payload["approval_id"])),
+                    ExecutionApprovalProjectionORM.run_id == run_state.run_id,
+                    ExecutionApprovalProjectionORM.status == "pending",
+                )
+                .values(
+                    status="expired",
+                    decision="expired",
+                    decided_by_user_id=None,
+                    feedback="",
+                    decision_event_position=event.position,
+                    decided_at=event.occurred_at,
+                )
+            )
+            return
         if event.event_type in {"RunCompleted", "RunFailed", "RunCancelled"}:
+            # An expiry emits ApprovalExpired *then* RunCancelled; the approval is
+            # already 'expired' (no longer pending) by the time this runs, so this
+            # blanket cancel only touches approvals still genuinely pending.
             await session.execute(
                 update(ExecutionApprovalProjectionORM)
                 .where(
@@ -610,7 +787,13 @@ class PostgresFormalProjector:
             )
             await session.execute(
                 update(KnowledgeBaseModel)
-                .where(KnowledgeBaseModel.id == values["resource_id"])
+                .where(
+                    KnowledgeBaseModel.id == values["resource_id"],
+                    or_(
+                        KnowledgeBaseModel.last_event_position.is_(None),
+                        KnowledgeBaseModel.last_event_position < event.position,
+                    ),
+                )
                 .values(
                     status=case(
                         (
@@ -620,6 +803,7 @@ class PostgresFormalProjector:
                         else_="failed",
                     ),
                     error=error_code,
+                    last_event_position=event.position,
                     updated_at=event.occurred_at,
                 )
             )
@@ -896,4 +1080,9 @@ class PostgresFormalProjector:
         return value if isinstance(value, str) and value else None
 
 
-__all__ = ["PostgresFormalProjector"]
+__all__ = [
+    "ApprovalNotifierPort",
+    "ApprovalWaitingNotice",
+    "PostgresApprovalNotifier",
+    "PostgresFormalProjector",
+]

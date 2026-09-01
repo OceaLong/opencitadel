@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   auth: { loading: true, user: null as { id: string } | null },
   list: vi.fn(),
   markRead: vi.fn(),
-  streamUrl: vi.fn(() => "/api/notifications/stream"),
+  stream: vi.fn(),
   close: vi.fn(),
 }));
 
@@ -22,7 +22,7 @@ vi.mock("@/lib/api/notifications", () => ({
   notificationsApi: {
     list: mocks.list,
     markRead: mocks.markRead,
-    streamUrl: mocks.streamUrl,
+    stream: mocks.stream,
   },
 }));
 
@@ -31,20 +31,6 @@ vi.mock("@/providers/auth-provider", () => ({
 }));
 
 import { NotificationInbox } from "./notification-inbox";
-
-class EventSourceStub {
-  static instances: EventSourceStub[] = [];
-
-  constructor(public readonly url: string) {
-    EventSourceStub.instances.push(this);
-  }
-
-  addEventListener() {}
-
-  close() {
-    mocks.close();
-  }
-}
 
 async function rerender(root: Awaited<ReturnType<typeof renderComponent>>["root"]) {
   await act(async () => {
@@ -58,13 +44,13 @@ describe("NotificationInbox authentication lifecycle", () => {
     mocks.auth.loading = true;
     mocks.auth.user = null;
     mocks.list.mockResolvedValue({ notifications: [], unread_count: 0 });
-    EventSourceStub.instances = [];
-    vi.stubGlobal("EventSource", EventSourceStub);
+    // stream() returns a cleanup fn; it never fires onError/onComplete here,
+    // so no reconnect is scheduled and it opens exactly once per user.
+    mocks.stream.mockReturnValue(mocks.close);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-    vi.unstubAllGlobals();
     document.body.replaceChildren();
   });
 
@@ -72,17 +58,17 @@ describe("NotificationInbox authentication lifecycle", () => {
     const { root, unmount } = await renderComponent(<NotificationInbox />);
 
     expect(mocks.list).not.toHaveBeenCalled();
-    expect(EventSourceStub.instances).toHaveLength(0);
+    expect(mocks.stream).not.toHaveBeenCalled();
 
     mocks.auth.loading = false;
     await rerender(root);
     expect(mocks.list).not.toHaveBeenCalled();
-    expect(EventSourceStub.instances).toHaveLength(0);
+    expect(mocks.stream).not.toHaveBeenCalled();
 
     mocks.auth.user = { id: "user-1" };
     await rerender(root);
     expect(mocks.list).toHaveBeenCalledTimes(1);
-    expect(EventSourceStub.instances).toHaveLength(1);
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
 
     mocks.auth.user = null;
     await rerender(root);

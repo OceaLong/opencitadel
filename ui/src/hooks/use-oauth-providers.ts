@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { authApi } from "@/lib/api/auth";
+
 /**
  * Enabled OAuth providers, resolved from the backend. SSO buttons must be
  * hidden when the provider has no configured client id/secret -- otherwise the
@@ -12,12 +14,11 @@ export function useEnabledOAuthProviders(): Set<string> {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/oauth/providers", { credentials: "same-origin" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body) => {
-        const data = body?.data;
+    authApi
+      .oauthProviders()
+      .then((data) => {
         if (active && Array.isArray(data)) {
-          setProviders(new Set(data as string[]));
+          setProviders(new Set(data));
         }
       })
       .catch(() => {

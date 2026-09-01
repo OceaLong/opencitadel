@@ -15,6 +15,15 @@ spec:
         app.kubernetes.io/component: execution-kernel
     spec:
       terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: execution-kernel
+      {{- end }}
       {{- if .Values.rbac.create }}
       serviceAccountName: {{ include "opencitadel.fullname" . }}-execution-kernel
       {{- end }}
@@ -65,11 +74,19 @@ spec:
             - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
               value: {{ .Values.shutdown.timeoutSeconds | quote }}
             {{- range $key, $value := .Values.env }}
-            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
             {{- end }}
+            # Sandbox egress proxy: injected via helper so it resolves to the
+            # in-cluster egress-proxy Service when egressProxy.enabled.
+            - name: SANDBOX_HTTP_PROXY
+              value: {{ include "opencitadel.sandboxHttpProxy" . | quote }}
+            - name: SANDBOX_HTTPS_PROXY
+              value: {{ include "opencitadel.sandboxHttpsProxy" . | quote }}
+            - name: SANDBOX_CHROME_ARGS
+              value: {{ include "opencitadel.sandboxChromeArgs" . | quote }}
             - name: POSTGRES_USER
               value: {{ .Values.executionKernel.databaseUser | quote }}
             - name: POSTGRES_PASSWORD

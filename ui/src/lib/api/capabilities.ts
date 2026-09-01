@@ -12,6 +12,7 @@ export const CAPABILITY_NAMES = [
   "a2a",
   "ops_patrol",
   "ops_patrol_remediation",
+  "report_pdf",
 ] as const;
 
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];

@@ -58,6 +58,15 @@ Approval 是带稳定 Run/Approval/Subject Activity 身份的正式 Event 与 Pr
 Endpoint 记录 Actor、Status、Time 与 Feedback。Reject、Expiry、Cancellation、重复 Decision、
 错误 Owner 的 Decision 都不会调用 Provider。
 
+审批是闭环，而非无限等待：
+
+- **收件箱。** `GET /api/approvals?status=pending` 列出调用方的待审批（也可选
+  `approved`/`rejected`/`cancelled`/`expired`），审阅者可在一个队列中找到跨 Run 的全部请求。
+- **通知。** Run 触发 `ApprovalRequested` 时，正式投影器发送持久通知，审阅者无需轮询即被提醒。
+- **超时。** 请求审批时会调度一个持久的自取消超时命令。触发后审批进入终态 `expired`
+  （`ApprovalExpired` Event），Run 离开等待状态，且绝不调用 Provider。窗口由 Operations
+  Policy 的 `approval.ttl_minutes` 字段（默认一天）控制，而非环境变量。
+
 ## Invocation 安全
 
 每个 Tool Request 都有唯一 Activity/Invocation Identity。两次有意的同参调用不会合并为一个

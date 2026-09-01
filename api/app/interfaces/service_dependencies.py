@@ -19,6 +19,7 @@ from app.application.ports.streams import (
 )
 from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
+from app.application.services.approval_inbox_service import ApprovalInboxService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.auth_service import AuthService
@@ -327,3 +328,11 @@ def get_governance_overview_service(
     runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> GovernanceOverviewService:
     return runtime.governance_overview_service
+
+
+def get_approval_inbox_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ApprovalInboxService:
+    # A stateless read-model wrapper over the shared run projection; cheap to
+    # build per request, so it needs no slot in the runtime bundle.
+    return ApprovalInboxService(run_projection=runtime.run_projection)

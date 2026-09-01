@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { ShieldCheck, ShieldX } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -25,6 +25,7 @@ function statusVariant(status: string): "success" | "destructive" | "secondary" 
 
 export function GovernanceProfileView({ profile }: Props) {
   const t = useTranslations("governanceProfile");
+  const locale = useLocale();
   const { session, chain, runs, approvals, activities } = profile;
 
   return (
@@ -85,7 +86,7 @@ export function GovernanceProfileView({ profile }: Props) {
               <Badge variant="outline">{run.family}</Badge>
               <span className="font-mono text-xs">{run.run_id}</span>
             </div>
-            <p className="text-muted-foreground mt-2 text-xs">{formatDateTime(run.created_at)}</p>
+            <p className="text-muted-foreground mt-2 text-xs">{formatDateTime(run.created_at, locale)}</p>
           </li>
         ))}
       </TimelineCard>
@@ -103,7 +104,7 @@ export function GovernanceProfileView({ profile }: Props) {
                 {t("actor")}: {approval.decided_by_user_id ?? "—"}
               </span>
               <span>
-                {t("time")}: {formatDateTime(approval.requested_at)}
+                {t("time")}: {formatDateTime(approval.requested_at, locale)}
               </span>
               <span className="sm:col-span-2">
                 {t("risk")}: {approval.risk_summary}
@@ -131,7 +132,7 @@ export function GovernanceProfileView({ profile }: Props) {
                 {t("attempt")}: {activity.attempt}
               </span>
               <span>
-                {t("time")}: {formatDateTime(activity.created_at)}
+                {t("time")}: {formatDateTime(activity.created_at, locale)}
               </span>
               {activity.failure_code ? (
                 <span>

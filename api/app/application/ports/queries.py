@@ -109,6 +109,38 @@ class ResourceBuildView:
     terminal_at: datetime | None
 
 
+@dataclass(frozen=True)
+class ApprovalInboxEntry:
+    """One projected approval for a reviewer's inbox."""
+
+    approval_id: UUID
+    run_id: UUID
+    source_entity_type: str
+    source_entity_id: str
+    approval_kind: str
+    subject_activity_id: UUID
+    subject_label: str
+    risk_summary: str
+    status: str
+    decision: str | None
+    decided_by_user_id: str | None
+    requested_at: datetime
+    decided_at: datetime | None
+
+
+@dataclass(frozen=True)
+class RunHistoryEntry:
+    """One projected execution Run for a source entity's run history."""
+
+    run_id: UUID
+    family: str
+    status: RunStatus
+    created_at: datetime
+    updated_at: datetime
+    terminal_at: datetime | None
+    failure_code: str | None
+
+
 @runtime_checkable
 class AuditSummaryQueryPort(Protocol):
     async def summarize(
@@ -215,6 +247,15 @@ class RunProjectionPort(Protocol):
 
     async def approval_stats(self, since: datetime) -> dict[str, Any]: ...
 
+    async def list_approvals(
+        self,
+        *,
+        owner_scope: OwnerScope,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[ApprovalInboxEntry, ...]: ...
+
     async def execution_metrics(
         self,
         *,
@@ -231,6 +272,16 @@ class RunProjectionPort(Protocol):
         source_entity_id: str,
         owner_scope: OwnerScope | None,
     ) -> dict[str, Any]: ...
+
+    async def list_runs_for_source(
+        self,
+        *,
+        source_entity_type: str,
+        source_entity_id: str,
+        owner_scope: OwnerScope,
+        limit: int,
+        offset: int,
+    ) -> tuple[RunHistoryEntry, ...]: ...
 
     async def resource_build(
         self,

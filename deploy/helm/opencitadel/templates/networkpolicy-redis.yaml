@@ -1,0 +1,27 @@
+{{- if and .Values.redis.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-redis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: redis
+  policyTypes: [Ingress]
+  # 仅允许 api / execution-kernel 访问 6379。ops-collector 为只读巡检组件，
+  # 其 egress 含 6379，启用时一并放行。
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - "api"
+                  - "execution-kernel"
+                  {{- if .Values.opsCollector.enabled }}
+                  - "ops-collector"
+                  {{- end }}
+      ports:
+        - {protocol: TCP, port: 6379}
+{{- end }}

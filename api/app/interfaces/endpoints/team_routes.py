@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Response as StarletteResponse
 
 from app.application.ports.crypto import CookieManagerPort
+from app.application.services.audit_service import AuditService
 from app.application.services.auth_service import AuthService
 from app.application.services.team_service import TeamService
+from app.domain.models.audit_log import AuditLog
 from app.interfaces.auth_dependencies import get_current_principal
 from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
@@ -20,6 +22,7 @@ from app.interfaces.schemas.team import (
     UpdateTeamMemberRoleRequest,
 )
 from app.interfaces.service_dependencies import (
+    get_audit_service,
     get_auth_service,
     get_cookie_manager,
     get_team_service,
@@ -153,10 +156,30 @@ async def accept_invitation(
 @router.delete("/{team_id}", response_model=Response[None])
 async def delete_team(
     team_id: str,
+    request: Request,
+    strategy: str = Query("transfer_to_owner", pattern="^(cascade|transfer_to_owner)$"),
     principal=Depends(get_current_principal),
     service: TeamService = Depends(get_team_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[None]:
-    await service.delete_team(team_id=team_id, actor_user_id=principal.user_id)
+    result = await service.delete_team(
+        team_id=team_id, actor_user_id=principal.user_id, strategy=strategy
+    )
+    await audit_service.record(
+        AuditLog(
+            actor_user_id=principal.user_id,
+            actor_ip=get_client_ip(request),
+            action="team.delete",
+            resource_type="team",
+            resource_id=team_id,
+            request_id=request.headers.get("x-request-id") or "",
+            metadata={
+                "strategy": result.strategy,
+                "affected_resources": result.affected_resources,
+                "transferred_to_user_id": result.transferred_to_user_id,
+            },
+        ),
+    )
     return Response.success()
 
 

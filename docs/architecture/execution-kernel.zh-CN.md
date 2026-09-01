@@ -40,6 +40,23 @@ Execution Kernel 进程认领数据库工作，调用注册的 Activity Handler�
 `execution_run_projection`、`execution_resource_build_projection`、审批与 Activity 投影以及
 `execution_public_events` 都可重建。它们可以短暂落后，但不能产生事实或决定终态。
 
+## 水平扩展与单一写者投影
+
+多个执行内核副本可安全地对同一数据库运行：
+
+- **Inbox `SKIP LOCKED`。** Command Inbox 认领使用 `FOR UPDATE SKIP LOCKED`，副本认领互不
+  相交的行，而非争抢同一批。
+- **安全水位投影。** 投影器只推进到稳定快照水位（`pg_snapshot_xmin`）以下的 Position，因此
+  在途事务后乱序提交的事件绝不会被跳过。按 Owner Scope 的 `execution_scope_head` 表记录各
+  Scope 的 Head Position；待处理 Scope 发现退化为 `head > checkpoint` 索引查询而非扫描。
+- **产品状态单一写者。** 产品表上的执行权威列（Session/Patrol 状态、
+  `active_execution_run_id` 等）只由投影器写入，应用服务读投影。每个此类投影行带
+  `last_event_position` 列，投影器的 `UPDATE` 由 `WHERE last_event_position IS NULL OR <
+  :position` 守卫，慢或重复的投影绝不会覆盖更新的状态。
+- **毒行隔离。** 无法处理的 Decision 行按 `run_id` 隔离到 `execution_poisoned_runs` 并计数
+  （`execution_poisoned_runs_total`），而不作废整批；每个控制面 Lane 也隔离自身失败，一个
+  Lane 不会拖垮其他 Lane。
+
 ## Run 与 Activity 协议
 
 所有生产行为都属于六类 Run：`agent`、`ask`、`kb_ingest`、

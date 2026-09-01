@@ -43,6 +43,19 @@ _OPERATOR_ALLOWABLE_PRIVATE_NETWORKS = tuple(
         "fc00::/7",
     )
 )
+# Address-translation / relay ranges that Python's ``is_global`` reports as
+# public but which route onto private, link-local or metadata space and must
+# always be rejected. NAT64 lets ``[64:ff9b::a9fe:a9fe]`` resolve to
+# 169.254.169.254, and 6to4 relay anycast bridges to reserved space. IPv4
+# addresses embedded in IPv6 (NAT64 / IPv4-mapped) are unwrapped separately in
+# ``_effective_ip`` so the existing private-range rules apply to them too.
+_TRANSLATION_BLOCKED_NETWORKS = tuple(
+    ipaddress.ip_network(value)
+    for value in (
+        "64:ff9b::/96",  # NAT64 well-known prefix (RFC 6052)
+        "192.88.99.0/24",  # 6to4 relay anycast (RFC 7526)
+    )
+)
 
 
 class OutboundURLRejected(ValueError):
@@ -115,6 +128,20 @@ def _resolve_addresses(
     return tuple(addresses)
 
 
+def _effective_ip(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Unwrap an IPv4-mapped IPv6 address (``::ffff:0:0/96``) to its IPv4 form.
+
+    Python treats IPv4-mapped addresses like ``::ffff:169.254.169.254`` as
+    IPv6, so the embedded IPv4 must be recovered before the private-range rules
+    below can recognise it.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
 def _ensure_safe_addresses(
     hostname: str,
     addresses: Iterable[str],
@@ -127,12 +154,21 @@ def _ensure_safe_addresses(
     )
     for address in addresses:
         ip = ipaddress.ip_address(address)
-        if ip.is_global:
+        effective_ip = _effective_ip(ip)
+        for candidate in {ip, effective_ip}:
+            if any(
+                candidate.version == network.version and candidate in network
+                for network in _TRANSLATION_BLOCKED_NETWORKS
+            ):
+                raise OutboundURLRejected(
+                    f"不允许访问 NAT64/6to4 等地址转换或中继范围: {hostname} ({ip})"
+                )
+        if effective_ip.is_global:
             continue
         if not private_allowed:
             raise OutboundURLRejected(f"不允许访问内网、本地、保留或元数据地址: {hostname} ({ip})")
         if not any(
-            ip.version == network.version and ip in network
+            effective_ip.version == network.version and effective_ip in network
             for network in _OPERATOR_ALLOWABLE_PRIVATE_NETWORKS
         ):
             raise OutboundURLRejected(

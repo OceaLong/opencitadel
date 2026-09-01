@@ -42,6 +42,7 @@ type JobsTableProps = {
   onDelete: (job: ScheduledJob) => void;
   onToggle: (job: ScheduledJob, enabled: boolean) => void;
   onRunNow: (job: ScheduledJob) => void;
+  onViewRuns: (job: ScheduledJob) => void;
   onRotateSecret: (job: ScheduledJob) => void;
   webhookUrl: (token: string) => string;
   togglingJobId: string | null;
@@ -57,6 +58,7 @@ export function JobsTable({
   onDelete,
   onToggle,
   onRunNow,
+  onViewRuns,
   onRotateSecret,
   webhookUrl,
   togglingJobId,
@@ -169,6 +171,9 @@ export function JobsTable({
                     )}
                   </Button>
                 )}
+                <Button variant="ghost" size="sm" onClick={() => onViewRuns(job)}>
+                  {t("runsAction")}
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => onEdit(job)}>
                   {t("editJob")}
                 </Button>

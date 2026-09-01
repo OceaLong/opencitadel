@@ -48,6 +48,7 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(file_routes.router)
     authenticated_router.include_router(session_routes.router)
     authenticated_router.include_router(approval_routes.router)
+    authenticated_router.include_router(approval_routes.inbox_router)
     authenticated_router.include_router(resource_binding_routes.router)
     authenticated_router.include_router(runtime_policy_routes.router)
     authenticated_router.include_router(integration_routes.router)

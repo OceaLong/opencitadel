@@ -41,6 +41,10 @@ Command Transaction 提交前验证 Resource Access 并绑定具体 Active Versi
 把 Terminal Run State 投影到 Summary，并发送持久 Inbox Notification 与可选 MCP IM。进程死亡
 不会制造 Terminal State。
 
+`GET /api/scheduled-jobs/{job_id}/runs` 返回该 Job 的分页触发历史（每次触发的 id、关联执行
+Run 与终态），运维可审计每一次过往触发，而不仅是最新 Summary。Leader Lease 在副本持有期间
+持续续约，健康的 Leader 持续轮询而无需反复重新获取；丢失 Lease 只会让另一个副本接管。
+
 同一个 Leased Loop 还运行有界 Knowledge Version GC 与 Patrol Retention。它们使用独立
 数据库 Lease，且不会删除 Active/Bound Version 或 Audit Row。
 

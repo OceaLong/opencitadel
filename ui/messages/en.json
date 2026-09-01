@@ -100,17 +100,40 @@
     "teamNameRequired": "Team name is required.",
     "teamAccessDenied": "You do not have access to this team.",
     "teamOwnerOnly": "Only the team owner can perform this action.",
+    "teamDeleteStrategyUnsupported": "This deletion strategy is not supported.",
+    "teamTransferOwnerUnknown": "Cannot determine the target team owner for the transfer.",
+    "transferTeamRequired": "Select a target team to transfer resources to.",
+    "tooManyLoginAttempts": "Too many failed login attempts. Please try again later.",
     "adminRequired": "Administrator access required.",
     "workspaceAccessDenied": "You do not have access to this workspace.",
     "modelNotFound": "The specified model does not exist or is not accessible.",
     "kbIndexingInProgress": "Knowledge base is indexing. Wait for the current task to finish before deleting.",
     "urlNotAllowed": "Internal or local addresses are not allowed.",
     "pageLoadError": "Page failed to load",
-    "unknownError": "An unknown error occurred. Please retry or return home."
+    "unknownError": "An unknown error occurred. Please retry or return home.",
+    "quota": {
+      "dailySessionLimit": "Daily session limit reached",
+      "maxConcurrentTasks": "Too many concurrent active sessions",
+      "monthlyTokenLimit": "Monthly token quota exceeded",
+      "storageLimit": "Storage quota exceeded"
+    }
   },
   "apiErrors": {
     "auth": {
       "oauthProfileUnavailable": "The OAuth provider did not return a usable profile. Please try again."
+    },
+    "artifact": {
+      "notFound": "The artifact could not be found.",
+      "sessionNotFound": "The session could not be found.",
+      "shareInvalid": "The share link is invalid or has expired."
+    },
+    "compliance": {
+      "evidencePackageNotFound": "The evidence package could not be found.",
+      "pdfUnavailable": "PDF rendering is unavailable. Please use the JSON or Markdown format."
+    },
+    "metrics": {
+      "notFound": "The requested metrics could not be found.",
+      "unauthorized": "You are not authorized to access these metrics."
     },
     "patrol": {
       "admissionPaused": "New patrol runs are currently paused by policy.",
@@ -165,8 +188,16 @@
       "workloadMissing": "The remediation workload could not be found."
     },
     "scheduling": {
-      "jobUnavailable": "The scheduled job is no longer available."
-    }
+      "jobNotFound": "The scheduled job could not be found.",
+      "jobUnavailable": "The scheduled job is no longer available.",
+      "secretRotationFailed": "The secret could not be rotated. Please try again.",
+      "triggerFailed": "The scheduled job could not be triggered.",
+      "triggerInvalid": "The job trigger configuration is invalid.",
+      "webhookNotFound": "The webhook could not be found.",
+      "webhookSignatureInvalid": "The webhook signature is invalid."
+    },
+    "rateLimited": "Too many requests. Please try again later.",
+    "rateLimitBackendUnavailable": "The rate limiting service is temporarily unavailable. Please try again later."
   },
   "inference": {
     "errors": {
@@ -298,12 +329,29 @@
     },
     "filterEmpty": "No tasks match this filter",
     "loadError": "Failed to load tasks",
-    "retry": "Retry"
+    "retry": "Retry",
+    "searchPlaceholder": "Search tasks…",
+    "searchEmpty": "No tasks match your search",
+    "recycleBinTitle": "Recycle bin",
+    "recycleBinDescription": "Restore or permanently delete recently removed tasks."
   },
   "sessions": {
     "fetchFailed": "Failed to fetch session list",
     "streamDisconnected": "Live session list connection lost. Please refresh manually.",
     "hookError": "useSessions must be used within SessionsProvider"
+  },
+  "recycleBin": {
+    "loading": "Loading…",
+    "loadFailed": "Failed to load recycle bin",
+    "empty": "Recycle bin is empty",
+    "restore": "Restore",
+    "purge": "Delete permanently",
+    "restoreSuccess": "Restored \"{name}\"",
+    "restoreFailed": "Failed to restore",
+    "purgeSuccess": "Permanently deleted \"{name}\"",
+    "purgeFailed": "Failed to delete permanently",
+    "purgeConfirmTitle": "Delete permanently?",
+    "purgeConfirmDescription": "\"{name}\" will be permanently deleted. This cannot be undone."
   },
   "sessionHeader": {
     "observationTitle": "Tools: {tools} · Errors: {errors}",
@@ -471,8 +519,12 @@
     "activeMetadata": "Active revision {sequence} · head version {version} · updated by {actor}",
     "note": "Change note",
     "noteDescription": "Required audit note describing why this revision is being activated.",
-    "execution": { "title": "Execution policy" },
-    "operations": { "title": "Operations policy" },
+    "execution": {
+      "title": "Execution policy"
+    },
+    "operations": {
+      "title": "Operations policy"
+    },
     "actions": {
       "saveExecution": "Save execution policy",
       "saveOperations": "Save operations policy",
@@ -890,6 +942,10 @@
     "deleteStrategyAnonymize": "Anonymize (keep resources)",
     "deleteStrategyCascade": "Cascade delete resources",
     "deleteStrategyTransfer": "Transfer to team",
+    "transferTargetTeam": "Target team",
+    "selectTeamPlaceholder": "Select a team",
+    "transferTeamRequired": "Please select a team to transfer resources to",
+    "noTeamsAvailable": "No teams available for transfer",
     "auditActivityDesc": "Daily audit event volume",
     "auditActivityTitle": "Audit activity",
     "callsTrendDesc": "LLM call volume over time",
@@ -1045,6 +1101,11 @@
     "roleOwner": "Owner",
     "roleAdmin": "Admin",
     "roleMember": "Member"
+  },
+  "capabilities": {
+    "reason": {
+      "pdfRendererUnavailable": "PDF renderer is not installed on the server, so PDF export is unavailable. Use Markdown export instead."
+    }
   },
   "compliance": {
     "evidenceCenterTitle": "Compliance evidence center",
@@ -1237,7 +1298,10 @@
       "failed": "Failed"
     },
     "statusDocCount": "{status} · {count} documents",
-    "title": "Document knowledge base"
+    "title": "Document knowledge base",
+    "recycleBin": "Recycle bin",
+    "recycleBinTitle": "Recycle bin",
+    "recycleBinDescription": "Restore or permanently delete removed knowledge bases."
   },
   "mobileNav": {
     "label": "Main navigation",
@@ -1253,7 +1317,8 @@
     "title": "Notifications",
     "scheduledJobCompleted": "Scheduled job \"{jobName}\" completed",
     "scheduledJobStarted": "Scheduled job \"{jobName}\" started",
-    "patrolCompleted": "Patrol \"{packName}\" completed with status {status}"
+    "patrolCompleted": "Patrol \"{packName}\" completed with status {status}",
+    "approvalWaiting": "Approval needed for {subject}"
   },
   "toolUse": {
     "statusRunning": "running",
@@ -1598,8 +1663,12 @@
     "shareLinkCopied": "Share link copied",
     "shareLinkFailed": "Failed to create share link",
     "revokeShare": "Revoke",
+    "reshare": "New link",
     "shareRevoked": "Share link revoked",
     "shareRevokeFailed": "Failed to revoke share link",
+    "sharedActive": "Shared",
+    "shareExpiresAt": "Expires {date}",
+    "shareTokenSuffix": "ending {suffix}",
     "statusDraft": "Draft",
     "statusFinal": "Final",
     "statusUpdated": "Updated",
@@ -1676,7 +1745,17 @@
     "tokenLabel": "Token",
     "secretLabel": "Secret",
     "triggerTypeCronOption": "Cron",
-    "triggerTypeWebhookOption": "Webhook"
+    "triggerTypeWebhookOption": "Webhook",
+    "runsAction": "History",
+    "runsTitle": "Run history",
+    "runsSubtitle": "Execution history for \"{name}\"",
+    "runsLoading": "Loading run history…",
+    "runsEmpty": "No runs yet",
+    "runsLoadFailed": "Failed to load run history",
+    "runsLoadMore": "Load more",
+    "runStartedAt": "Started: {time}",
+    "runFinishedAt": "Finished: {time}",
+    "runError": "Error: {error}"
   },
   "contextSelector": {
     "clear": "Clear context",

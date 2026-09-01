@@ -13,6 +13,11 @@ export type DeliveryArtifact = {
   status: DeliveryArtifactStatus;
   created_at: string;
   updated_at: string;
+  // 分享状态(脱敏,常驻):is_shared 表示当前是否存在有效(未过期)的公开链接;
+  // share_expires_at 为到期时间;share_token_preview 仅为令牌后 4 位,用于辨认链接。
+  is_shared: boolean;
+  share_expires_at: string | null;
+  share_token_preview: string | null;
 };
 
 export type DeliveryArtifactsData = {
@@ -26,8 +31,10 @@ export type DeliveryArtifactContent = {
 };
 
 export type DeliveryArtifactShare = {
+  // 完整 share_token 仅在创建这一刻返回一次,供前端立即拼接分享链接复制。
   share_token: string;
   share_url: string;
+  share_expires_at: string | null;
 };
 
 export type ArtifactEventSummary = {

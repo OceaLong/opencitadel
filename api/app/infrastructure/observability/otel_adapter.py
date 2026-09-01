@@ -1,6 +1,6 @@
 from app.domain.external.observability import ObservabilityPort
 from app.infrastructure.observability.agent_tracer import AgentTracer
-from app.infrastructure.observability.otel import (
+from app.observability.otel import (
     record_agent_cancel,
     record_agent_step,
     record_llm_tokens,

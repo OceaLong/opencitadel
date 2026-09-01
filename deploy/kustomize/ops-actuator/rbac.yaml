@@ -1,7 +1,12 @@
+# Namespaced Role/RoleBinding instead of a cluster-wide ClusterRole. Every
+# resource the Actuator patches (deployments, statefulsets, replicasets) is
+# namespaced, so the write grant is confined to the deployment namespace set by
+# kustomization.yaml (namespace: opencitadel).
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: opencitadel-ops-actuator-write
+  namespace: opencitadel
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
@@ -11,14 +16,15 @@ rules:
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: opencitadel-ops-actuator-write
+  namespace: opencitadel
 subjects:
   - kind: ServiceAccount
     name: opencitadel-ops-actuator
     namespace: opencitadel
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: opencitadel-ops-actuator-write

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
@@ -28,6 +28,7 @@ import { IconCopy, IconInvitation } from "@/lib/icons";
 export default function AdminInvitationsPage() {
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const [invitations, setInvitations] = useState<PlatformInvitation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -150,10 +151,10 @@ export default function AdminInvitationsPage() {
                       {item.email || t("noEmailSpecified")}
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
-                      {formatDateTime(item.created_at)}
+                      {formatDateTime(item.created_at, locale)}
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
-                      {formatDateTime(item.expires_at)}
+                      {formatDateTime(item.expires_at, locale)}
                     </TableCell>
                     <TableCell className="text-right">
                       <InvitationStatusBadge status={item.status} />

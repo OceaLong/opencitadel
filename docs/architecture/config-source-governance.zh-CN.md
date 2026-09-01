@@ -6,7 +6,7 @@
 
 | 类型 | 权威 | 示例 |
 | --- | --- | --- |
-| 部署拓扑与 Secret | 环境变量或 Secret Manager | 数据库身份、签名/加密 Key、OAuth、存储、沙箱 Driver/Image/Network |
+| 部署拓扑与 Secret | 环境变量或 Secret Manager | 数据库身份、签名/加密 Key（`API_KEY_SECRET`、`AUDIT_SIGNING_KEY`、`JWT_SECRET`/`JWT_PREVIOUS_SECRETS`、`DATABASE_AUTHORIZATION_SIGNING_SECRET`、`SANDBOX_TOKEN_SEED`、`OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN`）、OAuth、存储、沙箱 Driver/Image/Network |
 | 实时运行行为 | PostgreSQL Runtime Policy Head | 准入、超时、重试、调度、沙箱限制、保留策略 |
 | Integration | Owner Scope PostgreSQL Resource | 推理 Endpoint/Model/Binding、MCP、A2A、Skill |
 | 产品数据 | 领域表 | Session、Job、Pack、Resource、Version |
@@ -30,6 +30,15 @@ Deployment Settings 只描述进程在哪里、如何运行，不承载行为限
 
 Inference、MCP、A2A 是一等 Owner Scope Resource。Credential 使用版本化加密信封存储，读取时脱敏。
 Skill、Automation 与执行请求通过稳定 ID 绑定；Display Name 不是身份。
+
+签名与 Token Secret 采用 Active/Previous Ring，可零停机轮换：
+`API_KEY_SECRET`/`API_KEY_PREVIOUS_SECRETS`、
+`AUDIT_SIGNING_KEY`/`AUDIT_PREVIOUS_SIGNING_KEYS`、
+`JWT_SECRET`/`JWT_PREVIOUS_SECRETS`。`DATABASE_AUTHORIZATION_SIGNING_SECRET` 可选地将数据库
+授权 HMAC 与 `SESSION_SECRET` 拆分，未设置时回退到它。`SANDBOX_TOKEN_SEED` 派生每沙箱数据面
+Token，`OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN` 守卫 Ops MCP Server。执行内核高级调优
+（`EXECUTION_ACTIVITY_MAX_CONCURRENCY`、`EXECUTION_ACTIVITY_BATCH_SIZE`、
+`EXECUTION_IDLE_POLL_SECONDS`）属于部署拓扑而非运行行为，因此留在环境变量而非 Runtime Policy。
 
 ## 变更规则
 

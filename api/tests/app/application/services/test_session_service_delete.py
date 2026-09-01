@@ -16,12 +16,14 @@ def _uow(session: Session):
     uow.__aexit__ = AsyncMock(return_value=None)
     uow.commit = AsyncMock()
     uow.session.get_by_id = AsyncMock(return_value=session)
+    uow.session.soft_delete = AsyncMock(return_value=True)
     uow.session.delete_by_id = AsyncMock()
     return uow
 
 
 @pytest.mark.asyncio
-async def test_delete_session_destroys_sandbox_after_run_is_terminal():
+async def test_delete_session_soft_deletes_and_destroys_sandbox_after_run_is_terminal():
+    """删除改为软删（进入回收站），仍在删除时销毁可重建的 sandbox。"""
     session = Session(
         id="sess-1",
         sandbox_id="sandbox-1",
@@ -41,13 +43,13 @@ async def test_delete_session_destroys_sandbox_after_run_is_terminal():
         session_list_publisher=AsyncMock(),
     )
 
-    await service.delete_session(
-        "sess-1",
-        scope=OwnerScope.personal("user-1"),
-    )
+    scope = OwnerScope.personal("user-1")
+    await service.delete_session("sess-1", scope=scope)
 
     sandbox.destroy.assert_awaited_once()
-    uow.session.delete_by_id.assert_awaited_once_with("sess-1")
+    # 软删：设置 deleted_at，不物理删除
+    uow.session.soft_delete.assert_awaited_once_with("sess-1", scope=scope)
+    uow.session.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -71,4 +73,46 @@ async def test_delete_session_rejects_an_active_run():
             scope=OwnerScope.personal("user-1"),
         )
 
-    uow.session.delete_by_id.assert_not_awaited()
+    uow.session.soft_delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restore_session_clears_deleted_at():
+    uow = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.commit = AsyncMock()
+    uow.session.restore = AsyncMock(return_value=True)
+    service = SessionService(
+        uow_factory=lambda: uow,
+        sandbox_factory=MagicMock(),
+        run_projection=MagicMock(),
+        session_list_publisher=AsyncMock(),
+    )
+
+    scope = OwnerScope.personal("user-1")
+    await service.restore_session("sess-1", scope=scope)
+
+    uow.session.restore.assert_awaited_once_with("sess-1", scope=scope)
+    uow.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_purge_session_physically_deletes_recycle_bin_row():
+    uow = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.commit = AsyncMock()
+    uow.session.purge = AsyncMock(return_value=True)
+    service = SessionService(
+        uow_factory=lambda: uow,
+        sandbox_factory=MagicMock(),
+        run_projection=MagicMock(),
+        session_list_publisher=AsyncMock(),
+    )
+
+    scope = OwnerScope.personal("user-1")
+    await service.purge_session("sess-1", scope=scope)
+
+    uow.session.purge.assert_awaited_once_with("sess-1", scope=scope)
+    uow.commit.assert_awaited_once()

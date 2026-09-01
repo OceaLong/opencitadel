@@ -26,7 +26,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/api/auth", () => ({
-  authApi: { login: vi.fn() },
+  authApi: { login: vi.fn(), oauthProviders: vi.fn(async () => [] as string[]) },
 }));
 vi.mock("@/lib/api/team", () => ({
   teamApi: {
@@ -43,7 +43,7 @@ vi.mock("@/providers/client-data-provider", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import AcceptInvitationPage from "./invitations/[token]/page";
+import { AcceptInvitationPageClient } from "./invitations/[token]/accept-invitation-page-client";
 import LoginPage from "./login/page";
 
 function expectNamedInput(container: HTMLElement, id: string, name: string, label: string): void {
@@ -78,7 +78,9 @@ describe("identity form accessibility", () => {
       requires_registration: true,
       email_hint: null,
     });
-    const { container, unmount } = await renderComponent(<AcceptInvitationPage />);
+    const { container, unmount } = await renderComponent(
+      <AcceptInvitationPageClient token="invite-token" />,
+    );
     await act(async () => {
       await Promise.resolve();
     });

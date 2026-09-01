@@ -16,7 +16,6 @@ export type Session = {
   unread_message_count: number;
   mode?: SessionMode;
   resource_bindings?: SessionResourceBinding[];
-  [key: string]: unknown;
 };
 
 /**
@@ -41,7 +40,6 @@ export type CreateSessionParams = {
   mode?: SessionMode;
   operator_scope?: "owned" | "third_party_saas";
   operator_domains?: string[];
-  [key: string]: unknown;
 };
 
 export type ResourceKind = "knowledge_base";
@@ -70,11 +68,10 @@ export type ChatMessage = {
   attachments?: Array<{
     file_id: string;
     filename: string;
-    [key: string]: unknown;
+    size?: number;
   }>;
   /** Immutable turn snapshot; never derived from the current session pin. */
   resource_bindings?: SessionResourceBinding[];
-  [key: string]: unknown;
 };
 
 type ChatCursor = {
@@ -171,7 +168,6 @@ export type ToolEvent = {
   error?: string | null;
   span_id?: string | null;
   parent_span_id?: string | null;
-  [key: string]: unknown;
 };
 
 /**
@@ -200,6 +196,11 @@ export type SSEEventType =
 
 /**
  * SSE 事件数据
+ *
+ * 手写联合,无法迁移到生成 schema:后端 OpenAPI 导出把事件正文收敛为
+ * `ExecutionEventResponse.payload: { [key: string]: unknown }`(见
+ * generated/schema.d.ts),丢失了按 type 的判别信息。若后端未来把各事件
+ * payload 纳入 OpenAPI 判别联合,再迁移此处。
  */
 export type SSEEventData =
   | { type: "message"; data: ChatMessage & EventMeta }

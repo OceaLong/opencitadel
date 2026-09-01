@@ -6,6 +6,8 @@ import type { RequestOptions } from "./fetch";
 
 const mocks = vi.hoisted(() => ({
   createSSEStream: vi.fn(),
+  get: vi.fn(() => Promise.resolve({ sessions: [] })),
+  post: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("./fetch", async (importOriginal) => {
@@ -13,10 +15,69 @@ vi.mock("./fetch", async (importOriginal) => {
   return {
     ...actual,
     createSSEStream: mocks.createSSEStream,
+    get: mocks.get,
+    post: mocks.post,
   };
 });
 
 import { sessionApi } from "./session";
+
+describe("sessionApi search + recycle bin", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("passes the trimmed q keyword to the list endpoint", async () => {
+    await sessionApi.getSessions("  hello ");
+    expect(mocks.get).toHaveBeenCalledWith("/sessions", { q: "hello" });
+  });
+
+  it("omits q entirely when the keyword is empty (behavior unchanged)", async () => {
+    await sessionApi.getSessions("");
+    expect(mocks.get).toHaveBeenCalledWith("/sessions", undefined);
+    await sessionApi.getSessions();
+    expect(mocks.get).toHaveBeenCalledWith("/sessions", undefined);
+  });
+
+  it("appends q to the stream URL as a query param (not the body)", async () => {
+    mocks.createSSEStream.mockResolvedValue(new ReadableStream());
+    sessionApi.streamSessions(
+      () => {},
+      () => {},
+      "web ops",
+    );
+    await vi.waitFor(() => {
+      expect(mocks.createSSEStream).toHaveBeenCalledWith(
+        "/sessions/stream?q=web%20ops",
+        {},
+        expect.anything(),
+      );
+    });
+  });
+
+  it("keeps the bare stream URL when no keyword is given", async () => {
+    mocks.createSSEStream.mockResolvedValue(new ReadableStream());
+    sessionApi.streamSessions(() => {}, () => {});
+    await vi.waitFor(() => {
+      expect(mocks.createSSEStream).toHaveBeenCalledWith("/sessions/stream", {}, expect.anything());
+    });
+  });
+
+  it("lists deleted sessions from the recycle-bin endpoint", async () => {
+    await sessionApi.getDeletedSessions();
+    expect(mocks.get).toHaveBeenCalledWith("/sessions/deleted");
+  });
+
+  it("restores a session via POST /restore", async () => {
+    await sessionApi.restoreSession("s1");
+    expect(mocks.post).toHaveBeenCalledWith("/sessions/s1/restore", {});
+  });
+
+  it("purges a session via POST /purge", async () => {
+    await sessionApi.purgeSession("s1");
+    expect(mocks.post).toHaveBeenCalledWith("/sessions/s1/purge", {});
+  });
+});
 
 describe("sessionApi.streamSessions", () => {
   afterEach(() => {

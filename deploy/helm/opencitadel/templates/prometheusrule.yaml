@@ -1,0 +1,109 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-baseline
+  {{- with .Values.monitoring.prometheusRule.namespace }}
+  namespace: {{ . | quote }}
+  {{- end }}
+  labels:
+    app.kubernetes.io/component: monitoring
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: opencitadel.governance
+      rules:
+        # 审批超时率：超过审批时延直方图最高有限桶（900s）的决策占比。
+        # 指标由 governance_approval_decision_seconds（api）落地。
+        # count 速率为 0 时表达式为 NaN，不告警。
+        - alert: OpencitadelApprovalDecisionTimeoutRateHigh
+          expr: |
+            (
+              sum(rate(governance_approval_decision_seconds_count[15m]))
+              - sum(rate(governance_approval_decision_seconds_bucket{le="900.0"}[15m]))
+            )
+            / sum(rate(governance_approval_decision_seconds_count[15m])) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "审批决策超时率偏高 (>5%)"
+            description: "过去 15m 内超过 900s 才决策的审批占比 {{`{{ $value | humanizePercentage }}`}}，可能存在审批阻塞。"
+
+        # 审计链验证失败：hash-chain 校验结果为 broken 即视为篡改/损坏，立即告警。
+        # 指标由 governance_audit_chain_verifications_total{result=intact|broken}（api）落地。
+        - alert: OpencitadelAuditChainVerificationFailed
+          expr: increase(governance_audit_chain_verifications_total{result="broken"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "审计链验证失败（检测到 broken）"
+            description: "过去 15m 出现 {{`{{ $value }}`}} 次审计 hash-chain broken 结果，需立即排查证据链完整性。"
+
+    - name: opencitadel.execution
+      rules:
+        # outbox 投递滞后：最老未投递 wakeup 的堆积时长。
+        # 指标由 execution_outbox_lag_seconds（execution-kernel）落地。
+        - alert: OpencitadelExecutionOutboxLagHigh
+          expr: max(execution_outbox_lag_seconds) > 300
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "execution outbox 投递滞后 (>5m)"
+            description: "最老未投递 wakeup 已积压 {{`{{ $value | humanizeDuration }}`}}，projector/投递链路可能停滞。"
+
+        # outbox 重投堆积：出现被多次尝试仍未投递的行，通常意味着投递持续失败。
+        - alert: OpencitadelExecutionOutboxRedeliveryBacklog
+          expr: max(execution_outbox_redelivery_rows) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "execution outbox 存在重投堆积"
+            description: "有 {{`{{ $value }}`}} 条 wakeup 多次尝试仍未投递，持续 15m。"
+
+    - name: opencitadel.admission
+      rules:
+        # 沙箱准入拒绝率：无总准入分母，按绝对拒绝速率告警。
+        # 指标由 sandbox_admission_rejected_total{reason}（api）落地。
+        - alert: OpencitadelSandboxAdmissionRejectionRateHigh
+          expr: sum(rate(sandbox_admission_rejected_total[10m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "沙箱准入拒绝率偏高"
+            description: "过去 10m 沙箱准入拒绝速率 {{`{{ $value | printf \"%.2f\" }}`}}/s，可能触及配额或准入策略。"
+
+    - name: opencitadel.http
+      rules:
+        # HTTP 5xx 率。
+        # 依赖 F1/F2 计划落地的 http_requests_total{status} 指标；未落地前不触发。
+        - alert: OpencitadelHttp5xxRateHigh
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HTTP 5xx 率偏高 (>5%)"
+            description: "过去 5m 内 5xx 占比 {{`{{ $value | humanizePercentage }}`}}。"
+
+        # 限流拒绝率：限流拒绝占总请求的比例。
+        # 依赖 F1/F2 计划落地的 rate_limit_rejected_total 与 http_requests_total 指标。
+        - alert: OpencitadelRateLimitRejectionRateHigh
+          expr: |
+            sum(rate(rate_limit_rejected_total[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.10
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "限流拒绝率偏高 (>10%)"
+            description: "过去 5m 内被限流拒绝的请求占比 {{`{{ $value | humanizePercentage }}`}}。"
+{{- end }}

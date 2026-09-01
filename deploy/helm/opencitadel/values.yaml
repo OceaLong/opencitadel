@@ -40,6 +40,10 @@ opsCollector:
   targetRef: opencitadel-local
   allowedNamespaces: [opencitadel]
   allowedWorkloads: {}
+  # Bearer token the streamable-http endpoint requires (env OPS_COLLECTOR_TOKEN).
+  # MUST be a strong random value (>= 32 chars); the process refuses to start
+  # without it. Callers connect with `Authorization: Bearer <token>`.
+  token: ""
   registeredPrometheusQueries: {}
   registeredHttpProbes: {}
   registeredCertificateProbes: {}
@@ -65,6 +69,10 @@ opsActuator:
   targetRef: opencitadel-local
   allowedNamespaces: [opencitadel]
   allowedWorkloads: {}
+  # Bearer token the streamable-http endpoint requires (env OPS_ACTUATOR_TOKEN).
+  # MUST be a strong random value (>= 32 chars); the process refuses to start
+  # without it. Callers connect with `Authorization: Bearer <token>`.
+  token: ""
   serviceAccount:
     create: true
     name: ""
@@ -127,6 +135,79 @@ resourceQuota:
 networkPolicy:
   enabled: true
 
+# 沙箱出站代理（squid）。沙箱运行在无默认网关的隔离网络里，所有出站必须经此
+# 代理，由它解析目标并执行私网/元数据黑名单（策略同 deploy/squid/squid.conf）。
+# networkpolicy-sandbox 已把沙箱 egress 收敛为「仅 kube-dns:53 + 到本代理
+# Pod 的 3128」，故默认启用。若关闭（egressProxy.enabled=false），必须同时放开
+# 沙箱 NetworkPolicy，否则沙箱除 DNS 外无任何出站（fail-closed）。
+egressProxy:
+  enabled: true
+  # 与 docker-compose.yml 的 opencitadel-sandbox-egress 一致。
+  image: ubuntu/squid:6.6-24.04_edge
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # 预留：按域名收紧出站白名单。当前 squid.conf 采用「私网/元数据黑名单 +
+  # 公网 Safe_ports 放行」策略，未按域名白名单过滤；如需启用需改造
+  # configmap-egress-proxy.yaml 为内联渲染而非 .Files.Get 直取静态文件。
+  allowedDomains: []
+
+# PodDisruptionBudget，保证滚动更新/节点排空期间关键工作负载至少保留一个可用副本。
+# 需配合多副本使用（replicaCount.api / executionKernel.replicas >= 2），
+# 否则 minAvailable:1 会阻止自愿驱逐（如节点维护）。
+pdb:
+  enabled: false
+  api:
+    minAvailable: 1
+  executionKernel:
+    minAvailable: 1
+
+# 部署韧性：为 api / execution-kernel 跨节点分散副本。默认使用
+# topologySpreadConstraints（软约束 ScheduleAnyway，单节点集群也能调度）。
+topologySpread:
+  enabled: true
+
+# 监控告警。启用后渲染 PrometheusRule CRD（需集群已安装 Prometheus Operator）。
+# 部分表达式依赖 F1/F2 计划落地的指标（http_requests_total、rate_limit_rejected_total
+# 等），指标未落地前对应规则不会触发（no data），不影响其余规则。
+monitoring:
+  prometheusRule:
+    enabled: false
+    # 留空则渲染到 Release namespace。指定后写入该 namespace（须与 Prometheus
+    # ruleSelector 的 namespaceSelector 匹配）。
+    namespace: ""
+    # 附加到 PrometheusRule metadata.labels，供 Prometheus Operator ruleSelector 选中，
+    # 例如 {release: kube-prometheus-stack}。
+    labels: {}
+
+# 内置 Postgres 逻辑备份 CronJob（pg_dump）。默认关闭；生产建议使用外部/托管
+# 数据库自身的备份能力或 CloudNativePG。启用后其 registeredBackups 名称
+# "opencitadel-postgres-backup" 可对应 Ops Patrol 的 opsCollector.registeredBackups，
+# 使巡检的备份项有真实来源。
+backup:
+  enabled: false
+  # cron 表达式（集群时区，通常 UTC）。默认每日 02:00。
+  schedule: "0 2 * * *"
+  # 转储保留份数，超出后按时间删除最旧的。
+  retention: 7
+  # 转储落地方式：pvc(默认，写入独立 PVC) 亦为纯离线评估级；生产应改为对象存储。
+  storage: 5Gi
+  # 使用与 Postgres 同族的镜像以保证 pg_dump 版本兼容。
+  image: pgvector/pgvector:pg16
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 service:
   type: ClusterIP
   port: 80
@@ -186,10 +267,12 @@ env:
   SANDBOX_IMAGE: opencitadel-sandbox
   SANDBOX_NAME_PREFIX: opencitadel-sandbox
   SANDBOX_NETWORK: ""
+  # 留空时由 egressProxy 自动指向集群内 <release>-egress-proxy:3128（见
+  # _helpers.tpl 的 sandbox* 助手）。填值则覆盖为外部代理。
   SANDBOX_CHROME_ARGS: ""
   SANDBOX_HTTPS_PROXY: ""
   SANDBOX_HTTP_PROXY: ""
-  SANDBOX_NO_PROXY: ""
+  SANDBOX_NO_PROXY: "localhost,127.0.0.1"
   SANDBOX_K8S_NAMESPACE: default
   SANDBOX_K8S_POD_LABEL: app=opencitadel-sandbox
   POSTGRES_HOST: opencitadel-postgres
@@ -199,7 +282,9 @@ env:
   REDIS_PORT: "6379"
   REDIS_DB: "0"
   COOKIE_SECURE: "true"
-  OUTBOUND_ALLOWED_PORTS: "80,443,8080,8443,11434"
+  # 8090/8091: bundled Ops Patrol Collector/Actuator MCP servers; required so
+  # the built-in MCP registration is not rejected by the outbound guard.
+  OUTBOUND_ALLOWED_PORTS: "80,443,8080,8443,8090,8091,11434"
   OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
   # Set to the exact ingress-controller or service-mesh proxy CIDRs.
   TRUSTED_PROXY_CIDRS: "10.0.0.0/8"

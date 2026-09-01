@@ -11,7 +11,10 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.execution.activity_registry import ActivityRegistry
-from app.application.execution.activity_worker import ActivityWorker
+from app.application.execution.activity_worker import (
+    DEFAULT_ACTIVITY_MAX_CONCURRENCY,
+    ActivityWorker,
+)
 from app.application.execution.decision_worker import DecisionWorker
 from app.application.execution.inbox_worker import InboxWorker
 from app.application.execution.outbox_dispatcher import OutboxDispatcher
@@ -26,9 +29,15 @@ from app.domain.execution.commands import CommandEnvelope
 from app.domain.execution.run import RunAggregate
 from app.domain.models.authorization import AuthorizationContext
 from app.execution_kernel import ExecutionKernelRuntime
-from app.infrastructure.adapters.redis_capabilities import RedisWakeupAdapter
+from app.infrastructure.adapters.redis_capabilities import (
+    RedisNotificationPublisher,
+    RedisWakeupAdapter,
+)
 from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
-from app.infrastructure.execution.postgres_formal_projector import PostgresFormalProjector
+from app.infrastructure.execution.postgres_formal_projector import (
+    PostgresApprovalNotifier,
+    PostgresFormalProjector,
+)
 from app.infrastructure.execution.postgres_inbox import PostgresInbox
 from app.infrastructure.execution.postgres_inbox_source import PostgresInboxSource
 from app.infrastructure.execution.postgres_outbox import (
@@ -229,6 +238,7 @@ def build_execution_kernel_runtime(
     authorization: AuthorizationContext,
     activity_registry: ActivityRegistry,
     worker_id: str | None = None,
+    activity_max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
 ) -> ExecutionKernelRuntime:
     command_handler = SqlAlchemyExecutionOrchestrator(
         session_factory=session_factory,
@@ -257,6 +267,7 @@ def build_execution_kernel_runtime(
             run_service=run_service,
             registry=activity_registry,
             worker_id=worker_id or f"{gethostname()}:execution-kernel",
+            max_concurrency=activity_max_concurrency,
         ),
         decision_worker=DecisionWorker(
             source=PostgresRunDecisionSource(
@@ -281,6 +292,11 @@ def build_execution_kernel_runtime(
         projector=PostgresFormalProjector(
             session_factory=session_factory,
             authorization=authorization,
+            notifier=PostgresApprovalNotifier(
+                session_factory=session_factory,
+                authorization=authorization,
+                publisher=RedisNotificationPublisher(redis),
+            ),
         ),
         owner_scopes=PostgresOwnerScopeSource(
             session_factory=session_factory,

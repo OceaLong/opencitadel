@@ -43,7 +43,7 @@ class MCPServerORM(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     owner_user_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
@@ -95,7 +95,7 @@ class A2AServerORM(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     owner_user_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True

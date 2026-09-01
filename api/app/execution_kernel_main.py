@@ -21,6 +21,7 @@ from app.composition.tasks import TaskFailure, TaskKind
 from app.composition.types import KernelRuntime
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.logging import setup_logging
+from app.observability.otel import setup_observability
 from core.config import DeploymentSettings, load_deployment_settings
 
 logger = logging.getLogger(__name__)
@@ -100,46 +101,58 @@ class ExecutionKernelProcess:
     async def _run_control_plane(self) -> None:
         while not self._stopping.is_set():
             now = datetime.now(UTC)
-            await self._policy_reader.refresh_if_due(now=now)
+            try:
+                await self._policy_reader.refresh_if_due(now=now)
+            except Exception:
+                logger.exception("execution kernel policy refresh failed")
+            # Each lane is isolated: a single lane raising (e.g. one poison row
+            # or a transient store error) must not tear down the whole control
+            # plane process. Without this a CRITICAL, un-restarted kernel task
+            # would exit and every replica would CrashLoopBackOff on the same
+            # bad input. Failed lanes log and count as zero work.
             work = 0
-            work += (
-                await self._runtime.run_pending_projectors_once(
+            work += await self._run_lane(
+                "projectors",
+                self._runtime.run_pending_projectors_once(
                     scope_limit=self._batch_size,
                     event_limit=self._batch_size,
-                )
-            ).processed
-            work += (
-                await self._runtime.run_inbox_once(
-                    limit=self._batch_size,
-                    now=now,
-                )
-            ).loaded
-            work += (
-                await self._runtime.run_decisions_once(
-                    limit=self._batch_size,
-                    now=now,
-                )
-            ).submitted
-            work += (
-                await self._runtime.run_timers_once(
-                    limit=self._batch_size,
-                    now=now,
-                )
-            ).fired
-            work += (
-                await self._runtime.run_outbox_once(
-                    limit=self._batch_size,
-                    now=now,
-                )
-            ).claimed
-            work += (
-                await self._runtime.run_pending_projectors_once(
-                    scope_limit=self._batch_size,
-                    event_limit=self._batch_size,
-                )
-            ).processed
+                ),
+                "processed",
+            )
+            work += await self._run_lane(
+                "inbox",
+                self._runtime.run_inbox_once(limit=self._batch_size, now=now),
+                "loaded",
+            )
+            work += await self._run_lane(
+                "decisions",
+                self._runtime.run_decisions_once(limit=self._batch_size, now=now),
+                "submitted",
+            )
+            work += await self._run_lane(
+                "timers",
+                self._runtime.run_timers_once(limit=self._batch_size, now=now),
+                "fired",
+            )
+            work += await self._run_lane(
+                "outbox",
+                self._runtime.run_outbox_once(limit=self._batch_size, now=now),
+                "claimed",
+            )
             if work == 0:
-                await self._wait_for_hint()
+                try:
+                    await self._wait_for_hint()
+                except Exception:
+                    logger.exception("execution kernel wake-up hint failed")
+
+    async def _run_lane(self, name: str, work: object, attribute: str) -> int:
+        """Await one control-plane lane, isolating failures from its peers."""
+        try:
+            result = await work  # type: ignore[misc]
+        except Exception:
+            logger.exception("execution kernel control-plane lane '%s' failed", name)
+            return 0
+        return int(getattr(result, attribute))
 
     async def _run_activity_plane(self) -> None:
         while not self._stopping.is_set():
@@ -255,6 +268,7 @@ async def run_kernel(
                 wakeup=runtime.wakeup,
                 policy_reader=runtime.policy_reader,
                 stopping=runtime.supervisor.stop_event,
+                batch_size=settings.execution_activity_batch_size,
             )
             install_signal_handlers(runtime.supervisor.request_stop)
             await runtime.supervisor.start(
@@ -274,13 +288,93 @@ async def run_kernel(
                 ) from failure.error
 
 
+def _token_guarded_metrics_app(token: str):
+    """Wrap the Prometheus WSGI app with mandatory ``Bearer`` token auth.
+
+    Mirrors ``/api/metrics`` (interfaces/endpoints/metrics_routes.py): a request
+    without a matching ``Authorization: Bearer <token>`` header gets 401 and no
+    metrics body. Returned as a plain WSGI callable so it can be unit-tested
+    without binding a socket.
+    """
+
+    import hmac
+
+    from prometheus_client import make_wsgi_app
+
+    metrics_app = make_wsgi_app()
+
+    def app(environ, start_response):
+        header = environ.get("HTTP_AUTHORIZATION", "")
+        scheme, _, provided = header.partition(" ")
+        authorized = scheme.lower() == "bearer" and hmac.compare_digest(provided, token)
+        if not authorized:
+            start_response(
+                "401 Unauthorized",
+                [("Content-Type", "text/plain; charset=utf-8")],
+            )
+            return [b"Unauthorized\n"]
+        return metrics_app(environ, start_response)
+
+    return app
+
+
+def start_kernel_metrics_server(settings: DeploymentSettings) -> None:
+    """Expose kernel Prometheus metrics with the same guard posture as the API.
+
+    The kernel has no FastAPI app, so it cannot reuse the ``/api/metrics`` route.
+    With ``METRICS_TOKEN`` set the port serves metrics only to callers carrying a
+    matching bearer token (consistent with ``/api/metrics``). With no token it
+    would otherwise be an unauthenticated, network-reachable metrics endpoint, so
+    it is bound to loopback instead — unreachable from the pod network.
+
+    The primary production control for the metrics port is a NetworkPolicy that
+    restricts ingress to :<port> to the Prometheus ``podSelector`` (that lives in
+    the deploy manifests, out of this module's scope). The bearer token here and
+    the loopback fallback are defense-in-depth on top of that netpol.
+    """
+
+    port = settings.execution_kernel_metrics_port
+    if not port:
+        return
+    token = settings.metrics_token
+    if token:
+        from threading import Thread
+        from wsgiref.simple_server import WSGIRequestHandler, make_server
+
+        class _QuietHandler(WSGIRequestHandler):
+            def log_message(self, *args: object) -> None:  # silence access logs
+                return
+
+        # Bound to all interfaces but gated by mandatory bearer-token auth above.
+        httpd = make_server(
+            "0.0.0.0",
+            port,
+            _token_guarded_metrics_app(token),
+            handler_class=_QuietHandler,
+        )
+        Thread(
+            target=httpd.serve_forever,
+            name="kernel-metrics-server",
+            daemon=True,
+        ).start()
+        logger.info("kernel metrics server started on :%s (bearer-token protected)", port)
+        return
+
+    from prometheus_client import start_http_server
+
+    start_http_server(port, addr="127.0.0.1")
+    logger.warning(
+        "kernel metrics server bound to loopback only on :%s (METRICS_TOKEN unset); "
+        "set METRICS_TOKEN to expose authenticated metrics to Prometheus",
+        port,
+    )
+
+
 async def main() -> None:
     settings = load_deployment_settings()
     setup_logging(settings)
-    if settings.execution_kernel_metrics_port:
-        from prometheus_client import start_http_server
-
-        start_http_server(settings.execution_kernel_metrics_port)
+    setup_observability(settings=settings)
+    start_kernel_metrics_server(settings)
     await run_kernel(settings)
 
 
@@ -288,4 +382,10 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-__all__ = ["ExecutionKernelProcess", "install_signal_handlers", "main", "run_kernel"]
+__all__ = [
+    "ExecutionKernelProcess",
+    "install_signal_handlers",
+    "main",
+    "run_kernel",
+    "start_kernel_metrics_server",
+]

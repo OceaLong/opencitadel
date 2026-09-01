@@ -88,6 +88,10 @@ def _install_extensions() -> None:
             'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
             "CREATE EXTENSION IF NOT EXISTS pgcrypto",
             "CREATE EXTENSION IF NOT EXISTS vector",
+            # 会话搜索按 ILIKE '%q%' 过滤 title/latest_message；启用 pg_trgm
+            # 以便后续为 sessions(title/latest_message) 建 GIN trgm 索引加速
+            # 子串检索（当前查询已正确，索引为纯性能优化，随模型改动落地）。
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm",
         ]
     )
 
@@ -317,6 +321,18 @@ def _grant_runtime_privileges() -> None:
             );
             EXECUTE format(
                 'GRANT SELECT, INSERT, UPDATE, DELETE ON {execution_mutable} '
+                'TO %I', kernel_role
+            );
+            -- Kernel-internal Run quarantine (no tenant RLS); kernel-only.
+            EXECUTE format(
+                'GRANT SELECT, INSERT, UPDATE ON execution_poisoned_runs '
+                'TO %I', kernel_role
+            );
+            -- Kernel-internal per-scope head watermark (no tenant RLS);
+            -- kernel-only. Upserted by the append path, read by projector
+            -- scope discovery (list_pending).
+            EXECUTE format(
+                'GRANT SELECT, INSERT, UPDATE ON execution_scope_head '
                 'TO %I', kernel_role
             );
 

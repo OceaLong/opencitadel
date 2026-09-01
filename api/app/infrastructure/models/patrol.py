@@ -39,6 +39,12 @@ from app.domain.models.patrol import (
 
 from .base import Base
 
+# Columns that update_from_domain must never overwrite from a domain snapshot.
+# ``last_event_position`` is the formal projector's optimistic guard column
+# (see PostgresFormalProjector); the domain models do not carry it, so copying a
+# fresh from_domain() replacement would reset it to NULL and defeat the guard.
+_PROJECTOR_GUARDED_COLUMNS = frozenset({"id", "last_event_position"})
+
 
 def _utc(value: datetime | None) -> datetime | None:
     if value is None:
@@ -70,11 +76,14 @@ class PatrolPackModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+        String(255),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,  # users RESTRICT FK integrity scan (composite scope index does not lead with owner_user_id)
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
-    )
+    )  # indexed via ix_patrol_packs_scope_status (leading team_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
@@ -85,7 +94,10 @@ class PatrolPackModel(Base):
     # a database FK would make soft-deleted Packs pin Integrations forever.
     mcp_server_id: Mapped[str] = mapped_column(String(255), nullable=False)
     scheduled_job_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("scheduled_jobs.id", ondelete="SET NULL"), nullable=True
+        String(255),
+        ForeignKey("scheduled_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     last_validated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -95,6 +107,9 @@ class PatrolPackModel(Base):
     validation_summary: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # 投影器乐观守卫：最近应用到本行执行态列的 execution_events.position。
+    # 仅由 PostgresFormalProjector 写；update_from_domain 显式跳过该列以免被回退。
+    last_event_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -153,7 +168,8 @@ class PatrolPackModel(Base):
     def update_from_domain(self, pack: PatrolPack) -> None:
         replacement = self.from_domain(pack)
         for column in self.__table__.columns:
-            if column.name != "id":
+            # last_event_position 是投影器独占的乐观守卫列，不随领域写路径回退。
+            if column.name not in _PROJECTOR_GUARDED_COLUMNS:
                 setattr(self, column.name, getattr(replacement, column.name))
 
 
@@ -177,7 +193,7 @@ class PatrolRunModel(Base):
         String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False
     )
     session_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     execution_run_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     pack_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -207,8 +223,11 @@ class PatrolRunModel(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     report_artifact_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # 投影器乐观守卫：最近应用到本行执行态列的 execution_events.position。
+    # 仅由 PostgresFormalProjector 写；update_from_domain 显式跳过该列以免被回退。
+    last_event_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -264,7 +283,8 @@ class PatrolRunModel(Base):
     def update_from_domain(self, run: PatrolRun) -> None:
         replacement = self.from_domain(run)
         for column in self.__table__.columns:
-            if column.name != "id":
+            # last_event_position 是投影器独占的乐观守卫列，不随领域写路径回退。
+            if column.name not in _PROJECTOR_GUARDED_COLUMNS:
                 setattr(self, column.name, getattr(replacement, column.name))
 
 
@@ -342,6 +362,7 @@ class PatrolFindingModel(Base):
         String(36),
         ForeignKey("patrol_check_results.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     severity: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -352,7 +373,7 @@ class PatrolFindingModel(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     decided_by: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -413,22 +434,29 @@ class PatrolRemediationModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     pack_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False
+        String(36),
+        ForeignKey("patrol_packs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,  # patrol_packs RESTRICT FK integrity scan
     )
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False
-    )
+    )  # indexed via ix_patrol_remediations_run_id
     finding_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("patrol_findings.id", ondelete="CASCADE"), nullable=False
+        String(36),
+        ForeignKey("patrol_findings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,  # full FK index; uq_patrol_remediations_active_finding is partial (non-terminal only)
     )
     check_result_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("patrol_check_results.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     session_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     target_namespace: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -448,12 +476,18 @@ class PatrolRemediationModel(Base):
     before_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     after_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     recheck_run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True
+        String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 投影器乐观守卫：最近应用到本行执行态列的 execution_events.position。
+    # 仅由 PostgresFormalProjector 写；update_from_domain 显式跳过该列以免被回退。
+    last_event_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_by: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+        String(255),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,  # users RESTRICT FK integrity scan
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -513,5 +547,6 @@ class PatrolRemediationModel(Base):
     def update_from_domain(self, remediation: PatrolRemediation) -> None:
         replacement = self.from_domain(remediation)
         for column in self.__table__.columns:
-            if column.name != "id":
+            # last_event_position 是投影器独占的乐观守卫列，不随领域写路径回退。
+            if column.name not in _PROJECTOR_GUARDED_COLUMNS:
                 setattr(self, column.name, getattr(replacement, column.name))

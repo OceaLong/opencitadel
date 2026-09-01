@@ -43,9 +43,34 @@ type SessionsStreamCallback = (sessions: Session[]) => void;
 export const sessionApi = {
   /**
    * 获取会话列表
+   *
+   * @param q 可选的关键词，经 `q` 查询参数传给后端（ILIKE 标题/最新消息）。
+   *          不传或空字符串时行为与原先一致（不带 q）。
    */
-  getSessions: (): Promise<SessionsData> => {
-    return get<SessionsData>("/sessions");
+  getSessions: (q?: string): Promise<SessionsData> => {
+    const query = q?.trim();
+    return get<SessionsData>("/sessions", query ? { q: query } : undefined);
+  },
+
+  /**
+   * 获取回收站（已软删除、可恢复）会话列表
+   */
+  getDeletedSessions: (): Promise<SessionsData> => {
+    return get<SessionsData>("/sessions/deleted");
+  },
+
+  /**
+   * 从回收站恢复会话
+   */
+  restoreSession: (sessionId: string): Promise<void> => {
+    return post<void>(`/sessions/${sessionId}/restore`, {});
+  },
+
+  /**
+   * 彻底清除回收站中的会话（不可恢复）
+   */
+  purgeSession: (sessionId: string): Promise<void> => {
+    return post<void>(`/sessions/${sessionId}/purge`, {});
   },
 
   /**
@@ -71,13 +96,18 @@ export const sessionApi = {
   streamSessions: (
     onSessions: SessionsStreamCallback,
     onError?: (error: Error) => void,
+    q?: string,
   ): (() => void) => {
     const controller = new AbortController();
+    const query = q?.trim();
+    // 后端 stream 端点把 `q` 当作 query 参数（非请求体），因此拼到 URL 上；
+    // 不传/清空时行为不变（裸 URL + 空请求体）。
+    const endpoint = query ? `/sessions/stream?q=${encodeURIComponent(query)}` : "/sessions/stream";
 
     const startStream = async () => {
       try {
         const stream = await createSSEStream(
-          "/sessions/stream",
+          endpoint,
           {},
           {
             signal: controller.signal,

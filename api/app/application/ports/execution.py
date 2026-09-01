@@ -17,7 +17,10 @@ class CommandResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     command_id: UUID
-    status: Literal["accepted", "rejected"]
+    # "deferred" is a non-terminal, non-fatal outcome: another worker holds an
+    # active claim on this command, so it was neither accepted nor rejected and
+    # remains eligible for a later retry. The inbox row is left untouched.
+    status: Literal["accepted", "rejected", "deferred"]
     first_event_position: int | None
     last_event_position: int | None
     rejection_code: str | None

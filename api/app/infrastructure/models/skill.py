@@ -40,6 +40,7 @@ class SkillORM(Base):
         String(255),
         ForeignKey("inference_models.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     agent_params: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
@@ -59,6 +60,7 @@ class SkillORM(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),

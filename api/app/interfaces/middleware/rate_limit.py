@@ -7,7 +7,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
-from app.application.ports.crypto import ACCESS_COOKIE, REFRESH_COOKIE
+from app.application.ports.crypto import ACCESS_COOKIE, REFRESH_COOKIE, read_host_cookie
 from app.domain.runtime_policy import (
     RuntimePolicyIntegrityError,
     RuntimePolicyStaleError,
@@ -16,6 +16,8 @@ from app.domain.runtime_policy import (
 )
 from app.domain.utils.time_utils import utc_now
 from app.interfaces.client_ip import get_client_ip
+from app.interfaces.observability.security_metrics import record_rate_limit_rejected
+from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.service_dependencies import require_api_runtime
 
 logger = logging.getLogger(__name__)
@@ -63,8 +65,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         bucket = self._path_bucket(request.url.path)
         keys = [f"ip:{self._client_key(request)}:{bucket}"]
         tokens = (
-            request.cookies.get(ACCESS_COOKIE),
-            request.cookies.get(REFRESH_COOKIE),
+            read_host_cookie(request.cookies, ACCESS_COOKIE),
+            read_host_cookie(request.cookies, REFRESH_COOKIE),
             request.headers.get("x-api-key"),
         )
         seen_fingerprints: set[str] = set()
@@ -128,49 +130,67 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ) as exc:
             return JSONResponse(
                 status_code=503,
-                content={
-                    "code": 503,
-                    "msg": "运行策略暂不可用，请稍后重试",
-                    "data": {"error_key": exc.error_key},
-                },
+                content=ApiResponse(
+                    code=503,
+                    msg="运行策略暂不可用，请稍后重试",
+                    data={},
+                    error_key=exc.error_key,
+                ).model_dump(exclude_none=True),
                 headers={"Retry-After": "5", "Cache-Control": "no-store"},
             )
         if not traffic.rate_limit_enabled:
             return await call_next(request)
 
+        bucket = self._path_bucket(request.url.path)
+        limit = self._bucket_limit(traffic, bucket)
         try:
             limited = False
             for key in self._request_keys(request):
                 if await self._is_rate_limited(
                     request,
                     key,
-                    limit=traffic.requests_per_minute,
+                    limit=limit,
                 ):
                     limited = True
         except RateLimitBackendUnavailable:
             return JSONResponse(
                 status_code=503,
-                content={
-                    "code": 503,
-                    "msg": "请求限流服务暂不可用，请稍后重试",
-                    "data": None,
-                },
+                content=ApiResponse(
+                    code=503,
+                    msg="请求限流服务暂不可用，请稍后重试",
+                    data={},
+                    error_key="apiErrors.rateLimitBackendUnavailable",
+                ).model_dump(exclude_none=True),
                 headers={
                     "Retry-After": "5",
                     "Cache-Control": "no-store",
                 },
             )
         if limited:
+            record_rate_limit_rejected(bucket)
             return JSONResponse(
                 status_code=429,
-                content={"code": 429, "msg": "请求过于频繁，请稍后再试", "data": None},
+                content=ApiResponse(
+                    code=429,
+                    msg="请求过于频繁，请稍后再试",
+                    data={},
+                    error_key="apiErrors.rateLimited",
+                ).model_dump(exclude_none=True),
                 headers={
                     "Retry-After": str(_WINDOW_SECONDS),
-                    "X-RateLimit-Limit": str(traffic.requests_per_minute),
+                    "X-RateLimit-Limit": str(limit),
                     "Cache-Control": "no-store",
                 },
             )
         return await call_next(request)
+
+    @staticmethod
+    def _bucket_limit(traffic: TrafficPolicy, bucket: str) -> int:
+        """Credential endpoints get a tighter per-minute budget than business
+        traffic so password guessing cannot ride the general API allowance."""
+        if bucket == "auth":
+            return traffic.auth_requests_per_minute
+        return traffic.requests_per_minute
 
     @staticmethod
     def _path_bucket(path: str) -> str:

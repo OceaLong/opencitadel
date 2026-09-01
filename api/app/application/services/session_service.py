@@ -159,11 +159,15 @@ class SessionService:
             return updated
 
     async def get_all_sessions(
-        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+        search: str | None = None,
     ) -> list[Session]:
-        """获取项目所有任务会话列表"""
+        """获取项目所有任务会话列表；``search`` 非空时按关键词过滤"""
         async with self._uow_factory() as uow:
-            return await uow.session.get_all(limit=limit, offset=offset, scope=scope)
+            return await uow.session.get_all(limit=limit, offset=offset, scope=scope, search=search)
 
     async def clear_unread_message_count(self, session_id: str) -> None:
         """清空指定会话未读消息数"""
@@ -173,11 +177,18 @@ class SessionService:
             await uow.commit()
 
     async def delete_session(self, session_id: str, scope: OwnerScope | None = None) -> None:
-        """根据传递的会话id删除任务会话"""
+        """软删除任务会话：置 ``deleted_at``，进入回收站，可恢复。
+
+        证据链完整性要求删除可回溯，因此不再物理删除；物理删除只发生在
+        ``purge_session``（回收站手动清除或保留期到期后）。关联 sandbox 是可
+        重建的运行时资源，删除时销毁以立即释放；恢复后按需重新拉起。
+        保留期清理（软删 30 天后自动 purge）留待调度器挂载。TODO(recycle-bin):
+        在 scheduled_job 服务里挂一个保留期清理 tick（scheduler 文件超出本次范围）。
+        """
         if scope is None:
             raise ValueError("session deletion requires an owner scope")
-        # 1.先检查会话是否存在
-        logger.info("正在删除会话, 会话id: %s", session_id)
+        # 1.先检查会话是否存在（普通读路径已过滤软删行，重复删除将报不存在）
+        logger.info("正在软删除会话, 会话id: %s", session_id)
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id, scope=scope)
         if not session:
@@ -192,7 +203,7 @@ class SessionService:
         if active_run_id is not None:
             raise BadRequestError("会话仍有活动 Run，请先停止并等待进入终态")
 
-        # 2.销毁关联 sandbox 后删除会话
+        # 2.销毁关联 sandbox 后软删除会话
         if session.sandbox_id:
             try:
                 sandbox = await self._sandbox_factory.get(session.sandbox_id)
@@ -202,10 +213,46 @@ class SessionService:
                 logger.warning("删除会话时销毁 sandbox 失败 session=%s: %s", session_id, e)
 
         async with self._uow_factory() as uow:
-            await uow.session.delete_by_id(session_id)
+            await uow.session.soft_delete(session_id, scope=scope)
             await uow.commit()
         await self._publish_session_list_hint()
-        logger.info("删除会话[%s]成功", session_id)
+        logger.info("软删除会话[%s]成功", session_id)
+
+    async def list_deleted_sessions(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+    ) -> list[Session]:
+        """回收站：列出当前 owner 作用域内已软删的会话。"""
+        async with self._uow_factory() as uow:
+            return await uow.session.list_deleted(limit=limit, offset=offset, scope=scope)
+
+    async def restore_session(self, session_id: str, scope: OwnerScope | None = None) -> None:
+        """从回收站恢复会话：清空 ``deleted_at``。"""
+        if scope is None:
+            raise ValueError("session restore requires an owner scope")
+        logger.info("正在恢复会话, 会话id: %s", session_id)
+        async with self._uow_factory() as uow:
+            restored = await uow.session.restore(session_id, scope=scope)
+            if not restored:
+                raise NotFoundError(f"回收站中不存在会话[{session_id}]")
+            await uow.commit()
+        await self._publish_session_list_hint()
+        logger.info("恢复会话[%s]成功", session_id)
+
+    async def purge_session(self, session_id: str, scope: OwnerScope | None = None) -> None:
+        """物理清除回收站中的会话（不可恢复）。"""
+        if scope is None:
+            raise ValueError("session purge requires an owner scope")
+        logger.info("正在清除会话, 会话id: %s", session_id)
+        async with self._uow_factory() as uow:
+            purged = await uow.session.purge(session_id, scope=scope)
+            if not purged:
+                raise NotFoundError(f"回收站中不存在会话[{session_id}]")
+            await uow.commit()
+        await self._publish_session_list_hint()
+        logger.info("清除会话[%s]成功", session_id)
 
     async def _publish_session_list_hint(self) -> None:
         try:
@@ -277,8 +324,14 @@ class SessionService:
 
         raise ServerRequestsError(result.message)
 
-    async def get_vnc_url(self, session_id: str, scope: OwnerScope | None = None) -> str:
-        """获取指定会话的vnc链接"""
+    async def get_vnc_connection(
+        self, session_id: str, scope: OwnerScope | None = None
+    ) -> tuple[str, dict[str, str]]:
+        """获取指定会话的 VNC 链接及连接沙箱数据面所需的鉴权头。
+
+        VNC 现在经沙箱 :8080 上受 token 保护的反向代理转发（不再暴露无认证的
+        :5901），因此返回的 headers 必须在 api 侧发起 WebSocket 连接时携带。
+        """
         # 1.检查会话是否存在
         logger.info("获取会话[%s]的VNC链接", session_id)
         async with self._uow_factory() as uow:
@@ -292,4 +345,4 @@ class SessionService:
         if not sandbox:
             raise NotFoundError("当前会话沙箱不存在或已销毁")
 
-        return sandbox.vnc_url
+        return sandbox.vnc_url, sandbox.vnc_headers

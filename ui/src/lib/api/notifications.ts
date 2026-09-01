@@ -1,6 +1,5 @@
-import { API_CONFIG } from "./fetch";
-import { get, post } from "./fetch";
-import type { NotificationsData } from "./types";
+import { createIngestStream, get, post } from "./fetch";
+import type { NotificationsData, SSEEventHandler } from "./types";
 
 export const notificationsApi = {
   list: (unreadOnly = false): Promise<NotificationsData> => {
@@ -11,9 +10,17 @@ export const notificationsApi = {
     return post<{ read: boolean }>(`/notifications/${notificationId}/read`, {});
   },
 
-  /** EventSource URL for live notification stream (uses cookie auth). */
-  streamUrl: (): string => {
-    const base = API_CONFIG.baseURL.replace(/\/$/, "");
-    return `${base}/notifications/stream`;
+  /**
+   * 实时通知 SSE 流订阅。走仓内统一的 `createIngestStream`
+   * （GET + authenticatedFetch），因此会自动携带 `X-Workspace-Id` /
+   * `X-CSRF-Token` 等 header，保证与其它请求一致的租户隔离。
+   */
+  stream: (
+    onEvent: SSEEventHandler,
+    onError?: (error: Error) => void,
+    eventId?: string,
+    onComplete?: () => void,
+  ): (() => void) => {
+    return createIngestStream("/notifications/stream", onEvent, onError, eventId, onComplete);
   },
 };

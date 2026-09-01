@@ -25,6 +25,7 @@ class InferenceModelORM(Base):
         String(255),
         ForeignKey("inference_endpoints.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
     )
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     model_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -56,6 +57,7 @@ class InferenceModelORM(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),

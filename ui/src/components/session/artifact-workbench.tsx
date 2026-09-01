@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Download, FileText, Globe, Link2, Link2Off, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,9 +17,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { formatDateTime } from "@/lib/admin-utils";
 import { artifactsApi } from "@/lib/api/artifacts";
 import type { ArtifactEventSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+
+type ShareInfo = {
+  isShared: boolean;
+  expiresAt: string | null;
+  tokenPreview: string | null;
+};
 
 export type ArtifactWorkbenchProps = {
   sessionId: string;
@@ -35,6 +42,7 @@ export function ArtifactWorkbench({
   className,
 }: ArtifactWorkbenchProps) {
   const t = useTranslations("artifactWorkbench");
+  const locale = useLocale();
   const sortedArtifacts = useMemo(
     () => [...artifacts].sort((a, b) => a.title.localeCompare(b.title, "zh-CN")),
     [artifacts],
@@ -59,7 +67,8 @@ export function ArtifactWorkbench({
   const [loading, setLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [revoking, setRevoking] = useState(false);
-  const [sharedId, setSharedId] = useState<string | null>(null);
+  // 常驻分享状态:从后端 artifact 详情读取,刷新后仍可见/可撤销,不依赖内存中的一次性 id。
+  const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
 
   const active = sortedArtifacts.find((item) => item.artifact_id === selectedId) ?? null;
 
@@ -80,6 +89,31 @@ export function ArtifactWorkbench({
       setSelectedVersion(active.version);
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setShareInfo(null);
+      return;
+    }
+    let cancelled = false;
+    setShareInfo(null);
+    void artifactsApi
+      .get(selectedId)
+      .then((artifact) => {
+        if (cancelled) return;
+        setShareInfo({
+          isShared: artifact.is_shared,
+          expiresAt: artifact.share_expires_at,
+          tokenPreview: artifact.share_token_preview,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setShareInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId || selectedVersion == null) {
@@ -138,7 +172,12 @@ export function ArtifactWorkbench({
         ? result.share_url
         : `${window.location.origin}${result.share_url}`;
       await navigator.clipboard.writeText(url);
-      setSharedId(selectedId);
+      // 用一次性返回的完整 share_token 拼链接复制;常驻状态仅保留后 4 位辅助辨认。
+      setShareInfo({
+        isShared: true,
+        expiresAt: result.share_expires_at,
+        tokenPreview: result.share_token.slice(-4),
+      });
       toast.success(t("shareLinkCopied"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("shareLinkFailed"));
@@ -152,7 +191,7 @@ export function ArtifactWorkbench({
     setRevoking(true);
     try {
       await artifactsApi.revokeShare(selectedId);
-      setSharedId((current) => (current === selectedId ? null : current));
+      setShareInfo({ isShared: false, expiresAt: null, tokenPreview: null });
       toast.success(t("shareRevoked"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("shareRevokeFailed"));
@@ -164,6 +203,18 @@ export function ArtifactWorkbench({
   if (sortedArtifacts.length === 0) {
     return <EmptyState title={t("empty")} className={cn("h-full justify-center", className)} />;
   }
+
+  const sharedLabelParts = shareInfo?.isShared
+    ? [
+        t("sharedActive"),
+        shareInfo.expiresAt
+          ? t("shareExpiresAt", { date: formatDateTime(shareInfo.expiresAt, locale) })
+          : null,
+        shareInfo.tokenPreview
+          ? t("shareTokenSuffix", { suffix: shareInfo.tokenPreview })
+          : null,
+      ].filter((part): part is string => Boolean(part))
+    : [];
 
   return (
     <div className={cn("flex h-full flex-col overflow-hidden", className)}>
@@ -213,6 +264,13 @@ export function ArtifactWorkbench({
           </Badge>
         )}
 
+        {shareInfo?.isShared && (
+          <Badge variant="outline" className="border-primary/40 text-primary gap-1">
+            <Link2 className="size-3" />
+            {sharedLabelParts.join(" · ")}
+          </Badge>
+        )}
+
         <div className="ml-auto flex items-center gap-1">
           <Button variant="outline" size="sm" onClick={handleExport} disabled={!content || loading}>
             <Download className="size-3.5" />
@@ -220,9 +278,9 @@ export function ArtifactWorkbench({
           </Button>
           <Button variant="outline" size="sm" onClick={() => void handleShare()} disabled={sharing}>
             <Link2 className="size-3.5" />
-            {sharing ? t("generating") : t("share")}
+            {sharing ? t("generating") : shareInfo?.isShared ? t("reshare") : t("share")}
           </Button>
-          {sharedId === selectedId && selectedId !== null && (
+          {shareInfo?.isShared && selectedId !== null && (
             <Button
               variant="outline"
               size="sm"

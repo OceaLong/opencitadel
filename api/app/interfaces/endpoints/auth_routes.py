@@ -9,9 +9,11 @@ from app.application.ports.crypto import (
     ApplicationUrls,
     CookieManagerPort,
     OAuthRegistryPort,
+    read_host_cookie,
 )
 from app.application.services.auth_service import AuthService
 from app.domain.errors import BadRequestError, UnauthorizedError
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.invitation import InvitationType
 from app.domain.models.oauth_identity import OAuthIdentity
 from app.domain.models.team import TeamMember, TeamRole
@@ -86,7 +88,7 @@ async def refresh(
     auth_service: AuthService = Depends(get_auth_service),
     cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[UserResponse]:
-    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    refresh_token = read_host_cookie(request.cookies, REFRESH_COOKIE)
     if not refresh_token:
         raise UnauthorizedError("缺少刷新令牌")
     user, tokens = await auth_service.refresh(
@@ -107,7 +109,7 @@ async def logout(
     auth_service: AuthService = Depends(get_auth_service),
     cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[dict]:
-    await auth_service.logout(request.cookies.get(REFRESH_COOKIE))
+    await auth_service.logout(read_host_cookie(request.cookies, REFRESH_COOKIE))
     cookie_manager.clear_auth_cookies(response)
     return ApiResponse.success()
 
@@ -165,13 +167,22 @@ async def oauth_callback(
     token = await client.authorize_access_token(request)
     profile = await _load_oauth_profile(provider, client, token)
     email = (profile.get("email") or "").strip().lower()
+    # Account-takeover guard: an OAuth flow may only proceed with an email the
+    # provider has proven verified. This gate is what makes the implicit
+    # `get_by_email` account link below safe — without it an attacker could set
+    # a victim's address as an unverified email on their OAuth account and bind
+    # their identity onto the victim's existing (password) account.
     if not email or not profile.get("email_verified", False):
         raise BadRequestError("OAuth 邮箱未验证，无法登录")
     provider_user_id = str(profile.get("sub") or profile.get("id") or "")
     if not provider_user_id:
         raise BadRequestError("OAuth 用户标识缺失")
 
-    async with uow_factory() as uow:
+    # OAuth login/registration reads and writes users, oauth_identities,
+    # invitations, and team_members for a caller who has no bound identity yet;
+    # the service layer here is the authorization boundary, so the transaction
+    # runs under a trusted system scope instead of the anonymous request context.
+    async with uow_factory(authorization_context=AuthorizationContext.system("oauth")) as uow:
         identity = await uow.oauth_identity.get_by_provider_identity(provider, provider_user_id)
         user = (
             await uow.user.get_by_id(identity.user_id)
@@ -273,19 +284,11 @@ async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite
             and invitation.email.strip().lower() == email
         ):
             return invitation
-    invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
-    now = datetime.now(UTC)
-    return next(
-        (
-            item
-            for item in invitations
-            if item.email
-            and item.email.strip().lower() == email
-            and not item.accepted
-            and item.expires_at >= now
-        ),
-        None,
-    )
+    # Resolve the pending PLATFORM invitation by an email-indexed repository
+    # query (mirrors get_pending_team_invitation); avoids the previous
+    # list(limit=500) scan that could hide invitations on platforms with >500
+    # pending PLATFORM invitations.
+    return await uow.invitation.get_pending_platform_invitation(email)
 
 
 async def _load_oauth_profile(provider: str, client, token: dict) -> dict:
@@ -308,17 +311,22 @@ async def _load_oauth_profile(provider: str, client, token: dict) -> dict:
             "picture": userinfo.get("picture"),
         }
     if provider == "github":
+        # Account-takeover guard: the public `email` on the /user profile is
+        # self-asserted and may be unverified, so it must never be trusted as a
+        # verified identity. Always resolve the address from /user/emails and
+        # accept it only when GitHub reports it as the primary AND verified
+        # email. Without such an address the caller has no proven email and the
+        # OAuth flow is rejected downstream (see oauth_callback's email guard).
+        email = None
+        verified = False
+        emails_resp = await client.get("user/emails", token=token)
+        for item in emails_resp.json():
+            if item.get("primary") and item.get("verified"):
+                email = item.get("email")
+                verified = True
+                break
         user_resp = await client.get("user", token=token)
         user = user_resp.json()
-        email = user.get("email")
-        verified = bool(email)
-        if not email:
-            emails_resp = await client.get("user/emails", token=token)
-            for item in emails_resp.json():
-                if item.get("primary") and item.get("verified"):
-                    email = item.get("email")
-                    verified = True
-                    break
         return {
             "id": user.get("id"),
             "email": email,

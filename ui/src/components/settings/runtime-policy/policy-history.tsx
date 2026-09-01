@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +24,7 @@ import {
   runtimePolicyApi,
   type RuntimePolicyHead,
 } from "@/lib/api/runtime-policies";
+import { toBcp47 } from "@/lib/utils";
 
 type Props = {
   kind: "execution" | "operations";
@@ -34,6 +35,7 @@ type Props = {
 
 export function PolicyHistory({ kind, head, revisions, onRestored }: Props) {
   const t = useTranslations("runtimePolicy");
+  const locale = useLocale();
   const [selected, setSelected] = useState<ExecutionPolicyRevision | OperationsPolicyRevision>();
   const [restoring, setRestoring] = useState(false);
 
@@ -78,7 +80,7 @@ export function PolicyHistory({ kind, head, revisions, onRestored }: Props) {
                   {t("history.revision", { sequence: revision.sequence })} · {revision.note}
                 </p>
                 <p className="text-muted-foreground truncate text-xs">
-                  {revision.created_by} · {new Date(revision.created_at).toLocaleString()}
+                  {revision.created_by} · {new Date(revision.created_at).toLocaleString(toBcp47(locale))}
                 </p>
               </div>
               <Button

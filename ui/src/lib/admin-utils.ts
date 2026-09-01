@@ -1,3 +1,5 @@
+import { toBcp47 } from "./utils";
+
 export type AdminTimeRange = "7d" | "30d" | "90d" | "all";
 
 export function getAdminDateRange(range: AdminTimeRange): { start_at?: string; end_at?: string } {
@@ -26,9 +28,9 @@ export function formatCompactNumber(value: number): string {
   return String(value);
 }
 
-export function formatDateTime(value?: string | null): string {
+export function formatDateTime(value?: string | null, locale?: string): string {
   if (!value) return "-";
-  return new Date(value).toLocaleString("zh-CN", {
+  return new Date(value).toLocaleString(toBcp47(locale), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -37,8 +39,8 @@ export function formatDateTime(value?: string | null): string {
   });
 }
 
-export function formatShortDate(value: string): string {
+export function formatShortDate(value: string, locale?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  return date.toLocaleDateString(toBcp47(locale), { month: "2-digit", day: "2-digit" });
 }

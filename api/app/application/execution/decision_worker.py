@@ -12,6 +12,9 @@ from app.application.execution.orchestrator import CommandResult
 from app.application.execution.run_context import run_execution_context
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunState
+from app.observability.otel import get_tracer
+
+_tracer = get_tracer("opencitadel.execution.decision")
 
 
 class DecisionCandidate(BaseModel):
@@ -71,29 +74,36 @@ class DecisionWorker:
         submitted = rejected = idle = 0
         for candidate in candidates:
             state = candidate.state
-            run_context = run_execution_context(state)
-            command = next_command(
-                state,
-                run_context,
-                now=now,
-            )
-            if command is None:
-                idle += 1
-                continue
-            result = await self._run_service.submit(
-                command,
-                CommandContext(
-                    owner_user_id=state.owner_user_id,
-                    team_id=state.team_id,
-                    correlation_id=run_context.correlation_id,
-                    causation_id=None,
-                    issued_at=now,
-                ),
-            )
-            if result.status == "accepted":
-                submitted += 1
-            else:
-                rejected += 1
+            with _tracer.start_as_current_span("run.decision") as span:
+                run_context = run_execution_context(state)
+                span.set_attribute("opencitadel.run_id", str(state.run_id))
+                span.set_attribute("opencitadel.correlation_id", str(run_context.correlation_id))
+                span.set_attribute("opencitadel.family", str(state.family))
+                command = next_command(
+                    state,
+                    run_context,
+                    now=now,
+                )
+                if command is None:
+                    span.set_attribute("opencitadel.decision", "idle")
+                    idle += 1
+                    continue
+                span.set_attribute("opencitadel.command_type", command.command_type)
+                result = await self._run_service.submit(
+                    command,
+                    CommandContext(
+                        owner_user_id=state.owner_user_id,
+                        team_id=state.team_id,
+                        correlation_id=run_context.correlation_id,
+                        causation_id=None,
+                        issued_at=now,
+                    ),
+                )
+                span.set_attribute("opencitadel.decision", result.status)
+                if result.status == "accepted":
+                    submitted += 1
+                else:
+                    rejected += 1
         return DecisionBatchStats(
             loaded=len(candidates),
             submitted=submitted,

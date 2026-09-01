@@ -23,4 +23,13 @@ export const authApi = {
   register: (params: { invite_token: string; email: string; username: string; password: string }) =>
     post<AuthUser>("/auth/register", params),
   logout: () => post("/auth/logout", {}),
+  /**
+   * 已启用的 OAuth 提供商列表。走统一 fetch 层（带 workspace/CSRF header），
+   * 并跳过鉴权刷新/跳转——该接口可能在未登录的登录页被调用，失败时静默即可。
+   */
+  oauthProviders: () =>
+    get<string[]>("/auth/oauth/providers", undefined, {
+      skipAuthRefresh: true,
+      skipAuthRedirect: true,
+    }),
 };

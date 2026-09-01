@@ -45,6 +45,21 @@ function message(eventId: string): SSEEventData {
   };
 }
 
+function messageWithoutId(text: string): SSEEventData {
+  return {
+    type: "message",
+    data: {
+      role: "assistant",
+      message: text,
+      schema_version: 1,
+      visibility: "user",
+      channel: "ui",
+      persist: false,
+      created_at: 1,
+    },
+  };
+}
+
 describe("useSessionEventLog formal event cursor", () => {
   afterEach(() => {
     mocks.getSessionEvents.mockReset();
@@ -100,6 +115,57 @@ describe("useSessionEventLog formal event cursor", () => {
       "event-2",
       "event-3",
     ]);
+    await unmount();
+  });
+
+  it("orders out-of-order event ids by event_id, not arrival", async () => {
+    const { unmount } = await renderComponent(<Harness />);
+    await act(async () => {
+      currentLog?.appendEvent(message("event-3"));
+      currentLog?.appendEvent(message("event-1"));
+      currentLog?.appendEvent(message("event-2"));
+    });
+
+    expect(currentLog?.events.map((event) => event.data.event_id)).toEqual([
+      "event-1",
+      "event-2",
+      "event-3",
+    ]);
+    // 最新游标取最大 event_id，与到达顺序无关。
+    expect(currentLog?.lastEventIdRef.current).toBe("event-3");
+    await unmount();
+  });
+
+  it("deduplicates a repeated event_id", async () => {
+    const { unmount } = await renderComponent(<Harness />);
+    let first = false;
+    let second = false;
+    await act(async () => {
+      first = currentLog?.appendEvent(message("event-1")) ?? false;
+      second = currentLog?.appendEvent(message("event-1")) ?? false;
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(currentLog?.events.map((event) => event.data.event_id)).toEqual(["event-1"]);
+    await unmount();
+  });
+
+  it("keeps events without an event_id in arrival order and dedupes identical ones", async () => {
+    const { unmount } = await renderComponent(<Harness />);
+    await act(async () => {
+      currentLog?.appendEvent(messageWithoutId("alpha"));
+      currentLog?.appendEvent(messageWithoutId("beta"));
+      // 内容完全一致的无 id 事件按指纹去重。
+      currentLog?.appendEvent(messageWithoutId("alpha"));
+    });
+
+    const messages = currentLog?.events.map((event) =>
+      event.type === "message" ? event.data.message : undefined,
+    );
+    expect(messages).toEqual(["alpha", "beta"]);
+    // 无 id 事件不参与游标推进，也不应导致崩溃。
+    expect(currentLog?.lastEventIdRef.current).toBeNull();
     await unmount();
   });
 });

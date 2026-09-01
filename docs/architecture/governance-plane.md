@@ -62,6 +62,20 @@ approval, and subject Activity. The decision endpoint records actor, status,
 time, and feedback. Reject, expiry, cancellation, duplicate decisions, and a
 decision for the wrong owner all fail without calling the provider.
 
+Approvals are a closed loop rather than an open-ended wait:
+
+- **Inbox.** `GET /api/approvals?status=pending` lists the caller's pending
+  approvals (with `approved`/`rejected`/`cancelled`/`expired` also selectable)
+  so a reviewer can find every request across Runs from one queue.
+- **Notification.** When a Run raises `ApprovalRequested`, the formal projector
+  sends a durable notification so the reviewer is alerted instead of polling.
+- **Timeout.** Requesting an approval schedules a durable self-cancelling
+  timeout command. When it fires the approval transitions to the terminal
+  `expired` status (an `ApprovalExpired` event), the Run leaves the waiting
+  state, and the provider is never called. The window is the
+  `approval.ttl_minutes` Operations Policy field (default one day), not an
+  environment variable.
+
 ## Invocation safety
 
 Each tool request has a unique Activity/Invocation identity. Equal arguments in

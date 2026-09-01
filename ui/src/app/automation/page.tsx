@@ -10,6 +10,7 @@ import {
   JobFormSheet,
   jobToFormValues,
 } from "@/components/automation/job-form-sheet";
+import { JobRunsDialog } from "@/components/automation/job-runs-dialog";
 import { JobsTable } from "@/components/automation/jobs-table";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -50,6 +51,7 @@ export default function AutomationPage() {
   const [pendingDelete, setPendingDelete] = useState<ScheduledJob | null>(null);
   const [webhookDialogOpen, setWebhookDialogOpen] = useState(false);
   const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
+  const [runsJob, setRunsJob] = useState<ScheduledJob | null>(null);
   const [form, setForm] = useState<CreateScheduledJobParams>(EMPTY_JOB_FORM);
 
   const closeWebhookDialog = () => {
@@ -283,6 +285,7 @@ export default function AutomationPage() {
         onDelete={setPendingDelete}
         onToggle={(job, enabled) => void handleToggleEnabled(job, enabled)}
         onRunNow={(job) => void handleRunNow(job)}
+        onViewRuns={setRunsJob}
         onRotateSecret={(job) => void handleRotateSecret(job)}
         webhookUrl={webhookUrl}
         togglingJobId={togglingJobId}
@@ -296,6 +299,13 @@ export default function AutomationPage() {
         title={t("deleteJobTitle")}
         description={t("deleteJobDescription", { name: pendingDelete?.name ?? "" })}
         onConfirm={handleDelete}
+      />
+
+      <JobRunsDialog
+        open={runsJob != null}
+        onOpenChange={(open) => !open && setRunsJob(null)}
+        jobId={runsJob?.id ?? null}
+        jobName={runsJob?.name ?? ""}
       />
     </ScrollablePageContent>
   );

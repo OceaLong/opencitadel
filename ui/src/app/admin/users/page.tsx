@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Loader2, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -41,18 +41,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { type PaginatedFetcher, usePaginatedList } from "@/hooks/use-paginated-list";
 import { formatDateTime } from "@/lib/admin-utils";
-import { adminApi, type AdminUser, type Quota } from "@/lib/api/admin";
-
-const PAGE_SIZE = 20;
+import { adminApi, type AdminTeam, type AdminUser, type Quota } from "@/lib/api/admin";
 
 export default function AdminUsersPage() {
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const locale = useLocale();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [quotaOpen, setQuotaOpen] = useState(false);
@@ -64,27 +60,63 @@ export default function AdminUsersPage() {
     "anonymize" | "cascade" | "transfer_to_team"
   >("anonymize");
   const [deleting, setDeleting] = useState(false);
+  const [teams, setTeams] = useState<AdminTeam[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+  const [transferTeamId, setTransferTeamId] = useState<string>("");
 
-  const loadUsers = useCallback(
-    async (nextOffset: number) => {
-      setLoading(true);
+  const fetchUsers = useCallback<PaginatedFetcher<AdminUser>>(
+    async ({ limit, offset }) => {
       try {
-        const data = await adminApi.users({ limit: PAGE_SIZE, offset: nextOffset });
-        setUsers(data.users);
-        setTotal(data.total);
-        setOffset(nextOffset);
+        const data = await adminApi.users({ limit, offset });
+        return { items: data.users, total: data.total };
       } catch (error) {
         toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
-      } finally {
-        setLoading(false);
+        return null;
       }
     },
     [tCommon],
   );
 
+  const {
+    items: users,
+    total,
+    offset,
+    loading,
+    totalPages,
+    currentPage,
+    canPrev,
+    canNext,
+    load: loadUsers,
+    nextPage,
+    prevPage,
+  } = usePaginatedList<AdminUser>(fetchUsers);
+
   useEffect(() => {
     void loadUsers(0);
   }, [loadUsers]);
+
+  // 选择 "转移给团队" 策略时懒加载可选团队列表(选择器必选,避免提交缺 team_id 被后端 400)。
+  useEffect(() => {
+    if (!deleteTarget || deleteStrategy !== "transfer_to_team" || teams.length > 0 || teamsLoading) {
+      return;
+    }
+    let cancelled = false;
+    setTeamsLoading(true);
+    void adminApi
+      .teams({ limit: 100 })
+      .then((data) => {
+        if (!cancelled) setTeams(data.teams);
+      })
+      .catch(() => {
+        if (!cancelled) setTeams([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTeamsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deleteTarget, deleteStrategy, teams.length, teamsLoading]);
 
   const filteredUsers = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -156,9 +188,14 @@ export default function AdminUsersPage() {
 
   async function deleteUser() {
     if (!deleteTarget) return;
+    if (deleteStrategy === "transfer_to_team" && !transferTeamId) return;
     setDeleting(true);
     try {
-      await adminApi.deleteUser(deleteTarget.id, deleteStrategy);
+      await adminApi.deleteUser(
+        deleteTarget.id,
+        deleteStrategy,
+        deleteStrategy === "transfer_to_team" ? transferTeamId : undefined,
+      );
       toast.success(t("userDeleted"));
       setDeleteTarget(null);
       await loadUsers(offset);
@@ -168,9 +205,6 @@ export default function AdminUsersPage() {
       setDeleting(false);
     }
   }
-
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
 
   return (
     <div className="space-y-6">
@@ -240,7 +274,7 @@ export default function AdminUsersPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
-                      {formatDateTime(user.last_login_at)}
+                      {formatDateTime(user.last_login_at, locale)}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
@@ -288,16 +322,16 @@ export default function AdminUsersPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={offset === 0}
-                  onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}
+                  disabled={!canPrev}
+                  onClick={() => void prevPage()}
                 >
                   {tCommon("previousPage")}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => void loadUsers(offset + PAGE_SIZE)}
+                  disabled={!canNext}
+                  onClick={() => void nextPage()}
                 >
                   {tCommon("nextPage")}
                 </Button>
@@ -407,7 +441,16 @@ export default function AdminUsersPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteStrategy("anonymize");
+            setTransferTeamId("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("deleteUserTitle")}</DialogTitle>
@@ -421,9 +464,10 @@ export default function AdminUsersPage() {
                 <Label>{t("deleteStrategy")}</Label>
                 <Select
                   value={deleteStrategy}
-                  onValueChange={(value: "anonymize" | "cascade" | "transfer_to_team") =>
-                    setDeleteStrategy(value)
-                  }
+                  onValueChange={(value: "anonymize" | "cascade" | "transfer_to_team") => {
+                    setDeleteStrategy(value);
+                    if (value !== "transfer_to_team") setTransferTeamId("");
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -435,13 +479,52 @@ export default function AdminUsersPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {deleteStrategy === "transfer_to_team" ? (
+                <div className="space-y-2">
+                  <Label>{t("transferTargetTeam")}</Label>
+                  <Select
+                    value={transferTeamId || undefined}
+                    onValueChange={setTransferTeamId}
+                    disabled={teamsLoading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={teamsLoading ? tCommon("loading") : t("selectTeamPlaceholder")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teams.map((team) => (
+                        <SelectItem key={team.id} value={team.id}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!teamsLoading && teams.length === 0 ? (
+                    <p className="text-muted-foreground text-xs">{t("noTeamsAvailable")}</p>
+                  ) : !transferTeamId ? (
+                    <p className="text-destructive text-xs">{t("transferTeamRequired")}</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteStrategy("anonymize");
+                setTransferTeamId("");
+              }}
+            >
               {tCommon("cancel")}
             </Button>
-            <Button variant="destructive" disabled={deleting} onClick={() => void deleteUser()}>
+            <Button
+              variant="destructive"
+              disabled={deleting || (deleteStrategy === "transfer_to_team" && !transferTeamId)}
+              onClick={() => void deleteUser()}
+            >
               {deleting ? tCommon("deleting") : t("deleteUser")}
             </Button>
           </DialogFooter>

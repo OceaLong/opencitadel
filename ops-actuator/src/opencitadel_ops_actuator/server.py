@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from .actuator import Actuator
 from .capabilities import capability_manifest
 from .config import ActuatorSettings
+from .http_auth import BearerTokenMiddleware, require_http_token
 
 READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
@@ -80,3 +81,28 @@ def create_server(settings: ActuatorSettings | None = None) -> FastMCP:
         return await actuator.rollback_workload(namespace, workload, kind, idempotency_key)
 
     return server
+
+
+def build_http_app(settings: ActuatorSettings | None = None):
+    """Return the streamable-http ASGI app wrapped in mandatory bearer auth.
+
+    The token is validated eagerly so a mis-provisioned process fails to start
+    instead of silently exposing unauthenticated write actions.
+    """
+    cfg = settings or ActuatorSettings()
+    token = require_http_token(cfg.token)
+    app = create_server(cfg).streamable_http_app()
+    app.add_middleware(BearerTokenMiddleware, token=token)
+    return app
+
+
+def run_server(settings: ActuatorSettings, transport: str) -> None:
+    """Run the Actuator over the selected transport, enforcing auth on HTTP."""
+    if transport == "stdio":
+        create_server(settings).run(transport="stdio")
+        return
+
+    import uvicorn
+
+    app = build_http_app(settings)
+    uvicorn.run(app, host=settings.host, port=settings.port, access_log=False)

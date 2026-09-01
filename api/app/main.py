@@ -23,7 +23,6 @@ from app.composition.api import open_api_runtime
 from app.composition.tasks import TaskFailure
 from app.composition.types import ApiRuntime
 from app.domain.models.authorization import AuthorizationContext
-from app.infrastructure.observability.otel import setup_observability
 from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
@@ -32,6 +31,7 @@ from app.interfaces.middleware.auth_context import AuthContextMiddleware
 from app.interfaces.middleware.csrf import CsrfMiddleware
 from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
 from app.interfaces.middleware.request_logging import install_request_logging
+from app.observability.otel import setup_observability
 from core.config import DeploymentSettings, load_deployment_settings
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,6 @@ def _install_application(
         https_only=settings.cookie_secure,
     )
     register_exception_handlers(application)
-    install_request_logging(application)
     application.add_middleware(AuthContextMiddleware)
     application.add_middleware(CsrfMiddleware)
     maybe_install_rate_limit(
@@ -122,9 +121,13 @@ def _install_application(
         ),
     )
     # Starlette makes the most recently added user middleware outermost.
-    # Install the pure-ASGI cache boundary last so even CSRF/rate-limit
-    # short-circuits receive the API no-store policy.
+    # The pure-ASGI cache boundary stays outside CSRF/rate-limit so even their
+    # short-circuit responses receive the API no-store policy.
     application.add_middleware(ApiCachePolicyMiddleware)
+    # Request logging + HTTP metrics go outermost of all so that requests
+    # short-circuited by rate-limit (429) / CSRF (403) still get an access log
+    # line and still feed http_requests_total / http_request_duration_seconds.
+    install_request_logging(application)
     application.include_router(well_known_router)
     application.include_router(a2a_router, prefix="/api/a2a")
     application.include_router(router, prefix="/api")

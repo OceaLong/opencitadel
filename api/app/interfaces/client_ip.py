@@ -62,8 +62,18 @@ def get_client_ip(
     except ValueError:
         return str(peer)
 
+    # Trust-chain-depth walk: starting from the nearest hop (the peer wrote the
+    # rightmost entry), strip only addresses that belong to a trusted proxy CIDR
+    # and stop at the first untrusted address — that is the real client. We never
+    # blindly take the left-most (attacker-controlled) entry. The depth of trust
+    # is therefore bounded by the trusted_proxy_cidrs configuration: with a single
+    # narrow ingress CIDR only that one appended hop is peeled off, so an attacker
+    # cannot impersonate an arbitrary client by prepending extra XFF entries.
+    # (config.py forbids broad RFC1918 CIDRs in production so the sandbox network,
+    # which shares those ranges, is never treated as a trusted proxy layer.)
     for hop in reversed(hops):
         if any(hop in network for network in networks):
             continue
         return str(hop)
+    # Every hop was a trusted proxy: fall back to the left-most claimed origin.
     return str(hops[0])

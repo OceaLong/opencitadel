@@ -1,0 +1,28 @@
+{{- if and .Values.postgresql.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress]
+  # 仅允许 api / execution-kernel 访问 5432。迁移逻辑以 initContainer 形式跑在
+  # api Pod 内（继承 component=api 标签），故无需单独的 migrate 选择器。
+  # ops-collector 为只读巡检组件，其 egress 含 5432，启用时一并放行。
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - "api"
+                  - "execution-kernel"
+                  {{- if .Values.opsCollector.enabled }}
+                  - "ops-collector"
+                  {{- end }}
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- end }}

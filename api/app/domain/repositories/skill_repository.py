@@ -7,7 +7,11 @@ from app.domain.models.skill import Skill
 class SkillRepository(ABC):
     @abstractmethod
     async def get_all(
-        self, enabled_only: bool = False, scope: OwnerScope | None = None
+        self,
+        enabled_only: bool = False,
+        scope: OwnerScope | None = None,
+        *,
+        global_only: bool = False,
     ) -> list[Skill]: ...
 
     @abstractmethod

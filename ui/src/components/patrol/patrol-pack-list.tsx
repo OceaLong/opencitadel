@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, Stethoscope } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
 import type { PatrolPack, PatrolRun } from "@/lib/api/types";
+import { toBcp47 } from "@/lib/utils";
 
 export function PatrolPackList({
   packs,
@@ -35,6 +36,7 @@ export function PatrolPackList({
   runAdmissionDisabled: boolean;
 }) {
   const t = useTranslations("patrol");
+  const locale = useLocale();
   const labels = usePatrolLabels();
   if (loading) {
     return (
@@ -88,7 +90,7 @@ export function PatrolPackList({
                   <span className="inline-flex items-center gap-1">
                     <Clock3 className="size-3.5" />
                     {pack.next_run_at
-                      ? t("nextRun", { value: new Date(pack.next_run_at).toLocaleString() })
+                      ? t("nextRun", { value: new Date(pack.next_run_at).toLocaleString(toBcp47(locale)) })
                       : t("scheduleOff")}{" "}
                     · {pack.config.timezone}
                   </span>

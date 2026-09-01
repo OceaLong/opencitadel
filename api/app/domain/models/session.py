@@ -61,6 +61,29 @@ class Session(BaseModel):
             raise ValueError("operator sessions require at least one allowed domain")
         return self
 
+    def attach_run(self, run_id: UUID, request_id: UUID) -> "Session":
+        """绑定一次已准入的正式执行 Run 到会话（记录当前活跃 Run 身份）。
+
+        执行态状态机的富化入口：admission 通过后由应用服务在持锁事务内调用，
+        承载 ``active_execution_run_id`` / ``active_execution_request_id`` 的迁移，
+        取代应用服务对这两列的裸赋值。``status`` 列本身交由投影器（读事件流）
+        推进，这里不触碰，避免与投影器竞写会话状态。
+        """
+        self.active_execution_run_id = run_id
+        self.active_execution_request_id = request_id
+        return self
+
+    def release_run(self) -> "Session":
+        """在 Run 抵达终态时解绑活跃 Run 身份。
+
+        与 ``attach_run`` 对称。当前运行时的释放由投影器在处理终态事件时完成
+        （清空 active_execution_run_id/request_id），此方法为应用服务保留一个
+        领域内的显式释放入口，不改动 ``status``。
+        """
+        self.active_execution_run_id = None
+        self.active_execution_request_id = None
+        return self
+
     def binding_for(
         self,
         kind: ResourceKind,

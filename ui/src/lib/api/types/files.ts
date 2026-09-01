@@ -9,9 +9,10 @@ export type FileInfo = {
   filepath: string;
   key: string;
   extension: string;
-  content_type: string;
+  mime_type: string;
   size: number;
-  [key: string]: unknown;
+  owner_user_id?: string | null;
+  team_id?: string | null;
 };
 
 /**

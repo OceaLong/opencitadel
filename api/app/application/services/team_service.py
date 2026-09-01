@@ -16,6 +16,7 @@ from app.domain.errors import (
     ForbiddenError,
     NotFoundError,
 )
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.models.user import User
@@ -35,6 +36,22 @@ class TeamInvitationRegisterResult:
     member: TeamMember
 
 
+# Team-deletion strategies. `archive` (soft delete via deleted_at) depends on
+# E9 and is intentionally not implemented here. There is deliberately no
+# implicit "let the DB SET NULL scatter the resources" default: callers must
+# pick an explicit, audited disposition.
+TEAM_DELETE_TRANSFER_TO_OWNER = "transfer_to_owner"
+TEAM_DELETE_CASCADE = "cascade"
+_TEAM_DELETE_STRATEGIES = frozenset({TEAM_DELETE_TRANSFER_TO_OWNER, TEAM_DELETE_CASCADE})
+
+
+@dataclass(frozen=True)
+class TeamDeletionResult:
+    strategy: str
+    affected_resources: int
+    transferred_to_user_id: str | None
+
+
 class TeamService:
     def __init__(
         self,
@@ -52,7 +69,13 @@ class TeamService:
         if not name:
             raise BadRequestError("团队名称不能为空", error_key="errors.teamNameRequired")
         team = Team(name=name, description=description, created_by=actor_user_id)
-        async with self._uow_factory() as uow:
+        # Creating a team and seeding its owner membership are writes to
+        # tenancy tables whose RLS write predicate is system/admin only; the
+        # service is the authorization boundary, so it persists under a system
+        # scope after validating the caller.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             await uow.team.save(team)
             await uow.team.add_member(
                 TeamMember(team_id=team.id, user_id=actor_user_id, role=TeamRole.OWNER)
@@ -73,12 +96,21 @@ class TeamService:
             return team
 
     async def list_members(self, team_id: str, actor_user_id: str) -> list[TeamMember]:
-        async with self._uow_factory() as uow:
+        # Listing peers reads other members' team_members rows, which RLS scopes
+        # to the subject only; the app-layer membership check below is the
+        # authorization boundary, so the read runs under a system scope.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=True)
             return await uow.team.list_members(team_id)
 
     async def list_member_details(self, team_id: str, actor_user_id: str) -> list[TeamMemberDetail]:
-        async with self._uow_factory() as uow:
+        # Enriching members reads peer team_members and users rows that RLS scopes
+        # to their own subject; the app-layer membership check is the boundary.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=True)
             members = await uow.team.list_members(team_id)
             return await self._enrich_members(uow, members)
@@ -115,7 +147,11 @@ class TeamService:
         return f"{self._application_urls.frontend_base_url.rstrip('/')}/invitations/{token}"
 
     async def preview_invitation(self, *, token: str) -> TeamInvitationPreview:
-        async with self._uow_factory() as uow:
+        # Public preview: the caller is not yet a team member, so reading the
+        # invitation, its team, and any matching user requires a system scope.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             invitation = await self._load_team_invitation(uow, token)
             team = await uow.team.get_by_id(invitation.team_id or "")
             if not team:
@@ -149,7 +185,11 @@ class TeamService:
         normalized_email = email.strip().lower()
         if not _EMAIL_RE.match(normalized_email):
             raise BadRequestError("邮箱格式无效")
-        async with self._uow_factory() as uow:
+        # Anonymous registration flow: creates the user, their membership, and
+        # marks the invitation accepted before any identity is bound.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             invitation = await self._load_team_invitation(uow, token)
             if not invitation.email:
                 raise BadRequestError("此邀请不支持注册，请登录已有账号")
@@ -179,7 +219,11 @@ class TeamService:
             return TeamInvitationRegisterResult(user=user, member=member)
 
     async def accept_invitation(self, *, token: str, user_id: str) -> TeamMember:
-        async with self._uow_factory() as uow:
+        # The accepting user is not a member of the target team yet, so reading
+        # the invitation and writing the new membership run under a system scope.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             invitation = await self._load_team_invitation(uow, token)
             if invitation.accepted:
                 raise BadRequestError("邀请链接已被使用")
@@ -212,16 +256,36 @@ class TeamService:
             await uow.commit()
             return member
 
-    async def delete_team(self, *, team_id: str, actor_user_id: str) -> None:
-        async with self._uow_factory() as uow:
+    async def delete_team(
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        strategy: str = TEAM_DELETE_TRANSFER_TO_OWNER,
+    ) -> TeamDeletionResult:
+        # Owner-authorized team deletion. Disposing of the team's resources and
+        # removing team_members are system/admin-only writes, so persist under a
+        # system scope after the app-layer owner check. The owner performing the
+        # deletion is the transfer target for `transfer_to_owner`.
+        self._require_supported_delete_strategy(strategy)
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             actor = await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             if actor.role != TeamRole.OWNER:
                 raise ForbiddenError("只有团队所有者可解散团队", error_key="errors.teamOwnerOnly")
-            await uow.team.delete_by_id(team_id)
+            result = await self._dispose_and_delete_team(
+                uow, team_id=team_id, strategy=strategy, transfer_target_user_id=actor_user_id
+            )
             await uow.commit()
+        return result
 
     async def remove_member(self, *, team_id: str, actor_user_id: str, target_user_id: str) -> None:
-        async with self._uow_factory() as uow:
+        # Managing another member's row is a system/admin-only write; the
+        # app-layer admin/owner check above is the authorization boundary.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             target = await uow.team.get_member(team_id, target_user_id)
             if not target:
@@ -238,7 +302,11 @@ class TeamService:
         target_user_id: str,
         role: TeamRole,
     ) -> TeamMember:
-        async with self._uow_factory() as uow:
+        # Role changes to another member are system/admin-only writes; the
+        # app-layer owner check below is the authorization boundary.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             actor = await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             if actor.role != TeamRole.OWNER:
                 raise ForbiddenError(
@@ -257,7 +325,11 @@ class TeamService:
             return updated
 
     async def leave_team(self, *, team_id: str, user_id: str) -> None:
-        async with self._uow_factory() as uow:
+        # Removing one's own membership is a system/admin-only write predicate;
+        # persist under a system scope after the app-layer membership check.
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             member = await self._load_actor_member(uow, team_id, user_id, allow_member=True)
             if member.role == TeamRole.OWNER:
                 members = await uow.team.list_members(team_id)
@@ -273,13 +345,28 @@ class TeamService:
             total = await uow.team.count()
         return teams, total
 
-    async def admin_delete_team(self, team_id: str) -> None:
-        async with self._uow_factory() as uow:
+    async def admin_delete_team(
+        self, team_id: str, *, strategy: str = TEAM_DELETE_TRANSFER_TO_OWNER
+    ) -> TeamDeletionResult:
+        # Platform-admin teardown crosses every member's data, so run under a
+        # system scope and dispose of resources explicitly rather than relying
+        # on the database's implicit ON DELETE SET NULL.
+        self._require_supported_delete_strategy(strategy)
+        async with self._uow_factory(
+            authorization_context=AuthorizationContext.system("team")
+        ) as uow:
             team = await uow.team.get_by_id(team_id)
             if not team:
                 raise NotFoundError("团队不存在")
-            await uow.team.delete_by_id(team_id)
+            transfer_target = await self._resolve_transfer_target(uow, team)
+            result = await self._dispose_and_delete_team(
+                uow,
+                team_id=team_id,
+                strategy=strategy,
+                transfer_target_user_id=transfer_target,
+            )
             await uow.commit()
+        return result
 
     async def admin_list_member_details(self, team_id: str) -> list[TeamMemberDetail]:
         async with self._uow_factory() as uow:
@@ -341,6 +428,51 @@ class TeamService:
             )
             for member in members
         ]
+
+    @staticmethod
+    def _require_supported_delete_strategy(strategy: str) -> None:
+        if strategy not in _TEAM_DELETE_STRATEGIES:
+            raise BadRequestError(
+                "不支持的团队删除策略", error_key="errors.teamDeleteStrategyUnsupported"
+            )
+
+    async def _resolve_transfer_target(self, uow, team: Team) -> str | None:
+        """Pick the personal-space recipient for `transfer_to_owner`.
+
+        Prefers a member with the OWNER role; falls back to the team creator so
+        an ownerless team still resolves to a deterministic recipient.
+        """
+        members = await uow.team.list_members(team.id)
+        for member in members:
+            if member.role == TeamRole.OWNER:
+                return member.user_id
+        return team.created_by or None
+
+    async def _dispose_and_delete_team(
+        self,
+        uow,
+        *,
+        team_id: str,
+        strategy: str,
+        transfer_target_user_id: str | None,
+    ) -> TeamDeletionResult:
+        if strategy == TEAM_DELETE_CASCADE:
+            affected = await uow.team.delete_resources(team_id)
+            transferred_to: str | None = None
+        else:  # TEAM_DELETE_TRANSFER_TO_OWNER
+            if not transfer_target_user_id:
+                raise BadRequestError(
+                    "无法确定资源接收者，无法转移团队资源",
+                    error_key="errors.teamTransferOwnerUnknown",
+                )
+            affected = await uow.team.transfer_resources_to_owner(team_id, transfer_target_user_id)
+            transferred_to = transfer_target_user_id
+        await uow.team.delete_by_id(team_id)
+        return TeamDeletionResult(
+            strategy=strategy,
+            affected_resources=affected,
+            transferred_to_user_id=transferred_to,
+        )
 
     async def _ensure_removable_owner(self, uow, team_id: str, target: TeamMember) -> None:
         if target.role != TeamRole.OWNER:

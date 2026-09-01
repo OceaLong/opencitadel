@@ -825,3 +825,129 @@ def test_full_replay_equals_every_snapshot_tail_split() -> None:
         )
         assert resumed.state == full.state
         assert resumed.state_hash == full.state_hash
+
+
+def _approve_pending(aggregate: RunAggregate, events: list[StoredEvent]) -> None:
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "CreateRun",
+            0,
+            {
+                "family": "agent",
+                "source_entity_type": "session",
+                "source_entity_id": "session-1",
+                "parent_run_id": None,
+                "semantic_payload": {},
+            },
+        ),
+    )
+    decide_and_replay(aggregate, events, command("StartRun", 1))
+
+
+APPROVAL_ID = UUID("40000000-0000-0000-0000-000000000001")
+APPROVAL_ACTIVITY_ID = UUID("40000000-0000-0000-0000-000000000002")
+REQUEST_APPROVAL_PAYLOAD = {
+    "approval_id": str(APPROVAL_ID),
+    "subject_activity_id": str(APPROVAL_ACTIVITY_ID),
+    "approval_kind": "tool_effect",
+    "risk_summary": "Write to an external system",
+    "subject_label": "write_external",
+}
+
+
+def test_request_approval_schedules_a_self_cancelling_timeout() -> None:
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    _approve_pending(aggregate, events)
+    state = replay(aggregate, events, stream_id=str(RUN_ID)).state
+
+    decision = aggregate.decide(
+        state,
+        command("RequestApproval", 2, REQUEST_APPROVAL_PAYLOAD),
+    )
+
+    assert [event.event_type for event in decision.events] == ["ApprovalRequested"]
+    assert len(decision.scheduled_commands) == 1
+    timeout = decision.scheduled_commands[0]
+    assert timeout.command.command_type == "ExpireApproval"
+    assert timeout.command.payload == {"approval_id": str(APPROVAL_ID)}
+    assert timeout.due_at == NOW + timedelta(minutes=1440)
+    assert "ApprovalDecided" in timeout.cancellation_event_types
+    assert "RunCancelled" in timeout.cancellation_event_types
+    assert timeout.cancellation_activity_id is None
+
+
+def test_expired_approval_advances_a_permanently_waiting_run() -> None:
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    _approve_pending(aggregate, events)
+    waiting = decide_and_replay(
+        aggregate,
+        events,
+        command("RequestApproval", 2, REQUEST_APPROVAL_PAYLOAD),
+    )
+    assert waiting.status == "waiting"
+    assert waiting.pending_approval_id == APPROVAL_ID
+
+    expired = decide_and_replay(
+        aggregate,
+        events,
+        command("ExpireApproval", 3, {"approval_id": str(APPROVAL_ID)}),
+    )
+
+    assert [event.event_type for event in events[-2:]] == [
+        "ApprovalExpired",
+        "RunCancelled",
+    ]
+    assert expired.status == "cancelled"
+    assert expired.pending_approval_id is None
+    assert dict(expired.approval_decisions)[APPROVAL_ID] == "expired"
+
+
+def test_expire_is_a_noop_once_the_approval_was_already_decided() -> None:
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    _approve_pending(aggregate, events)
+    decide_and_replay(
+        aggregate,
+        events,
+        command("RequestApproval", 2, REQUEST_APPROVAL_PAYLOAD),
+    )
+    resumed = decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "DecideApproval",
+            3,
+            {
+                "approval_id": str(APPROVAL_ID),
+                "decision": "approved",
+                "actor_user_id": "reviewer-1",
+                "feedback": "ok",
+            },
+        ),
+    )
+    assert resumed.status == "running"
+
+    # A late timer for the already-decided approval must not emit any event.
+    late = aggregate.decide(
+        resumed,
+        command("ExpireApproval", resumed.stream_version, {"approval_id": str(APPROVAL_ID)}),
+    )
+    assert late.events == ()
+
+
+def test_expire_after_run_is_terminal_is_absorbed() -> None:
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    _approve_pending(aggregate, events)
+    terminal = decide_and_replay(aggregate, events, command("CancelRun", 2))
+    assert terminal.status == "cancelled"
+
+    absorbed = aggregate.decide(
+        terminal,
+        command("ExpireApproval", terminal.stream_version, {"approval_id": str(APPROVAL_ID)}),
+    )
+    assert absorbed.events == ()

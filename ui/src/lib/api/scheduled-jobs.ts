@@ -2,7 +2,9 @@ import { del, get, patch, post } from "./fetch";
 import type {
   CreateScheduledJobParams,
   CreateScheduledJobResult,
+  ListScheduledJobRunsParams,
   ScheduledJob,
+  ScheduledJobRunsData,
   ScheduledJobsData,
   UpdateScheduledJobParams,
 } from "./types";
@@ -33,5 +35,21 @@ export const scheduledJobsApi = {
 
   trigger: (jobId: string): Promise<{ session_id: string }> => {
     return post<{ session_id: string }>(`/scheduled-jobs/${jobId}/trigger`, {});
+  },
+
+  /**
+   * 获取某个定时任务的运行历史（分页）
+   */
+  listRuns: (
+    jobId: string,
+    params?: ListScheduledJobRunsParams,
+  ): Promise<ScheduledJobRunsData> => {
+    const query: Record<string, number> = {};
+    if (params?.limit != null) query.limit = params.limit;
+    if (params?.offset != null) query.offset = params.offset;
+    return get<ScheduledJobRunsData>(
+      `/scheduled-jobs/${jobId}/runs`,
+      Object.keys(query).length > 0 ? query : undefined,
+    );
   },
 };

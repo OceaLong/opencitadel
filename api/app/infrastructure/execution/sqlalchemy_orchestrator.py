@@ -19,7 +19,7 @@ from app.domain.execution.aggregate import (
     replay,
 )
 from app.domain.execution.commands import CommandEnvelope
-from app.domain.execution.errors import RejectionCode
+from app.domain.execution.errors import CommandInProgressError, RejectionCode
 from app.domain.execution.run import (
     ExpectedStreamVersionError,
     InvalidRunTransitionError,
@@ -114,6 +114,14 @@ class SqlAlchemyExecutionOrchestrator:
                 await inbox.complete(result, now=self._now())
                 await session.commit()
                 return result
+            except CommandInProgressError:
+                # Another worker holds an active claim. This is a benign
+                # concurrency signal, not a fatal error: roll back without
+                # touching the inbox row and report a non-terminal "deferred"
+                # outcome so the command is retried later instead of crashing
+                # the control plane.
+                await session.rollback()
+                return self._deferred(command)
             except (OSError, RuntimeError, ValueError):
                 await session.rollback()
                 raise
@@ -445,6 +453,16 @@ class SqlAlchemyExecutionOrchestrator:
             first_event_position=None,
             last_event_position=None,
             rejection_code=code.value,
+        )
+
+    @staticmethod
+    def _deferred(command: CommandEnvelope) -> CommandResult:
+        return CommandResult(
+            command_id=command.command_id,
+            status="deferred",
+            first_event_position=None,
+            last_event_position=None,
+            rejection_code=None,
         )
 
 

@@ -192,7 +192,7 @@ async def test_live_limit_tightening_applies_to_the_next_request() -> None:
         return Response(status_code=204)
 
     first = await middleware.dispatch(
-        _request("203.0.113.10", runtime=runtime),
+        _request("203.0.113.10", path="/api/sessions", runtime=runtime),
         accepted,
     )
     reader.set_operations(
@@ -201,10 +201,77 @@ async def test_live_limit_tightening_applies_to_the_next_request() -> None:
         )
     )
     denied = await middleware.dispatch(
-        _request("203.0.113.10", runtime=runtime),
+        _request("203.0.113.10", path="/api/sessions", runtime=runtime),
         accepted,
     )
 
     assert first.status_code == 204
     assert denied.status_code == 429
     assert len(reader.operations_calls) == 2
+
+
+def test_auth_bucket_uses_dedicated_auth_budget_not_the_general_one() -> None:
+    """Credential endpoints must draw from the tighter auth budget so a
+    generous business `requests_per_minute` cannot open a brute-force window."""
+    traffic = TrafficPolicy(requests_per_minute=500, auth_requests_per_minute=7)
+
+    assert RateLimitMiddleware._bucket_limit(traffic, "auth") == 7
+    assert RateLimitMiddleware._bucket_limit(traffic, "api") == 500
+    assert RateLimitMiddleware._bucket_limit(traffic, "files") == 500
+
+
+@pytest.mark.asyncio
+async def test_auth_endpoint_denied_by_tighter_auth_budget() -> None:
+    """/api/auth/* is throttled at auth_requests_per_minute even when the
+    general per-minute budget is generous, and the 429 advertises that limit."""
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=500, auth_requests_per_minute=1),
+        )
+    )
+    runtime = _runtime(reader=reader, store=_UnavailableStore())
+    middleware = RateLimitMiddleware(Starlette())
+
+    async def accepted(_request):
+        return Response(status_code=204)
+
+    first = await middleware.dispatch(
+        _request("203.0.113.10", path="/api/auth/login", runtime=runtime),
+        accepted,
+    )
+    denied = await middleware.dispatch(
+        _request("203.0.113.10", path="/api/auth/login", runtime=runtime),
+        accepted,
+    )
+
+    assert first.status_code == 204
+    assert denied.status_code == 429
+    assert denied.headers["X-RateLimit-Limit"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_business_endpoint_keeps_general_budget_under_tight_auth_limit() -> None:
+    """A tight auth budget must not bleed into business traffic: /api/sessions
+    still rides the larger requests_per_minute allowance."""
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=500, auth_requests_per_minute=1),
+        )
+    )
+    runtime = _runtime(reader=reader, store=_UnavailableStore())
+    middleware = RateLimitMiddleware(Starlette())
+
+    async def accepted(_request):
+        return Response(status_code=204)
+
+    first = await middleware.dispatch(
+        _request("203.0.113.10", path="/api/sessions", runtime=runtime),
+        accepted,
+    )
+    second = await middleware.dispatch(
+        _request("203.0.113.10", path="/api/sessions", runtime=runtime),
+        accepted,
+    )
+
+    assert first.status_code == 204
+    assert second.status_code == 204

@@ -9,6 +9,7 @@ import { MarkdownContent } from "@/components/markdown-content";
 import { Button } from "@/components/ui/button";
 
 import { fileApi } from "@/lib/api";
+import { downloadBlob } from "@/lib/download-blob";
 import type { AttachmentFile } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
 
@@ -148,14 +149,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
 
     try {
       const blob = await fileApi.downloadFile(file.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, file.filename);
       toast.success(t("downloadSuccess", { filename: file.filename }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("downloadFailed");

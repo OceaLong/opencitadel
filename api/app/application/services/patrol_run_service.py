@@ -593,29 +593,7 @@ class PatrolRunService:
                         )
                     )
 
-            counts = Counter(item.status.value for item in evaluated)
-            run.pass_count = counts["pass"]
-            run.warn_count = counts["warn"]
-            run.fail_count = counts["fail"]
-            run.error_count = counts["error"]
-            run.skipped_count = counts["skipped"]
-            enabled = [item for item in evaluated if item.status != PatrolCheckStatus.SKIPPED]
-            complete = sum(1 for item in enabled if item.evidence_complete)
-            run.evidence_completeness = complete / len(enabled) if enabled else 1.0
-            run.status = (
-                PatrolRunStatus.COMPLETED_WITH_FINDINGS
-                if any(counts[key] for key in ("warn", "fail", "error"))
-                else PatrolRunStatus.COMPLETED
-            )
-            run.finished_at = now
-            started = run.started_at or run.created_at
-            run.duration_ms = max(0, int((now - started).total_seconds() * 1000))
-            run.summary = {
-                "counts": {
-                    key: counts[key] for key in ("pass", "warn", "fail", "error", "skipped")
-                },
-                "evidence_completeness": run.evidence_completeness,
-            }
+            run = run.finalize(evaluated, now)
             await uow.patrol.save_run(run)
             await uow.session.update_status(session_id, SessionStatus.COMPLETED)
             await uow.commit()

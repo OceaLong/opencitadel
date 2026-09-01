@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, PrimaryKeyConstraint, String, text
+from sqlalchemy import DateTime, ForeignKey, Index, PrimaryKeyConstraint, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,13 +11,22 @@ from .base import Base
 
 class DeliveryArtifactModel(Base):
     __tablename__ = "artifacts"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_artifacts_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_artifacts_id"),
+        # Unguessable share links must be unique; only shared artifacts carry a token.
+        Index(
+            "uq_artifacts_share_token",
+            "share_token",
+            unique=True,
+            postgresql_where=text("share_token IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(255), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     session_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("sessions.id", ondelete="CASCADE")
+        String(255), ForeignKey("sessions.id", ondelete="CASCADE"), index=True
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="doc")
     title: Mapped[str] = mapped_column(String(512), nullable=False, server_default="")

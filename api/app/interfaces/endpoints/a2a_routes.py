@@ -45,9 +45,14 @@ async def a2a_jsonrpc(
 
         return EventSourceResponse(event_generator())
 
+    if method == "tasks/get":
+        return await a2a_server_service.handle_task_get(payload, principal=principal)
+    if method == "tasks/cancel":
+        return await a2a_server_service.handle_task_cancel(payload, principal=principal)
+
     request_id = payload.get("id")
     return {
         "jsonrpc": "2.0",
         "id": request_id,
-        "error": {"code": -32601, "message": f"不支持的方法: {method}"},
+        "error": {"code": -32601, "message": f"Method not found: {method}"},
     }

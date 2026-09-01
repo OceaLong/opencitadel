@@ -1,0 +1,13 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-execution-kernel
+  labels:
+    app.kubernetes.io/component: execution-kernel
+spec:
+  minAvailable: {{ .Values.pdb.executionKernel.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: execution-kernel
+{{- end }}

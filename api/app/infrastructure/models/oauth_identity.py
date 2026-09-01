@@ -19,7 +19,7 @@ class OAuthIdentityORM(Base):
         String(255), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)

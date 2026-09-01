@@ -15,7 +15,10 @@ Collector/Actuator.
 - A new PostgreSQL database with pgvector, plus Redis
 
 The chart can create PostgreSQL, Redis, and MinIO for a self-contained install.
-For production, external managed services are recommended.
+The built-in PostgreSQL and Redis are single-replica, evaluation-grade only; for
+production use an external/managed service or an operator such as CloudNativePG,
+and set `postgresql.enabled=false` / `redis.enabled=false` with `env.POSTGRES_HOST`,
+`env.REDIS_HOST` (and related credentials in `secrets.*`) pointing at it.
 
 ## Install
 
@@ -65,12 +68,37 @@ append/claim/projection grants required by its runtime role.
 | `redis.enabled` | `true` | chart-managed Redis |
 | `minio.enabled` | `false` | optional chart-managed MinIO |
 | `networkPolicy.enabled` | `true` | workload network isolation |
+| `egressProxy.enabled` | `true` | sandbox egress proxy (squid) required by the sandbox NetworkPolicy |
+| `pdb.enabled` | `false` | PodDisruptionBudget (minAvailable:1) for api/kernel |
+| `topologySpread.enabled` | `true` | spread api/kernel replicas across nodes |
+| `monitoring.prometheusRule.enabled` | `false` | render baseline PrometheusRule alerts |
+| `backup.enabled` | `false` | scheduled pg_dump CronJob to a PVC |
 | `opsCollector.enabled` | `false` | fixed read-only Patrol Collector |
 | `opsActuator.enabled` | `false` | allowlisted write-only Patrol Actuator |
 | `migrate.enabled` | `true` | run the serialized migration initContainer |
 
 The schema in `values.schema.json` validates the execution-kernel contract and
 rejects obsolete deployment keys.
+
+## Resilience and observability
+
+- `pdb.enabled=true` keeps at least one api/kernel pod during voluntary
+  disruptions; use it only with multiple replicas.
+- `topologySpread.enabled` (default on) spreads api/kernel across nodes with a
+  soft (`ScheduleAnyway`) hostname constraint, so single-node clusters still
+  schedule.
+- `monitoring.prometheusRule.enabled=true` renders a `PrometheusRule` (requires
+  the Prometheus Operator) with baseline alerts: approval-decision timeout rate,
+  audit-chain verification failure, execution outbox lag/redelivery backlog,
+  sandbox admission rejection rate, HTTP 5xx rate, and rate-limit rejection rate.
+  The last two depend on `http_requests_total` / `rate_limit_rejected_total`
+  being emitted by the API; until then those two rules simply return no data.
+- `backup.enabled=true` runs a scheduled `pg_dump` CronJob into a dedicated PVC
+  with a retention count. Its resource name `opencitadel-postgres-backup` is the
+  intended target for an Ops Patrol `opsCollector.registeredBackups` entry, so the
+  Patrol backup check has a real backing job. This local PVC dump is
+  evaluation-grade; production should back up via the managed database or ship
+  dumps to object storage.
 
 ## Required secrets
 
@@ -92,6 +120,16 @@ into API or execution-kernel containers.
 ## Security requirements
 
 - Keep `networkPolicy.enabled=true` and scope sandbox ingress to API/kernel.
+- Keep `egressProxy.enabled=true`: it deploys the squid egress proxy that every
+  sandbox must traverse for outbound traffic. The sandbox NetworkPolicy allows
+  only DNS plus port 3128 to the proxy Pod (label
+  `app.kubernetes.io/component=egress-proxy`), so the proxy resolves each
+  destination and enforces the private-range/metadata blacklist from
+  `deploy/squid/squid.conf`. The api/kernel `SANDBOX_HTTP_PROXY`,
+  `SANDBOX_HTTPS_PROXY`, and `SANDBOX_CHROME_ARGS` default to
+  `http://<release>-egress-proxy:3128`. Disabling it fail-closes all sandbox
+  egress except DNS unless you also relax the sandbox NetworkPolicy; set the
+  same `env.SANDBOX_*` values to point at an external proxy instead.
 - Keep the Collector read-only and the Actuator separately allowlisted.
 - Set public HTTPS frontend/OAuth URLs and `env.COOKIE_SECURE=true`.
 - Set exact trusted proxy CIDRs, outbound ports, and private-host allowlists.

@@ -99,6 +99,7 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
             token_usage=shared.llm_token_usage_service,
             files=shared.file_service,
             client_factory=shared.resilient_llm_factory,
+            quota=shared.quota_service,
         ),
         RetrievalActivityHandler(
             objects=shared.activity_objects,
@@ -176,6 +177,7 @@ async def open_kernel_runtime(
                 authorization=AuthorizationContext.system("execution-kernel"),
                 activity_registry=activity_registry,
                 worker_id=_worker_id("activities"),
+                activity_max_concurrency=settings.execution_activity_max_concurrency,
             )
             resource_gc = ResourceVersionGCService(
                 uow_factory=shared.uow_factory,

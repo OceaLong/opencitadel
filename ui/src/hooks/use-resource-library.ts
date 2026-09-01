@@ -96,10 +96,22 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   const [startingId, setStartingId] = useState<string | null>(null);
   const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
 
+  // Callers commonly pass `onReset`/`onLoaded` as inline arrows (see
+  // `knowledge-library.tsx`), which change identity every render. Holding them
+  // in a ref keeps `load` stable so the `useEffect(() => void load(), [load])`
+  // below fires once per real dependency change instead of on every render,
+  // which would otherwise loop: load -> setItems -> render -> new callbacks ->
+  // new `load` -> effect -> load. Mirrors `use-session-streams.ts`'s
+  // `dependenciesRef` pattern.
+  const latestCallbacksRef = useRef({ onReset, onLoaded });
+  useEffect(() => {
+    latestCallbacksRef.current = { onReset, onLoaded };
+  }, [onReset, onLoaded]);
+
   const load = useCallback(async () => {
     if (!enabled) {
       setItems([]);
-      onReset?.();
+      latestCallbacksRef.current.onReset?.();
       return;
     }
     try {
@@ -118,11 +130,11 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
         setVersionsById(Object.fromEntries(histories));
       }
       setItems(list);
-      await onLoaded?.();
+      await latestCallbacksRef.current.onLoaded?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : loadErrorMessage);
     }
-  }, [enabled, api, onLoaded, onReset, loadErrorMessage]);
+  }, [enabled, api, loadErrorMessage]);
 
   useEffect(() => {
     void load();

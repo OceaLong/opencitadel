@@ -61,6 +61,27 @@ export type CreateScheduledJobResult = {
   webhook_secret?: string | null;
 };
 
+/**
+ * 定时任务的单次运行记录（GET /scheduled-jobs/{job_id}/runs）
+ */
+export type ScheduledJobRun = {
+  run_id: string;
+  family: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  error?: string | null;
+};
+
+export type ScheduledJobRunsData = {
+  runs: ScheduledJobRun[];
+};
+
+export type ListScheduledJobRunsParams = {
+  limit?: number;
+  offset?: number;
+};
+
 export type ApprovalEventData = Extract<SSEEventData, { type: "approval" }>["data"];
 
 /**
@@ -72,7 +93,8 @@ export type SessionFile = {
   filepath: string;
   key: string;
   extension: string;
-  content_type: string;
+  mime_type: string;
   size: number;
-  [key: string]: unknown;
+  owner_user_id?: string | null;
+  team_id?: string | null;
 };

@@ -40,6 +40,11 @@ spec:
               value: '["opencitadel"]'
             - name: OPS_ACTUATOR_TRANSPORT
               value: streamable-http
+            - name: OPS_ACTUATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: opencitadel-ops-actuator-secret
+                  key: OPS_ACTUATOR_TOKEN
           readinessProbe:
             tcpSocket:
               port: mcp

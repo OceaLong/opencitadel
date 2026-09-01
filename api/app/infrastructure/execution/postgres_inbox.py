@@ -95,13 +95,21 @@ class PostgresInbox:
             raise ValueError("claim_ttl must be positive")
         if command.payload_digest is None:
             await self.receive(command)
+        # SKIP LOCKED: if a concurrent worker holds the row lock (is actively
+        # claiming/processing this command), the lock is skipped and no row is
+        # returned. That is the concurrency signal, surfaced as a non-fatal
+        # CommandInProgressError rather than blocking on the lock. The row this
+        # session just receive()d, or one a peer left in ``processing`` and then
+        # released, is lockable here and continues normally.
         record = await self._session.scalar(
             select(ExecutionCommandInboxORM)
             .where(ExecutionCommandInboxORM.command_id == command.command_id)
-            .with_for_update()
+            .with_for_update(skip_locked=True)
         )
         if record is None:
-            raise RuntimeError("command inbox row is not visible after receive")
+            raise CommandInProgressError(
+                f"command {command.command_id} is locked by a concurrent claim"
+            )
         self._assert_same_command(record, command)
 
         if record.status in {"accepted", "rejected"}:
@@ -109,14 +117,6 @@ class PostgresInbox:
                 status="completed",
                 generation=record.claim_generation,
                 result=self._persisted_result(record),
-            )
-        if (
-            record.status == "processing"
-            and record.claim_deadline is not None
-            and record.claim_deadline > resolved_now
-        ):
-            raise CommandInProgressError(
-                f"command {command.command_id} has an active processing claim"
             )
 
         record.status = "processing"

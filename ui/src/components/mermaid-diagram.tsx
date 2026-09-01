@@ -31,7 +31,10 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
           mermaid.initialize({
             startOnLoad: false,
             theme: mermaidThemeName,
-            securityLevel: "loose",
+            // "strict" sanitizes rendered HTML tags and disables click handlers
+            // in model-generated diagrams, closing the XSS surface opened by the
+            // `dangerouslySetInnerHTML` below. Normal flowcharts are unaffected.
+            securityLevel: "strict",
           });
           mermaidInitialized = true;
           mermaidTheme = mermaidThemeName;

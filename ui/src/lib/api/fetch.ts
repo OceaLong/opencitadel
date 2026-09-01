@@ -58,6 +58,18 @@ function readCookie(name: string): string {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
+/**
+ * 读取 CSRF token cookie，回显到 `X-CSRF-Token` 请求头。
+ *
+ * 镜像后端 `read_host_cookie` 的兜底顺序：生产环境（HTTPS）下后端把 CSRF
+ * cookie 写成带 `__Host-` 前缀的 `__Host-csrf_token`，开发/http 下仍是裸名
+ * `csrf_token`。这里优先读 `__Host-csrf_token`，回退 `csrf_token`，从而两种
+ * 部署形态都能正确回显 token。
+ */
+function readCsrfToken(): string {
+  return readCookie("__Host-csrf_token") || readCookie("csrf_token");
+}
+
 function activeWorkspaceId(): string {
   if (typeof window === "undefined") return "";
   return window.localStorage.getItem(ACTIVE_WORKSPACE_KEY) ?? "";
@@ -83,7 +95,7 @@ function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): He
     ...headers,
   };
   const upperMethod = method.toUpperCase();
-  const csrfToken = readCookie("csrf_token");
+  const csrfToken = readCsrfToken();
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(upperMethod)) {
     (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
   }
@@ -231,7 +243,7 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
     ...headers,
   };
   const method = (fetchOptions.method || "GET").toString().toUpperCase();
-  const csrfToken = readCookie("csrf_token");
+  const csrfToken = readCsrfToken();
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
     (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
   }
@@ -422,7 +434,7 @@ export async function createSSEStream(
     Accept: "text/event-stream",
     ...headers,
   };
-  const csrfToken = readCookie("csrf_token");
+  const csrfToken = readCsrfToken();
   if (csrfToken) {
     (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
   }

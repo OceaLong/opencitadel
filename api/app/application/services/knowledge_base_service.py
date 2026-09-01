@@ -102,12 +102,18 @@ class KnowledgeBaseService:
         result: CandidateBuildResult,
         scope: OwnerScope,
         *,
+        uow: IUnitOfWork,
         command_sink=None,
     ) -> None:
         build = result.build
 
         async def private_input(policy: ExecutionPolicy):
-            frozen = await self._freeze_embedding(build, scope, policy=policy)
+            # Freeze the embedding binding through the caller's UoW. This closure
+            # runs inside admit(), which runs inside the outer build UoW, so it
+            # must NOT open a second UoW (P1-2 nested-UoW pool-exhaustion vector):
+            # reuse ``uow``'s connection instead of InferenceBindingService.resolve,
+            # which would check out a second pooled connection.
+            frozen = await self._freeze_embedding(build, scope, policy=policy, uow=uow)
             return {
                 "build_id": frozen.build_id,
                 "resource_id": frozen.resource_id,
@@ -144,20 +150,38 @@ class KnowledgeBaseService:
         scope: OwnerScope,
         *,
         policy: ExecutionPolicy,
+        uow: IUnitOfWork,
     ) -> ResourceBuildIntent:
         if not policy.knowledge_base.vector_enabled:
             return build
         if self._inference_bindings is None:
             raise RuntimeError("knowledge-base vector indexing requires InferenceBindingService")
-        resolved = await self._inference_bindings.resolve(
+        # Resolve the effective embedding binding on the caller's UoW connection
+        # rather than opening a nested UoW (P1-2). We only need the frozen model
+        # id + platform dimensions here; endpoint invokability is re-validated by
+        # the KB_INGEST embedding activity at execution time.
+        binding = await uow.inference_binding.get_effective_binding(
             InferencePurpose.EMBEDDING,
-            scope=scope,
+            scope,
         )
-        if not isinstance(resolved.model.settings, EmbeddingModelSettings):
+        if binding is None:
+            raise ConflictError(
+                "推理用途尚未配置模型绑定",
+                error_key="inference.errors.bindingNotConfigured",
+                error_params={"purpose": InferencePurpose.EMBEDDING.value},
+            )
+        model = await uow.inference_model.get_by_id(binding.model_id, scope=scope)
+        if model is None:
+            raise ConflictError(
+                "推理绑定引用的模型不存在或不可访问",
+                error_key="inference.errors.bindingModelUnavailable",
+                error_params={"purpose": InferencePurpose.EMBEDDING.value},
+            )
+        if not isinstance(model.settings, EmbeddingModelSettings):
             raise ConflictError("embedding binding does not reference an embedding model")
         return build.model_copy(
             update={
-                "embedding_model_id": resolved.id,
+                "embedding_model_id": model.id,
                 "embedding_dimensions": PLATFORM_EMBEDDING_DIMENSIONS,
             }
         )
@@ -172,6 +196,7 @@ class KnowledgeBaseService:
         await self._admit_build(
             result,
             scope,
+            uow=uow,
             command_sink=uow.execution_commands,
         )
 
@@ -978,6 +1003,13 @@ class KnowledgeBaseService:
         return document, revision_id, source_page
 
     async def delete_kb(self, kb_id: str, scope: OwnerScope | None = None) -> None:
+        """软删除知识库：置 ``deleted_at``，进入回收站，可恢复。
+
+        证据链完整性要求删除可回溯，因此不再物理删除；物理删除只发生在
+        ``purge_kb``（回收站手动清除或保留期到期后）。保留期清理（软删 30 天后
+        自动 purge）留待调度器挂载。TODO(recycle-bin): 在 scheduled_job 服务里
+        挂一个保留期清理 tick（scheduler 文件超出本次范围）。
+        """
         kb = await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:
             active = await uow.knowledge_version.get_active_candidate(kb.id)
@@ -987,9 +1019,39 @@ class KnowledgeBaseService:
                 error_key="errors.kbIndexingInProgress",
             )
         async with self._uow_factory() as uow:
-            await uow.knowledge_base.delete_kb(kb_id)
+            await uow.knowledge_base.soft_delete(kb_id, scope=scope)
             await uow.commit()
-        logger.info("删除知识库[%s]成功", kb_id)
+        logger.info("软删除知识库[%s]成功", kb_id)
+
+    async def list_deleted_kbs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+    ) -> list[KnowledgeBase]:
+        """回收站：列出当前 owner 作用域内已软删的知识库。"""
+        async with self._uow_factory() as uow:
+            return await uow.knowledge_base.list_deleted_kbs(
+                limit=limit, offset=offset, scope=scope
+            )
+
+    async def restore_kb(self, kb_id: str, scope: OwnerScope | None = None) -> None:
+        """从回收站恢复知识库：清空 ``deleted_at``。"""
+        async with self._uow_factory() as uow:
+            restored = await uow.knowledge_base.restore(kb_id, scope=scope)
+            if not restored:
+                raise NotFoundError(f"回收站中不存在知识库[{kb_id}]")
+            await uow.commit()
+        logger.info("恢复知识库[%s]成功", kb_id)
+
+    async def purge_kb(self, kb_id: str, scope: OwnerScope | None = None) -> None:
+        """物理清除回收站中的知识库及其级联数据（不可恢复）。"""
+        async with self._uow_factory() as uow:
+            purged = await uow.knowledge_base.purge_kb(kb_id, scope=scope)
+            if not purged:
+                raise NotFoundError(f"回收站中不存在知识库[{kb_id}]")
+            await uow.commit()
+        logger.info("清除知识库[%s]成功", kb_id)
 
     async def delete_document(
         self,

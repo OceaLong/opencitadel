@@ -103,3 +103,59 @@ jobs:
         with:
           sarif_file: trivy-full.sarif
           category: trivy-weekly-full
+
+  container-image-scan:
+    # The repository-scan job above only runs Trivy in `fs` mode, so OS
+    # packages baked into container images are invisible on PRs. This job
+    # closes that gap by building each image locally (buildx `load: true`,
+    # mirroring the ci.yml docker-build job) and running Trivy in `image`
+    # mode against the built OS layers, gating on fixable HIGH/CRITICAL.
+    #
+    # Coverage prioritizes attack surface: `sandbox` first (largest OS
+    # footprint: Chromium + Xvfb + x11vnc + Node + Python) and `api`, then
+    # `ui`. Build args and buildx setup mirror ci.yml's docker-build job.
+    name: Container image scan (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sandbox
+            context: sandbox
+            file: sandbox/Dockerfile
+            target: ""
+          - name: api
+            context: api
+            file: api/Dockerfile
+            target: api
+          - name: ui
+            context: ui
+            file: ui/Dockerfile
+            target: runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build image (load into local docker)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target || '' }}
+          push: false
+          load: true
+          tags: opencitadel-${{ matrix.name }}:scan
+          build-args: |
+            PIP_INDEX_URL=https://pypi.org/simple/
+            UV_INDEX_URL=https://pypi.org/simple/
+            NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Gate on fixable HIGH/CRITICAL OS/library findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: opencitadel-${{ matrix.name }}:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table

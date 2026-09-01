@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 
@@ -40,17 +41,31 @@ async def auto_extend_timeout_middleware(request: Request, call_next):
 
 
 async def require_sandbox_token_middleware(request: Request, call_next):
-    """数据面 API 的 Bearer Token 校验（向后兼容）。
+    """数据面 API 的 Bearer Token 强制校验（fail-closed）。
 
-    kernel 为每个沙箱注入唯一的 SANDBOX_ACCESS_TOKEN，并在每次请求携带；仅当该
-    环境变量存在时才强制校验，因此早于该 token 的旧部署仍可正常工作。这挡住了同一
-    沙箱网络内其它容器对本沙箱数据面（shell/文件）的越权访问。
+    kernel 为每个沙箱注入唯一的 SANDBOX_ACCESS_TOKEN（由 HMAC(seed, sandbox_id)
+    派生），并在每次请求携带。校验规则：
+
+    * token 未配置（env 为空）=> 直接拒绝(503)，绝不放行——消除此前"空 token 即
+      完全不校验"的 fail-open 漏洞。正常启动路径下 config 已保证该 env 必填。
+    * Authorization 头以恒定时间(hmac.compare_digest)比对，避免时序侧信道。
+
+    这挡住了同一沙箱网络内其它容器对本沙箱数据面（shell/文件/CDP/VNC 反代）的
+    越权访问。
     """
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
     expected = os.environ.get("SANDBOX_ACCESS_TOKEN", "")
-    if (
-        expected
-        and request.url.path.startswith("/api/")
-        and request.headers.get("Authorization", "") != f"Bearer {expected}"
-    ):
+    if not expected:
+        logger.error("SANDBOX_ACCESS_TOKEN 未配置，拒绝所有数据面请求")
+        return JSONResponse(
+            {"detail": "sandbox access token not configured"},
+            status_code=503,
+        )
+
+    provided = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(provided, f"Bearer {expected}"):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
     return await call_next(request)

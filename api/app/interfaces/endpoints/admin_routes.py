@@ -10,8 +10,9 @@ from app.application.ports.crypto import ApplicationUrls
 from app.application.services.audit_service import AuditService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
-from app.domain.errors import NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.models.audit_log import AuditLog
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.user import UserStatus
 from app.domain.models.user_quota import UserQuota
@@ -152,18 +153,44 @@ async def patch_user(
 async def delete_user(
     user_id: str,
     request: Request,
-    strategy: str = Query("anonymize", pattern="^(cascade|anonymize)$"),
+    strategy: str = Query("anonymize", pattern="^(cascade|anonymize|transfer_to_team)$"),
+    team_id: str | None = Query(None),
     audit_service: AuditService = Depends(get_audit_service),
     uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[dict]:
     principal = await get_current_principal()
-    async with uow_factory() as uow:
+    if strategy == "transfer_to_team" and not team_id:
+        raise BadRequestError(
+            "transfer_to_team 策略需要指定目标团队 team_id",
+            error_key="errors.transferTeamRequired",
+        )
+    moved_resources = 0
+    # Reassigning another user's resources to a team crosses the personal-owner
+    # RLS predicate, so the transfer strategy runs under a system scope; the
+    # existing cascade/anonymize paths keep their ambient admin scope.
+    authorization_context = (
+        AuthorizationContext.system("admin-user-delete") if strategy == "transfer_to_team" else None
+    )
+    async with uow_factory(authorization_context=authorization_context) as uow:
         user = await uow.user.get_by_id(user_id)
         if not user:
             raise NotFoundError("用户不存在")
         if strategy == "cascade":
             await uow.user.delete_owned_resources(user_id)
             await uow.user.delete_by_id(user_id)
+        elif strategy == "transfer_to_team":
+            team = await uow.team.get_by_id(team_id or "")
+            if not team:
+                raise NotFoundError("团队不存在")
+            moved_resources = await uow.user.transfer_personal_resources_to_team(user_id, team.id)
+            user.status = UserStatus.DISABLED
+            user.token_version += 1
+            user.email = f"deleted-{user.id}@deleted.local"
+            user.username = f"deleted-{user.id}"
+            user.display_name = "Deleted User"
+            await uow.user.save(user)
+            await uow.refresh_token.revoke_all_for_user(user.id)
+            await uow.user.revoke_security_material(user.id)
         else:
             user.status = UserStatus.DISABLED
             user.token_version += 1
@@ -175,6 +202,10 @@ async def delete_user(
             await uow.refresh_token.revoke_all_for_user(user.id)
             await uow.user.revoke_security_material(user.id)
         await uow.commit()
+    metadata: dict = {"strategy": strategy}
+    if strategy == "transfer_to_team":
+        metadata["team_id"] = team_id
+        metadata["moved_resources"] = moved_resources
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -182,7 +213,7 @@ async def delete_user(
         resource_type="user",
         resource_id=user_id,
         request=request,
-        metadata={"strategy": strategy},
+        metadata=metadata,
     )
     return Response.success(data={"strategy": strategy})
 
@@ -570,11 +601,12 @@ async def list_team_members_admin(
 async def delete_team_admin(
     team_id: str,
     request: Request,
+    strategy: str = Query("transfer_to_owner", pattern="^(cascade|transfer_to_owner)$"),
     principal=Depends(get_current_principal),
     team_service: TeamService = Depends(get_team_service),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[None]:
-    await team_service.admin_delete_team(team_id)
+    result = await team_service.admin_delete_team(team_id, strategy=strategy)
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -582,6 +614,11 @@ async def delete_team_admin(
         resource_type="team",
         resource_id=team_id,
         request=request,
+        metadata={
+            "strategy": result.strategy,
+            "affected_resources": result.affected_resources,
+            "transferred_to_user_id": result.transferred_to_user_id,
+        },
     )
     return Response.success()
 

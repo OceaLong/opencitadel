@@ -4,6 +4,7 @@ namespace: opencitadel
 resources:
   - service-account.yaml
   - rbac.yaml
+  - secret.yaml
   - deployment.yaml
   - service.yaml
   - network-policy.yaml

@@ -19,17 +19,17 @@ class InvitationORM(Base):
     type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'platform'"))
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     team_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True
+        String(255), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True, index=True
     )
     team_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
     token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     invited_by: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_user_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")

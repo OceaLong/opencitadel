@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -33,6 +33,11 @@ class DBSessionRepository(SessionRepository):
         return stmt.where(
             SessionModel.owner_user_id == scope.user_id, SessionModel.team_id.is_(None)
         )
+
+    @staticmethod
+    def _exclude_deleted(stmt):
+        """普通读路径过滤软删行；软删语义在仓储层实现，不进 RLS 谓词。"""
+        return stmt.where(SessionModel.deleted_at.is_(None))
 
     async def count_created_between(
         self,
@@ -159,11 +164,31 @@ class DBSessionRepository(SessionRepository):
         # 3.会话存在则仅更新元数据（files 由 add_file 专用路径维护）
         record.update_from_domain(session)
 
+    @staticmethod
+    def _search_clause(search: str):
+        """构建标题/最新消息的大小写不敏感关键词过滤条件。
+
+        转义 LIKE 通配符（``\\`` ``%`` ``_``）以避免用户输入被当作通配符，
+        保证 ``ILIKE '%q%'`` 的语义只匹配字面子串。
+        """
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        return SessionModel.title.ilike(pattern, escape="\\") | SessionModel.latest_message.ilike(
+            pattern, escape="\\"
+        )
+
     async def get_all(
-        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+        search: str | None = None,
     ) -> list[Session]:
         """获取所有会话列表（列表视图不加载 memories/files，避免 N+1）"""
-        stmt = self._apply_scope(select(SessionModel), scope)
+        stmt = self._exclude_deleted(self._apply_scope(select(SessionModel), scope))
+        normalized_search = search.strip() if search else ""
+        if normalized_search:
+            stmt = stmt.where(self._search_clause(normalized_search))
         stmt = (
             stmt.order_by(SessionModel.latest_message_at.desc().nullslast())
             .offset(max(offset, 0))
@@ -191,7 +216,9 @@ class DBSessionRepository(SessionRepository):
     async def get_metadata(
         self, session_id: str, scope: OwnerScope | None = None
     ) -> Session | None:
-        stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
+        stmt = self._exclude_deleted(
+            self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
+        )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:
@@ -205,9 +232,11 @@ class DBSessionRepository(SessionRepository):
         session_id: str,
         scope: OwnerScope | None = None,
     ) -> Session | None:
-        stmt = self._apply_scope(
-            select(SessionModel).where(SessionModel.id == session_id),
-            scope,
+        stmt = self._exclude_deleted(
+            self._apply_scope(
+                select(SessionModel).where(SessionModel.id == session_id),
+                scope,
+            )
         ).with_for_update()
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -226,7 +255,9 @@ class DBSessionRepository(SessionRepository):
 
     async def get_by_id(self, session_id: str, scope: OwnerScope | None = None) -> Session | None:
         """根据id查询会话"""
-        stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
+        stmt = self._exclude_deleted(
+            self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
+        )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:
@@ -234,12 +265,72 @@ class DBSessionRepository(SessionRepository):
         return await self._session_from_record(record)
 
     async def delete_by_id(self, session_id: str) -> None:
-        """根据传递的id删除会话"""
+        """根据传递的id物理删除会话（purge 底层原语）"""
         # 1.构建删除语句
         stmt = delete(SessionModel).where(SessionModel.id == session_id)
 
         # 2.执行sql无需检查是否删除
         await self.db_session.execute(stmt)
+
+    async def list_deleted(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+    ) -> list[Session]:
+        """回收站：仅返回已软删的会话（owner 作用域内，按删除时间倒序）。"""
+        stmt = (
+            self._apply_scope(select(SessionModel), scope)
+            .where(SessionModel.deleted_at.is_not(None))
+            .order_by(SessionModel.deleted_at.desc())
+            .offset(max(offset, 0))
+            .limit(max(1, min(limit, 500)))
+        )
+        result = await self.db_session.execute(stmt)
+        records = result.scalars().all()
+        bindings = await self._load_resource_bindings_for_sessions(
+            [record.id for record in records]
+        )
+        sessions = [record.to_domain() for record in records]
+        for session in sessions:
+            session.resource_bindings = bindings[session.id]
+        return sessions
+
+    async def soft_delete(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """软删除：设置 ``deleted_at``；仅命中未删除的行。"""
+        stmt = self._apply_scope(
+            update(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.deleted_at.is_(None),
+            ),
+            scope,
+        ).values(deleted_at=datetime.now(UTC))
+        result = await self.db_session.execute(stmt)
+        return result.rowcount > 0
+
+    async def restore(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """恢复：清空 ``deleted_at``；仅命中回收站中的行。"""
+        stmt = self._apply_scope(
+            update(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.deleted_at.is_not(None),
+            ),
+            scope,
+        ).values(deleted_at=None)
+        result = await self.db_session.execute(stmt)
+        return result.rowcount > 0
+
+    async def purge(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+        """清除：物理删除回收站中的会话（``deleted_at`` 非空）。"""
+        stmt = self._apply_scope(
+            delete(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.deleted_at.is_not(None),
+            ),
+            scope,
+        )
+        result = await self.db_session.execute(stmt)
+        return result.rowcount > 0
 
     async def update_title(self, session_id: str, title: str) -> None:
         """更新会话标题"""

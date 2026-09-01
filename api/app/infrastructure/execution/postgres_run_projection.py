@@ -9,7 +9,11 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.ports.queries import ResourceBuildView
+from app.application.ports.queries import (
+    ApprovalInboxEntry,
+    ResourceBuildView,
+    RunHistoryEntry,
+)
 from app.domain.execution.run import (
     RunState,
     RunStatus,
@@ -127,6 +131,54 @@ class PostgresRunProjection:
             "outcomes": outcomes,
             "avg_decision_seconds": (sum(durations) / len(durations) if durations else None),
         }
+
+    async def list_approvals(
+        self,
+        *,
+        owner_scope: OwnerScope,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[ApprovalInboxEntry, ...]:
+        """Return a reviewer's scope-filtered approval inbox, newest first.
+
+        Backed by ``ix_execution_approval_projection_{owner,team}_status``.
+        """
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            stmt = select(ExecutionApprovalProjectionORM).where(
+                self._approval_scope_filter(owner_scope),
+            )
+            if status is not None:
+                stmt = stmt.where(ExecutionApprovalProjectionORM.status == status)
+            rows = (
+                await session.scalars(
+                    stmt.order_by(
+                        ExecutionApprovalProjectionORM.requested_at.desc(),
+                        ExecutionApprovalProjectionORM.approval_id.desc(),
+                    )
+                    .offset(max(offset, 0))
+                    .limit(max(1, min(limit, 200)))
+                )
+            ).all()
+        return tuple(
+            ApprovalInboxEntry(
+                approval_id=row.approval_id,
+                run_id=row.run_id,
+                source_entity_type=row.source_entity_type,
+                source_entity_id=row.source_entity_id,
+                approval_kind=row.approval_kind,
+                subject_activity_id=row.subject_activity_id,
+                subject_label=row.subject_label,
+                risk_summary=row.risk_summary,
+                status=row.status,
+                decision=row.decision,
+                decided_by_user_id=row.decided_by_user_id,
+                requested_at=row.requested_at,
+                decided_at=row.decided_at,
+            )
+            for row in rows
+        )
 
     async def execution_metrics(
         self,
@@ -336,6 +388,47 @@ class PostgresRunProjection:
             ],
         }
 
+    async def list_runs_for_source(
+        self,
+        *,
+        source_entity_type: str,
+        source_entity_id: str,
+        owner_scope: OwnerScope,
+        limit: int,
+        offset: int,
+    ) -> tuple[RunHistoryEntry, ...]:
+        """Return the paged run history for a source entity, newest first."""
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            rows = (
+                await session.scalars(
+                    select(ExecutionRunProjectionORM)
+                    .where(
+                        ExecutionRunProjectionORM.source_entity_type == source_entity_type,
+                        ExecutionRunProjectionORM.source_entity_id == source_entity_id,
+                        self._scope_filter(owner_scope),
+                    )
+                    .order_by(
+                        ExecutionRunProjectionORM.created_at.desc(),
+                        ExecutionRunProjectionORM.run_id.desc(),
+                    )
+                    .offset(max(offset, 0))
+                    .limit(max(1, min(limit, 500)))
+                )
+            ).all()
+        return tuple(
+            RunHistoryEntry(
+                run_id=row.run_id,
+                family=row.family,
+                status=RunStatus(row.status),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                terminal_at=row.terminal_at,
+                failure_code=(row.state or {}).get("failure_code"),
+            )
+            for row in rows
+        )
+
     async def resource_build(
         self,
         *,
@@ -417,6 +510,14 @@ class PostgresRunProjection:
             return ExecutionResourceBuildProjectionORM.owner_user_id == owner_scope.user_id
         if owner_scope.type == OwnerScopeType.TEAM and owner_scope.team_id:
             return ExecutionResourceBuildProjectionORM.team_id == owner_scope.team_id
+        raise ValueError("team scope requires team_id")
+
+    @staticmethod
+    def _approval_scope_filter(owner_scope: OwnerScope):
+        if owner_scope.type == OwnerScopeType.PERSONAL:
+            return ExecutionApprovalProjectionORM.owner_user_id == owner_scope.user_id
+        if owner_scope.type == OwnerScopeType.TEAM and owner_scope.team_id:
+            return ExecutionApprovalProjectionORM.team_id == owner_scope.team_id
         raise ValueError("team scope requires team_id")
 
 

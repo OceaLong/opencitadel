@@ -82,3 +82,16 @@ class ScheduledJobListResponse(BaseModel):
 class WebhookSecretResponse(BaseModel):
     webhook_secret: str
     webhook_token: str
+
+
+class RunHistoryItem(BaseModel):
+    run_id: UUID
+    family: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    error: str | None = None
+
+
+class RunHistoryListResponse(BaseModel):
+    runs: list[RunHistoryItem]

@@ -4,8 +4,9 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
-from app.application.ports.crypto import ACCESS_COOKIE, REFRESH_COOKIE
+from app.application.ports.crypto import ACCESS_COOKIE, REFRESH_COOKIE, read_host_cookie
 from app.domain.errors import ForbiddenError
+from app.interfaces.observability.security_metrics import record_csrf_failure
 from app.interfaces.service_dependencies import require_api_runtime
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -31,12 +32,14 @@ class CsrfMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method.upper() not in SAFE_METHODS and not self._is_exempt(request.url.path):
             has_auth_cookie = bool(
-                request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
+                read_host_cookie(request.cookies, ACCESS_COOKIE)
+                or read_host_cookie(request.cookies, REFRESH_COOKIE)
             )
             if has_auth_cookie:
                 try:
                     require_api_runtime(request).csrf_service.verify_request(request)
                 except ForbiddenError as exc:
+                    record_csrf_failure()
                     return JSONResponse(
                         status_code=403,
                         content={"code": 403, "msg": str(exc), "data": None},

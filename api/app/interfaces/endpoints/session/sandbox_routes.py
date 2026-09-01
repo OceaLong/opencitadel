@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets import ConnectionClosed
 
-from app.application.ports.crypto import ACCESS_COOKIE, TokenCodecError
+from app.application.ports.crypto import ACCESS_COOKIE, TokenCodecError, read_host_cookie
 from app.application.services.session_service import SessionService
 from app.composition.types import ApiRuntime
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
@@ -70,7 +70,7 @@ async def _workspace_context_from_websocket(
     runtime: ApiRuntime,
 ) -> WorkspaceContext | None:
     """WebSocket 不经过 AuthContextMiddleware，这里显式从 cookie 构造工作区上下文。"""
-    token = websocket.cookies.get(ACCESS_COOKIE)
+    token = read_host_cookie(websocket.cookies, ACCESS_COOKIE)
     if not token:
         return None
     try:
@@ -80,18 +80,25 @@ async def _workspace_context_from_websocket(
     user_id = str(claims.get("sub") or "")
     if not user_id:
         return None
-    async with runtime.uow_factory() as uow:
-        user = await uow.user.get_by_id(user_id)
-        if not user or user.status != UserStatus.ACTIVE:
-            return None
-        if int(claims.get("ver", -1)) != user.token_version:
-            return None
-        teams = await uow.team.list_for_user(user_id)
-        team_roles = {}
-        for team in teams:
-            member = await uow.team.get_member(team.id, user_id)
-            if member:
-                team_roles[team.id] = member.role
+    from app.application.security.authorization_context import authorization_scope
+    from app.domain.models.authorization import AuthorizationContext
+
+    # Principal resolution reads users/teams/team_members before any user
+    # identity is bound; run it under a trusted system scope so RLS does not deny
+    # the pre-identity read (the WS handshake bypasses AuthContextMiddleware).
+    with authorization_scope(AuthorizationContext.system("ws-auth-context")):
+        async with runtime.uow_factory() as uow:
+            user = await uow.user.get_by_id(user_id)
+            if not user or user.status != UserStatus.ACTIVE:
+                return None
+            if int(claims.get("ver", -1)) != user.token_version:
+                return None
+            teams = await uow.team.list_for_user(user_id)
+            team_roles = {}
+            for team in teams:
+                member = await uow.team.get_member(team.id, user_id)
+                if member:
+                    team_roles[team.id] = member.role
     principal = Principal(
         user_id=user.id,
         global_role=user.global_role,
@@ -200,12 +207,17 @@ async def vnc_websocket(
     await websocket.accept(subprotocol=selected_protocol)
 
     try:
-        # 4.获取对应会话的vnc链接
-        sandbox_vnc_url = await session_service.get_vnc_url(session_id, scope=ctx.scope)
+        # 4.获取对应会话的vnc链接及连接沙箱数据面所需的鉴权头
+        sandbox_vnc_url, sandbox_vnc_headers = await session_service.get_vnc_connection(
+            session_id, scope=ctx.scope
+        )
         logger.info("连接WebSocket VNC： %s", sandbox_vnc_url)
 
-        # 5.创建上下文并连接到vnc
-        async with websockets.connect(sandbox_vnc_url) as sandbox_ws:
+        # 5.创建上下文并连接到vnc（携带 bearer token 经沙箱认证反代）
+        async with websockets.connect(
+            sandbox_vnc_url,
+            additional_headers=sandbox_vnc_headers or None,
+        ) as sandbox_ws:
             await _run_vnc_forwarders(websocket, sandbox_ws)
             logger.info("WebSocket连接已关闭")
     except ConnectionError as connection_e:

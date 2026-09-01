@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.execution.aggregate import ReplaySnapshot, replay
 from app.domain.execution.commands import CommandEnvelope
+from app.domain.execution.errors import CommandInProgressError
 from app.domain.execution.events import NewEvent
 from app.domain.execution.run import RunAggregate
 from app.domain.execution.store import (
@@ -348,6 +349,45 @@ async def test_crash_after_inbox_receive_is_recovered_by_orchestrator(
     result = await make_orchestrator(session_factory).handle(candidate)
 
     assert result.status == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_command_in_progress_is_reported_as_deferred_and_not_fatal(
+    orchestrator_database,
+) -> None:
+    session_factory, stream_ids, command_ids = orchestrator_database
+    stream_id = str(uuid4())
+    candidate = command("CreateRun", stream_id=stream_id)
+    stream_ids.append(stream_id)
+    command_ids.append(candidate.command_id)
+
+    class InProgressInbox(PostgresInbox):
+        async def claim(self, command, *, now, claim_ttl):
+            del command, now, claim_ttl
+            raise CommandInProgressError("held by a concurrent worker")
+
+    result = await make_orchestrator(
+        session_factory,
+        inbox_factory=InProgressInbox,
+    ).handle(candidate)
+
+    # Non-fatal: reported as deferred (retry later), nothing persisted.
+    assert result.status == "deferred"
+    assert result.rejection_code is None
+    assert result.first_event_position is None
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("orchestrator-deferred-verify"),
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ExecutionEventORM)
+                .where(ExecutionEventORM.stream_id == stream_id)
+            )
+            == 0
+        )
 
 
 @pytest.mark.asyncio

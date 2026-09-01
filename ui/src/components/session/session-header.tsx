@@ -37,6 +37,7 @@ import type {
   TokenUsageRecord,
   TokenUsageSummary,
 } from "@/lib/api/types";
+import { downloadBlob } from "@/lib/download-blob";
 import {
   IconActivity,
   IconCoins,
@@ -173,14 +174,7 @@ export const SessionHeader = memo(function SessionHeader({
       setDownloadingId(file.id);
       try {
         const blob = await fileApi.downloadFile(file.id);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.filename || `file-${file.id}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, file.filename || `file-${file.id}`);
         toast.success(t("downloadSuccess", { filename: file.filename }));
       } catch (err) {
         const msg = err instanceof Error ? err.message : t("downloadFailed");

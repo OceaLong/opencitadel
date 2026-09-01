@@ -9,8 +9,9 @@ the other four public methods. Fake uow + repo shapes mirror that file's
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from redis.asyncio import Redis as AsyncRedis
 
-from app.application.services.auth_service import AuthService
+from app.application.services.auth_service import AuthService, RedisAuthThrottleStore
 from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation, InvitationType
@@ -461,3 +462,165 @@ async def test_oauth_token_issue_records_oauth_login_in_same_uow():
     assert [(log.action, log.actor_user_id) for log in audit_repo.logs] == [
         ("oauth_login", user.id)
     ]
+
+
+# ---------------------------------------------------------------------------
+# login lockout / account throttle (real Redis)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def throttle_store(redis_integration):
+    from core.config import load_deployment_settings
+
+    settings = load_deployment_settings()
+    client = AsyncRedis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_db,
+        password=settings.redis_password,
+    )
+    try:
+        yield RedisAuthThrottleStore(client)
+    finally:
+        await client.aclose()
+
+
+def _build_locking_service(
+    *,
+    user_repo=None,
+    throttle_store=None,
+    threshold: int = 3,
+) -> AuthService:
+    return AuthService(
+        uow_factory=lambda: _FakeUow(user_repo=user_repo),
+        password_hasher=PasswordHasher(),
+        token_codec=JwtTokenCodecAdapter(
+            JwtService(
+                secret="test-jwt-secret-at-least-32-characters",
+                access_ttl_seconds=60,
+                refresh_ttl_seconds=120,
+            )
+        ),
+        throttle_store=throttle_store,
+        lockout_threshold=threshold,
+        lockout_window_seconds=120,
+        lockout_base_seconds=60,
+        lockout_max_seconds=120,
+    )
+
+
+def _active_user(email: str, password: str) -> User:
+    return User(
+        email=email,
+        username=email.split("@", 1)[0],
+        password_hash=PasswordHasher().hash(password),
+        status=UserStatus.ACTIVE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_redis_throttle_store_counts_locks_and_resets(throttle_store):
+    ident = "roundtrip@example.com"
+    await throttle_store.reset(ident)
+
+    assert await throttle_store.lock_ttl(ident) == 0
+    assert await throttle_store.register_failure(ident, window_seconds=120) == 1
+    assert await throttle_store.register_failure(ident, window_seconds=120) == 2
+
+    await throttle_store.arm_lock(ident, ttl_seconds=100)
+    ttl = await throttle_store.lock_ttl(ident)
+    assert 0 < ttl <= 100
+
+    await throttle_store.reset(ident)
+    assert await throttle_store.lock_ttl(ident) == 0
+    # counter cleared too: the next failure starts fresh at 1
+    assert await throttle_store.register_failure(ident, window_seconds=120) == 1
+    await throttle_store.reset(ident)
+
+
+@pytest.mark.asyncio
+async def test_login_lockout_rejects_even_a_correct_password(throttle_store):
+    email = "lockme@example.com"
+    await throttle_store.reset(email)
+    user = _active_user(email, "correct-pw")
+    service = _build_locking_service(
+        user_repo=_FakeUserRepo([user]),
+        throttle_store=throttle_store,
+        threshold=3,
+    )
+
+    for _ in range(3):
+        with pytest.raises(UnauthorizedError, match="账号或密码错误"):
+            await service.login(email_or_username=email, password="wrong-pw")
+
+    with pytest.raises(UnauthorizedError) as locked:
+        await service.login(email_or_username=email, password="correct-pw")
+    assert locked.value.error_key == "errors.tooManyLoginAttempts"
+
+    await throttle_store.reset(email)
+
+
+@pytest.mark.asyncio
+async def test_successful_login_clears_failure_count(throttle_store):
+    email = "clearme@example.com"
+    await throttle_store.reset(email)
+    user = _active_user(email, "correct-pw")
+    service = _build_locking_service(
+        user_repo=_FakeUserRepo([user]),
+        throttle_store=throttle_store,
+        threshold=3,
+    )
+
+    for _ in range(2):  # below the threshold
+        with pytest.raises(UnauthorizedError, match="账号或密码错误"):
+            await service.login(email_or_username=email, password="wrong-pw")
+
+    _, tokens = await service.login(email_or_username=email, password="correct-pw")
+    assert tokens.access_token
+
+    # counter was cleared on success: the next failure starts back at 1
+    assert await throttle_store.register_failure(email, window_seconds=120) == 1
+    await throttle_store.reset(email)
+
+
+@pytest.mark.asyncio
+async def test_unknown_user_is_throttled_identically_to_wrong_password(throttle_store):
+    """Anti-enumeration: an identifier with no account is counted and locked the
+    same way a real account is, so attackers cannot tell them apart via lockout
+    behavior."""
+    ghost = "ghost-user@example.com"
+    await throttle_store.reset(ghost)
+    service = _build_locking_service(
+        user_repo=_FakeUserRepo([]),
+        throttle_store=throttle_store,
+        threshold=3,
+    )
+
+    for _ in range(3):
+        with pytest.raises(UnauthorizedError, match="账号或密码错误"):
+            await service.login(email_or_username=ghost, password="whatever")
+
+    with pytest.raises(UnauthorizedError) as locked:
+        await service.login(email_or_username=ghost, password="whatever")
+    assert locked.value.error_key == "errors.tooManyLoginAttempts"
+
+    await throttle_store.reset(ghost)
+
+
+@pytest.mark.asyncio
+async def test_login_without_throttle_store_never_locks_out():
+    """The lockout is opt-in: with no store injected (current production wiring)
+    login keeps its existing behavior and only ever returns invalidCredentials."""
+    email = "nostore@example.com"
+    user = _active_user(email, "correct-pw")
+    service = _build_locking_service(
+        user_repo=_FakeUserRepo([user]),
+        throttle_store=None,
+        threshold=3,
+    )
+
+    for _ in range(6):
+        with pytest.raises(UnauthorizedError) as failure:
+            await service.login(email_or_username=email, password="wrong-pw")
+        assert failure.value.error_key == "errors.invalidCredentials"

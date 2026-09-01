@@ -29,6 +29,27 @@ class TeamRepository(ABC):
     async def delete_by_id(self, team_id: str) -> None: ...
 
     @abstractmethod
+    async def transfer_resources_to_owner(self, team_id: str, owner_user_id: str) -> int:
+        """Move team-owned resources into a single owner's personal space.
+
+        Every team-scoped resource (``team_id = team_id``) is reassigned to the
+        owner explicitly by setting ``owner_user_id = owner_user_id`` and
+        ``team_id = NULL``, so ownership is deliberate and auditable rather than
+        left to the database's implicit ``ON DELETE SET NULL``. Returns the
+        number of rows moved. Must run under a system/admin authorization scope.
+        """
+        ...
+
+    @abstractmethod
+    async def delete_resources(self, team_id: str) -> int:
+        """Delete every team-scoped resource. Returns the number of rows removed.
+
+        Must run under a system/admin authorization scope because it crosses
+        the team-membership RLS predicate.
+        """
+        ...
+
+    @abstractmethod
     async def get_member(self, team_id: str, user_id: str) -> TeamMember | None: ...
 
     @abstractmethod

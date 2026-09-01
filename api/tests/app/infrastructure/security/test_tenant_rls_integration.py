@@ -256,6 +256,17 @@ def test_auditor_reads_private_tenant_rows_across_owners(
                 actor="auditor-rls-private-seed",
                 signing_secret=settings.session_secret,
             )
+            # sessions.owner_user_id is a real foreign key into users, so the
+            # owning account must exist before the private row can be seeded.
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO users (id, email, username)
+                    VALUES ('owner-a', 'owner-a@example.com', 'owner-a')
+                    ON CONFLICT (id) DO NOTHING
+                    """
+                )
+            )
             connection.execute(
                 text(
                     """
@@ -313,6 +324,7 @@ def test_auditor_reads_private_tenant_rows_across_owners(
                 signing_secret=settings.session_secret,
             )
             connection.execute(text("DELETE FROM sessions WHERE id = :id"), {"id": session_id})
+            connection.execute(text("DELETE FROM users WHERE id = 'owner-a'"))
         engine.dispose()
 
 

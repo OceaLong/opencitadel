@@ -9,9 +9,10 @@ rate-limit-exempt or unauthenticated.
 
 import hmac
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, Response
 
 from app.composition.types import ApiRuntime
+from app.domain.errors import NotFoundError, UnauthorizedError
 from app.interfaces.service_dependencies import require_api_runtime
 
 router = APIRouter(tags=["监控"])
@@ -33,11 +34,11 @@ async def prometheus_metrics(
 ) -> Response:
     expected_token = runtime.settings.metrics_token
     if not expected_token:
-        raise HTTPException(status_code=404, detail="Not Found")
+        raise NotFoundError("Not Found", error_key="apiErrors.metrics.notFound")
 
     provided_token = _extract_bearer_token(authorization)
     if not hmac.compare_digest(provided_token, expected_token):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise UnauthorizedError("Unauthorized", error_key="apiErrors.metrics.unauthorized")
 
     try:
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest

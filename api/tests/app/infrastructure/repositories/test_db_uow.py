@@ -117,3 +117,82 @@ async def test_db_uow_sets_transaction_local_authorization_context_once() -> Non
 
     await uow.__aexit__(None, None, None)
     session.rollback.assert_not_awaited()
+
+
+def _make_read_only_uow(session: AsyncMock) -> DBUnitOfWork:
+    return DBUnitOfWork(
+        lambda: session,
+        secret_cipher=ApiKeyCipher("db-uow-test-secret"),
+        audit_signing_key="db-uow-audit-signing-key",
+        audit_signing_key_id="test",
+        database_authorization_signing_secret="db-uow-authorization-secret",
+        read_only=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_nested_write_uow_in_same_task_raises() -> None:
+    from app.infrastructure.repositories.db_uow import NestedUnitOfWorkError
+
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    with pytest.raises(NestedUnitOfWorkError, match="already active"):  # noqa: PT012 - nested UoW entry is the subject
+        async with _make_uow(session):
+            # A second write UoW opened inside the first (same task) would check
+            # out a second pooled connection while the first is held -> guard.
+            async with _make_uow(session):
+                pass
+
+    # The guard is released after the outer UoW unwinds, so a later top-level
+    # write UoW enters cleanly.
+    async with _make_uow(session):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_sequential_write_uows_in_same_task_do_not_trip_guard() -> None:
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    async with _make_uow(session):
+        pass
+    async with _make_uow(session):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_read_only_uow_may_nest_inside_write_uow() -> None:
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    # read_only UoWs are exempt (pending the broader P1-8 ReadOnlyUnitOfWork
+    # rollout) so query-side reads nested under a write do not trip the guard.
+    async with _make_uow(session), _make_read_only_uow(session):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_write_uows_in_independent_tasks_do_not_trip_guard() -> None:
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    entered_first = asyncio.Event()
+    entered_second = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold(entered: asyncio.Event) -> None:
+        async with _make_uow(session):
+            entered.set()
+            await release.wait()
+
+    first = asyncio.create_task(hold(entered_first))
+    second = asyncio.create_task(hold(entered_second))
+    await asyncio.wait_for(entered_first.wait(), 1)
+    await asyncio.wait_for(entered_second.wait(), 1)
+    release.set()
+    await asyncio.gather(first, second)

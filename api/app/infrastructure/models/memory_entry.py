@@ -25,6 +25,15 @@ class MemoryEntryORM(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # RLS predicate shape; leading team_id also serves the teams FK scan.
+        Index("ix_memory_entries_team_created", "team_id", "created_at"),
+        # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
+        Index(
+            "ix_memory_entries_owner_created",
+            "owner_user_id",
+            "created_at",
+            postgresql_where=text("team_id IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -33,6 +42,7 @@ class MemoryEntryORM(Base):
         String(255),
         ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=True,
+        index=True,  # sessions FK CASCADE scan + session-scoped memory lookups
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
@@ -43,12 +53,13 @@ class MemoryEntryORM(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,  # users FK integrity scan (partial owner index only covers team_id IS NULL rows)
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
-    )
+    )  # indexed via ix_memory_entries_team_created composite
     source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'manual'"))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

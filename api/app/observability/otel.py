@@ -1,6 +1,8 @@
 """OpenTelemetry and Prometheus observability setup."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from core.config import DeploymentSettings
 
@@ -76,11 +78,39 @@ def get_tracer(name: str = "opencitadel"):
         return _NoOpTracer()
 
 
-class _NoOpTracer:
-    def start_as_current_span(self, name: str, **kwargs):
-        from contextlib import nullcontext
+class _NoOpSpan:
+    """Span stand-in for when OpenTelemetry is not installed.
 
-        return nullcontext()
+    Mirrors the OpenTelemetry API's ``NonRecordingSpan`` surface so callers can
+    do ``with tracer.start_as_current_span(...) as span: span.set_attribute(...)``
+    without guarding for ``None``. Every method is a no-op. When OTel *is*
+    installed but tracing is disabled, ``trace.get_tracer`` already returns a
+    real tracer whose spans expose the same no-op surface, so both paths agree.
+    """
+
+    def set_attribute(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def set_attributes(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def record_exception(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def set_status(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def add_event(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def end(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+class _NoOpTracer:
+    @contextmanager
+    def start_as_current_span(self, name: str, **kwargs: object) -> Iterator[_NoOpSpan]:
+        yield _NoOpSpan()
 
 
 _agent_step_counter = None

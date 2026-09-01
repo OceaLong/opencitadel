@@ -75,13 +75,27 @@ post-commit 阶段作为提示发生。
 应用路由统一位于 `/api`：
 
 - `/auth/*`、`/teams/*`、`/service-keys/*`：身份与工作区
-- `/sessions/*`：会话 CRUD、消息 Command 准入、公开事件回放、VNC 与文件
+- `/sessions/*`：会话 CRUD、消息 Command 准入、公开事件回放、VNC 与文件；`?q=`
+  标题/消息搜索，以及软删除回收站（`GET /sessions/deleted`、
+  `POST /sessions/{id}/delete|restore|purge`）
 - `/runs/*`、`/approval-batches/*`：正式执行与审批 Command
-- `/knowledge-bases/*`：不可变候选构建与已发布版本绑定
-- `/scheduled-jobs/*`、`/patrol-*`：自动化、巡检、证据、修复
+- `/approvals`：审阅者收件箱——跨 Run 的 `GET /approvals?status=pending`（也可选
+  `approved`/`rejected`/`cancelled`/`expired`）
+- `/knowledge-bases/*`：不可变候选构建与已发布版本绑定，以及软删除回收站
+  （`GET /knowledge-bases/deleted`、`DELETE /knowledge-bases/{id}`、
+  `POST /{id}/restore`、`DELETE /{id}/purge`）
+- `/scheduled-jobs/*`、`/patrol-*`：自动化、巡检、证据、修复；
+  `GET /scheduled-jobs/{id}/runs` 返回分页触发历史
+- `/artifacts/*`：工作区 Artifact，带脱敏分享字段（`is_shared`、
+  `share_expires_at`、`share_token_preview`）；完整分享 Token 仅在创建/轮换时返回一次
+- `/a2a`（入站，`X-Api-Key`）：A2A JSON-RPC——`message/send`、`message/stream`、
+  `tasks/get`、`tasks/cancel`
+- `/capabilities`：平台能力报告，含 `report_pdf`
 - `/inference/endpoints/*`、`/inference/models/*`、`/inference/bindings/*`、
   `/skills/*`、`/runtime-policies/*`：运行资源、策略版本与推理绑定
-- `/admin/*`：用户、用量、审计、治理、合规
+- `/admin/*`：用户、用量、审计、治理、合规；团队删除
+  （`cascade` | `transfer_to_owner`）与用户删除
+  （`anonymize` | `cascade` | `transfer_to_team`）均为显式且带审计的策略
 
 路由级事实以 `/openapi.json` 为准。
 

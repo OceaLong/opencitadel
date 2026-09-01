@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.application.execution.admission import RunAdmissionService
 from app.application.ports.crypto import SecretCipherError, VersionedSecretCipher
-from app.application.ports.queries import RunProjectionPort
+from app.application.ports.queries import RunHistoryEntry, RunProjectionPort
 from app.application.services.notification_service import NotificationService
 from app.application.services.patrol_run_service import PatrolRunService
 from app.application.services.resource_binding_service import (
@@ -190,6 +190,31 @@ class ScheduledJobService:
     ) -> ScheduledJob | None:
         async with self._uow_factory() as uow:
             return await uow.scheduled_job.get_by_id(job_id, scope=scope)
+
+    async def list_runs(
+        self,
+        job_id: str,
+        scope: OwnerScope,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[RunHistoryEntry, ...] | None:
+        """Return the authoritative execution-run history for a job.
+
+        Ownership is enforced via the scoped ``get_job`` lookup; returns
+        ``None`` when the job does not exist or is out of scope so the caller
+        can surface a 404. Reads go through the read-only run projection.
+        """
+        job = await self.get_job(job_id, scope=scope)
+        if not job:
+            return None
+        return await self._run_projection.list_runs_for_source(
+            source_entity_type="scheduled_job",
+            source_entity_id=job.id,
+            owner_scope=self._scope_for_job(job),
+            limit=limit,
+            offset=offset,
+        )
 
     async def manual_trigger(
         self,

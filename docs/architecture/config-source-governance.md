@@ -6,7 +6,7 @@ Every value has exactly one authority.
 
 | Kind | Authority | Examples |
 | --- | --- | --- |
-| Deployment topology and secrets | Environment or secret manager | database identities, signing/encryption keys, OAuth, storage, sandbox driver/image/network |
+| Deployment topology and secrets | Environment or secret manager | database identities, signing/encryption keys (`API_KEY_SECRET`, `AUDIT_SIGNING_KEY`, `JWT_SECRET`/`JWT_PREVIOUS_SECRETS`, `DATABASE_AUTHORIZATION_SIGNING_SECRET`, `SANDBOX_TOKEN_SEED`, `OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN`), OAuth, storage, sandbox driver/image/network |
 | Live runtime behavior | PostgreSQL Runtime Policy head | admission, timeouts, retries, scheduler, sandbox limits, retention |
 | Integrations | Owner-scoped PostgreSQL resources | inference endpoints/models/bindings, MCP, A2A, Skills |
 | Product data | Domain tables | sessions, jobs, Packs, resources, versions |
@@ -37,6 +37,18 @@ create request carries the active Operations Policy revision and resource limits
 Inference, MCP, and A2A are first-class owner-scoped resources. Credentials are
 stored in versioned encrypted envelopes and masked on reads. Stable IDs bind
 Skills, Automations, and execution requests; display names are not identities.
+
+Signing and token secrets follow an active/previous ring so they can rotate
+without downtime: `API_KEY_SECRET`/`API_KEY_PREVIOUS_SECRETS`,
+`AUDIT_SIGNING_KEY`/`AUDIT_PREVIOUS_SIGNING_KEYS`, and
+`JWT_SECRET`/`JWT_PREVIOUS_SECRETS`. `DATABASE_AUTHORIZATION_SIGNING_SECRET`
+optionally splits the database authorization HMAC from `SESSION_SECRET` and
+falls back to it when unset. `SANDBOX_TOKEN_SEED` derives per-sandbox data-plane
+tokens, and `OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN` gate the Ops MCP servers.
+Advanced execution-kernel tuning (`EXECUTION_ACTIVITY_MAX_CONCURRENCY`,
+`EXECUTION_ACTIVITY_BATCH_SIZE`, `EXECUTION_IDLE_POLL_SECONDS`) is deployment
+topology, not runtime behavior, so it stays in the environment rather than
+Runtime Policy.
 
 ## Change rules
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from starlette.responses import Response, StreamingResponse
 
 from app.application.services.audit_service import AuditService
@@ -8,6 +8,7 @@ from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
 from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
+from app.domain.errors import AppException, NotFoundError
 from app.interfaces.auth_dependencies import require_auditor_or_admin
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.compliance import (
@@ -80,7 +81,9 @@ async def download_evidence_package(
     try:
         data = await service.build_session_evidence_package(session_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError(
+            str(exc), error_key="apiErrors.compliance.evidencePackageNotFound"
+        ) from exc
     return StreamingResponse(
         iter([data]),
         media_type="application/zip",
@@ -110,7 +113,12 @@ async def get_compliance_report(
         )
     pdf = service.render_pdf(report)
     if pdf is None:
-        raise HTTPException(status_code=501, detail="PDF 渲染不可用，请使用 json 或 md 格式")
+        raise AppException(
+            code=501,
+            status_code=501,
+            msg="PDF rendering is unavailable; use the json or md format instead",
+            error_key="apiErrors.compliance.pdfUnavailable",
+        )
     return Response(content=pdf, media_type="application/pdf")
 
 

@@ -44,6 +44,7 @@ class ExecutionPolicyRevisionORM(Base):
         PGUUID(as_uuid=True),
         ForeignKey("execution_policy_revisions.id", ondelete="RESTRICT"),
         nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -74,6 +75,7 @@ class OperationsPolicyRevisionORM(Base):
         PGUUID(as_uuid=True),
         ForeignKey("operations_policy_revisions.id", ondelete="RESTRICT"),
         nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

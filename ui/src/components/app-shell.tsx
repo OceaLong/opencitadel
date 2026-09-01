@@ -42,12 +42,9 @@ function requiresAuth(pathname: string): boolean {
 
 function ContextPanel({ module }: { module: NavModule | undefined }) {
   if (!module?.hasContextPanel) return null;
-  if (module.key === "chat")
-    return (
-      <SessionsProvider>
-        <LeftPanel />
-      </SessionsProvider>
-    );
+  // SessionsProvider / PatrolPacksProvider 已提升到 AppShell 顶层稳定挂载，
+  // 这里只渲染对应面板，不再包裹 Provider（避免切模块卸载重挂导致 SSE 断连）。
+  if (module.key === "chat") return <LeftPanel />;
   if (module.key === "admin") return <AdminContextPanel />;
   if (module.key === "patrol") return <PatrolContextPanel />;
   return null;
@@ -97,11 +94,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     <PageTitleProvider>
       <SidebarProvider className="[--sidebar-width:18rem] md:[--sidebar-left-offset:3.5rem] md:[--sidebar-width:280px]">
         <IconRail />
-        {activeModule?.key === "patrol" ? (
-          <PatrolPacksProvider>{shellBody}</PatrolPacksProvider>
-        ) : (
-          shellBody
-        )}
+        {/*
+          两个数据 Provider 无条件挂载在稳定位置（父类型不随 activeModule 变化），
+          切换模块不会卸载重挂 shellBody（AppHeader / 当前页面）；数据获取由
+          enabled 控制：仅在对应模块激活时发起请求。会话流一经激活即常驻。
+        */}
+        <SessionsProvider enabled={activeModule?.key === "chat"}>
+          <PatrolPacksProvider enabled={activeModule?.key === "patrol"}>
+            {shellBody}
+          </PatrolPacksProvider>
+        </SessionsProvider>
       </SidebarProvider>
     </PageTitleProvider>
   );

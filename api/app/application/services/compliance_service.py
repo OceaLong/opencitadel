@@ -17,6 +17,15 @@ from app.domain.runtime_policy import RuntimePolicyUnavailableError
 from app.domain.services.compliance.control_mapping import CONTROLS, Control
 from app.domain.utils.audit_redaction import scrub_secret_patterns
 
+# Bilingual PDF report title. The compliance report body is currently authored
+# in Chinese (see ``render_markdown``), but the exported PDF title must not be
+# Chinese-only: audit exports are consumed by English-locale tenants/auditors
+# too. Full body i18n is a larger effort tracked separately; parameterizing the
+# title bilingually here removes the hard-coded Chinese-only title without
+# threading a locale through the report pipeline (``build_report`` /
+# ``render_pdf`` carry no request-locale context today).
+COMPLIANCE_REPORT_PDF_TITLE = "Compliance Audit Report / 合规审计报告"
+
 # Real audit `action` values that correspond to a user login/logout event, if
 # such a value is ever recorded. As of this module's last audit (grep over
 LOGIN_AUDIT_ACTIONS: tuple[str, ...] = ("login", "logout", "oauth_login")
@@ -514,7 +523,21 @@ class ComplianceService:
         return "".join(lines)
 
     def render_pdf(self, report: dict[str, Any]) -> bytes | None:
-        return self._report_renderer.render_pdf(
-            markdown=self.render_markdown(report),
-            title="合规审计报告",
-        )
+        """Render the report to PDF, or ``None`` when the renderer is unusable.
+
+        The ``ReportRendererPort`` contract already returns ``None`` for the
+        known-unavailable case (weasyprint not installed). In practice the
+        native weasyprint import can fail with ``OSError`` (missing GObject/
+        Cairo/Pango system libraries), which the infrastructure renderer's
+        ``except ImportError`` does not catch. We treat any such rendering
+        failure as "PDF unavailable" here so the caller still gets the graceful
+        ``None`` -> HTTP 501 path instead of an unhandled 500, matching the
+        ``report_pdf`` capability that CapabilityService advertises.
+        """
+        try:
+            return self._report_renderer.render_pdf(
+                markdown=self.render_markdown(report),
+                title=COMPLIANCE_REPORT_PDF_TITLE,
+            )
+        except Exception:  # noqa: BLE001 -- renderer/native-lib failure == unavailable
+            return None

@@ -28,6 +28,7 @@ class InboxBatchStats(BaseModel):
     loaded: int
     accepted: int
     rejected: int
+    deferred: int = 0
 
 
 class InboxWorker:
@@ -39,17 +40,20 @@ class InboxWorker:
         if limit <= 0:
             raise ValueError("limit must be positive")
         commands = await self._source.load_pending(now=now, limit=limit)
-        accepted = rejected = 0
+        accepted = rejected = deferred = 0
         for command in commands:
             result = await self._handler.handle(command)
             if result.status == "accepted":
                 accepted += 1
+            elif result.status == "deferred":
+                deferred += 1
             else:
                 rejected += 1
         return InboxBatchStats(
             loaded=len(commands),
             accepted=accepted,
             rejected=rejected,
+            deferred=deferred,
         )
 
 

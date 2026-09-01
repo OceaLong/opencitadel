@@ -53,6 +53,7 @@ class PlaywrightBrowser(BrowserProtocol):
         vision_enabled: bool = False,
         vision_llm: LLM | None = None,
         allowed_domains: frozenset[str] | None = None,
+        cdp_headers: dict[str, str] | None = None,
     ) -> None:
         """构造函数，完成Playwright浏览器的初始化"""
         # LLM相关
@@ -65,6 +66,9 @@ class PlaywrightBrowser(BrowserProtocol):
 
         # 浏览器相关
         self.cdp_url: str = cdp_url
+        # Bearer header forwarded to the sandbox's authenticated CDP reverse
+        # proxy (:8080/api/cdp). Empty for legacy/unauthenticated endpoints.
+        self.cdp_headers: dict[str, str] = dict(cdp_headers or {})
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
         self.page: Page | None = None
@@ -391,7 +395,10 @@ class PlaywrightBrowser(BrowserProtocol):
             try:
                 # 3.创建playwright上下文并连接到cdp浏览器
                 self.playwright = await async_playwright().start()
-                self.browser = await self.playwright.chromium.connect_over_cdp(self.cdp_url)
+                self.browser = await self.playwright.chromium.connect_over_cdp(
+                    self.cdp_url,
+                    headers=self.cdp_headers or None,
+                )
 
                 # 4.获取浏览器的所有上下文
                 contexts = self.browser.contexts

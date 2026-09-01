@@ -34,6 +34,17 @@ class UserRepository(ABC):
     async def delete_owned_resources(self, user_id: str) -> None: ...
 
     @abstractmethod
+    async def transfer_personal_resources_to_team(self, user_id: str, team_id: str) -> int:
+        """Reassign the user's personal resources (team_id IS NULL) to a team.
+
+        Only rows the user owns individually (``owner_user_id = user_id`` and
+        ``team_id IS NULL``) are moved; owner_user_id is preserved. Returns the
+        number of rows reassigned. Must run under a system/admin authorization
+        scope because it crosses the personal-ownership RLS predicate.
+        """
+        ...
+
+    @abstractmethod
     async def revoke_security_material(self, user_id: str) -> None: ...
 
     @abstractmethod

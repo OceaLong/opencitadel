@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,7 @@ import {
 import { modelErrorMessage } from "@/lib/api/inference-errors";
 import type { SSEEventData } from "@/lib/api/types";
 import { toMillis } from "@/lib/session-events";
+import { toBcp47 } from "@/lib/utils";
 
 type ExecutionIssue = {
   id: string;
@@ -59,6 +60,7 @@ export function SessionErrorSheet({
   compact?: boolean;
 }) {
   const t = useTranslations("sessionErrors");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const issues = useMemo(() => executionIssues(events), [events]);
 
@@ -103,7 +105,7 @@ export function SessionErrorSheet({
                     </Badge>
                     {issue.timestamp ? (
                       <span className="text-muted-foreground text-xs">
-                        {new Date(issue.timestamp).toLocaleTimeString()}
+                        {new Date(issue.timestamp).toLocaleTimeString(toBcp47(locale))}
                       </span>
                     ) : null}
                   </div>

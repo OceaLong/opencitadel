@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.tool_catalog import ExecutionToolCatalog, ToolDefinition
@@ -13,6 +13,7 @@ from app.application.services.file_service import FileService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.skill_service import SkillService
+from app.domain.errors import TooManyRequestsError
 from app.domain.execution.activity import (
     ActivityContext,
     ActivityOutcome,
@@ -21,6 +22,9 @@ from app.domain.execution.activity import (
 from app.domain.execution.commands import JsonValue
 from app.domain.external.llm import LLM
 from app.domain.models.scope import OwnerScope
+
+if TYPE_CHECKING:
+    from app.application.services.quota_service import QuotaService
 from app.domain.services.skills.skill_loader import render_active
 from app.domain.services.vision_service import (
     build_user_message,
@@ -45,6 +49,7 @@ class ModelCallActivityHandler:
         skills: SkillService | None = None,
         token_usage: LLMTokenUsageService | None = None,
         files: FileService | None = None,
+        quota: QuotaService | None = None,
         client_factory: Callable[..., LLM],
     ) -> None:
         self._objects = objects
@@ -53,6 +58,11 @@ class ModelCallActivityHandler:
         self._skills = skills
         self._token_usage = token_usage
         self._files = files
+        # 运行中 Token 预算拦截依赖；未注入时退化为无操作，保持既有行为不变。
+        # TODO(E4 接入): 在 ``app/composition/kernel.py`` 构造本处理器时补一行
+        #   ``quota=shared.quota_service``（``shared.quota_service`` 已就绪）。
+        #   kernel.py 属 C 系列执行基础设施，本次不改；这是唯一待接线的一处。
+        self._quota = quota
         self._client_factory = client_factory
 
     async def execute(
@@ -98,6 +108,16 @@ class ModelCallActivityHandler:
             inference_model_service=self._models,
             scope=scope,
         )
+        # 运行中月度 Token 预算复查：会话创建时只查一次，长会话可能建成后持续超额，
+        # 故在每次模型调用准入处按已用量对用户 / 团队配额再校验一次。
+        if self._quota is not None:
+            try:
+                await self._quota.check_model_call_budget(
+                    user_id=context.owner_user_id,
+                    team_id=context.team_id,
+                )
+            except TooManyRequestsError:
+                return ActivityOutcome.failed(failure_code="MODEL_CALL_BUDGET_EXCEEDED")
         allow_tools = request.input_payload.get("allow_tools") is True
         definitions = await self._tools.definitions(payload, context) if allow_tools else ()
         schemas = [definition.tool_schema for definition in definitions]

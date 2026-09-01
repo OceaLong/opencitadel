@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
 import { AdminStatCard } from "@/components/admin/stat-card";
@@ -38,6 +38,7 @@ import { IconInvitation, IconLayers, IconModel, IconPhoneCall, IconUsers } from 
 
 export default function AdminOverviewPage() {
   const t = useTranslations("admin");
+  const locale = useLocale();
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
@@ -238,7 +239,7 @@ export default function AdminOverviewPage() {
                         {item.resource_type}:{item.resource_id}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-right">
-                        {formatDateTime(item.created_at)}
+                        {formatDateTime(item.created_at, locale)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -275,7 +276,7 @@ export default function AdminOverviewPage() {
                         <InvitationStatusBadge status={item.status} />
                       </TableCell>
                       <TableCell className="text-muted-foreground text-right">
-                        {formatDateTime(item.created_at)}
+                        {formatDateTime(item.created_at, locale)}
                       </TableCell>
                     </TableRow>
                   ))}

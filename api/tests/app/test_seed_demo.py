@@ -298,6 +298,24 @@ async def test_seed_mcp_tool_policies_creates_then_skips(deps, repos):
 
 
 @pytest.mark.asyncio
+async def test_seed_mcp_tool_policies_injects_collector_bearer_header(deps, repos):
+    await seed_mcp_tool_policies(
+        deps.mcp_server_service,
+        actor_user_id="admin-1",
+        collector_token="strong-collector-token-0123456789abcdef",
+    )
+    saved = repos.mcp_server.servers[DEMO_MCP_SERVER_ID]
+    assert saved.headers == {"Authorization": "Bearer strong-collector-token-0123456789abcdef"}
+
+
+@pytest.mark.asyncio
+async def test_seed_mcp_tool_policies_no_header_without_token(deps, repos):
+    await seed_mcp_tool_policies(deps.mcp_server_service, actor_user_id="admin-1")
+    saved = repos.mcp_server.servers[DEMO_MCP_SERVER_ID]
+    assert saved.headers is None
+
+
+@pytest.mark.asyncio
 async def test_seed_mcp_tool_policies_repairs_existing_record(deps, repos):
     repos.mcp_server.servers["custom-id"] = MCPServerRecord(
         id="custom-id",

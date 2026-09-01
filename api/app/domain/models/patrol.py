@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
@@ -380,6 +381,41 @@ class PatrolRun(BaseModel):
     report_artifact_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    def finalize(self, results: list[PatrolEvaluatedCheck], now: datetime) -> PatrolRun:
+        """从评估后的 Check 结果推进 Run 至终态（贫血→富化）。
+
+        承载 patrol_run_service.finalize_run 原先内联的计数/状态/证据完整度/摘要
+        状态机：按 ``results`` 的 status 聚合 pass/warn/fail/error/skipped 计数，
+        据此在 COMPLETED 与 COMPLETED_WITH_FINDINGS 间择一，计算 evidence
+        completeness、finished_at、duration_ms 与 summary。就地更新并返回 self。
+
+        注意：patrol_runs 的完成态**只由应用服务经本方法写**（投影器仅在
+        RunFailed/RunCancelled 时写 failed/cancelled，且受 status 与
+        last_event_position 守卫），二者写入不相交的 status 集合，不构成竞写。
+        """
+        counts = Counter(item.status.value for item in results)
+        self.pass_count = counts["pass"]
+        self.warn_count = counts["warn"]
+        self.fail_count = counts["fail"]
+        self.error_count = counts["error"]
+        self.skipped_count = counts["skipped"]
+        enabled = [item for item in results if item.status != PatrolCheckStatus.SKIPPED]
+        complete = sum(1 for item in enabled if item.evidence_complete)
+        self.evidence_completeness = complete / len(enabled) if enabled else 1.0
+        self.status = (
+            PatrolRunStatus.COMPLETED_WITH_FINDINGS
+            if any(counts[key] for key in ("warn", "fail", "error"))
+            else PatrolRunStatus.COMPLETED
+        )
+        self.finished_at = now
+        started = self.started_at or self.created_at
+        self.duration_ms = max(0, int((now - started).total_seconds() * 1000))
+        self.summary = {
+            "counts": {key: counts[key] for key in ("pass", "warn", "fail", "error", "skipped")},
+            "evidence_completeness": self.evidence_completeness,
+        }
+        return self
 
 
 class PatrolCheckResult(BaseModel):

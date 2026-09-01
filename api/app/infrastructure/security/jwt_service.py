@@ -1,11 +1,15 @@
 import hashlib
+import re
 import secrets
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import jwt
 
 TokenKind = Literal["access", "refresh"]
+
+_KEY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class JwtService:
@@ -15,11 +19,28 @@ class JwtService:
         access_ttl_seconds: int = 900,
         refresh_ttl_seconds: int = 60 * 60 * 24 * 30,
         issuer: str = "opencitadel",
+        *,
+        previous_secrets: Mapping[str, str] | None = None,
     ) -> None:
+        if not secret:
+            raise ValueError("JWT secret 未配置，无法初始化 JwtService")
         self.secret = secret
         self.access_ttl_seconds = access_ttl_seconds
         self.refresh_ttl_seconds = refresh_ttl_seconds
         self.issuer = issuer
+        # Tokens are always signed (encoded) with the current secret. On decode
+        # the current secret is tried first, then each retired secret, so a key
+        # rotation keeps sessions signed by a just-retired key valid until they
+        # naturally expire instead of logging everyone out instantly. JWTs carry
+        # no key id header here, so the secrets are simply tried in order.
+        self._decode_secrets: list[str] = [secret]
+        for previous_key_id, previous_secret in (previous_secrets or {}).items():
+            if not _KEY_ID_RE.fullmatch(previous_key_id):
+                raise ValueError(f"无效的历史 JWT key id: {previous_key_id}")
+            if not previous_secret:
+                raise ValueError(f"历史 JWT key id[{previous_key_id}]未配置密钥")
+            if previous_secret != secret:
+                self._decode_secrets.append(previous_secret)
 
     @staticmethod
     def hash_token(token: str) -> str:
@@ -52,7 +73,22 @@ class JwtService:
         )
 
     def decode(self, token: str, expected_type: TokenKind | None = None) -> dict[str, Any]:
-        claims = jwt.decode(token, self.secret, algorithms=["HS256"], issuer=self.issuer)
-        if expected_type is not None and claims.get("typ") != expected_type:
-            raise jwt.InvalidTokenError("unexpected token type")
-        return claims
+        # Try the current secret first, then each retired one. Only a signature
+        # mismatch falls through to the next secret; an otherwise-valid token
+        # that is expired or has a bad issuer must surface that real error
+        # rather than being masked by a signature failure on a different secret.
+        signature_error: jwt.InvalidSignatureError | None = None
+        for candidate in self._decode_secrets:
+            try:
+                claims = jwt.decode(token, candidate, algorithms=["HS256"], issuer=self.issuer)
+            except jwt.InvalidSignatureError as exc:
+                signature_error = exc
+                continue
+            if expected_type is not None and claims.get("typ") != expected_type:
+                raise jwt.InvalidTokenError("unexpected token type")
+            return claims
+        raise (
+            signature_error
+            if signature_error is not None
+            else jwt.InvalidTokenError("token could not be decoded")
+        )

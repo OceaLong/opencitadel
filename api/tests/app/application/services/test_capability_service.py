@@ -94,6 +94,37 @@ async def test_capability_matrix_reports_degraded_and_paused() -> None:
 
 
 @pytest.mark.asyncio
+async def test_report_pdf_capability_available_when_probe_true() -> None:
+    resolved = Mock(id="chat-1")
+    service = CapabilityService(
+        _bindings(dict.fromkeys(InferencePurpose, resolved)),
+        policy_heads=MutablePolicyReader(),
+        pdf_probe=lambda: True,
+    )
+
+    snapshot = await service.get_capabilities(OwnerScope.personal("user-1"))
+
+    assert snapshot.items["report_pdf"].state is CapabilityStateValue.AVAILABLE
+    assert snapshot.items["report_pdf"].details == {"engine": "weasyprint"}
+    assert snapshot.items["report_pdf"].reason_key is None
+
+
+@pytest.mark.asyncio
+async def test_report_pdf_capability_not_configured_when_probe_false() -> None:
+    resolved = Mock(id="chat-1")
+    service = CapabilityService(
+        _bindings(dict.fromkeys(InferencePurpose, resolved)),
+        policy_heads=MutablePolicyReader(),
+        pdf_probe=lambda: False,
+    )
+
+    snapshot = await service.get_capabilities(OwnerScope.personal("user-1"))
+
+    assert snapshot.items["report_pdf"].state is CapabilityStateValue.NOT_CONFIGURED
+    assert snapshot.items["report_pdf"].reason_key == "capabilities.reason.pdfRendererUnavailable"
+
+
+@pytest.mark.asyncio
 async def test_missing_scope_is_denied_without_resolving_bindings() -> None:
     bindings = Mock()
     bindings.resolve = AsyncMock()

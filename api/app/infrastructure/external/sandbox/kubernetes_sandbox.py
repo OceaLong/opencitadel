@@ -22,6 +22,7 @@ from app.infrastructure.external.sandbox.settings import (
     SandboxEffectiveSettings,
     SandboxHostAccess,
 )
+from app.infrastructure.external.sandbox.token import derive_sandbox_token
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,18 @@ class KubernetesSandbox(Sandbox):
         quota: SandboxQuota,
         ip: str | None = None,
         pod_name: str | None = None,
+        access_token: str = "",
     ) -> None:
-        self.client = httpx.AsyncClient(timeout=600)
+        self.client = httpx.AsyncClient(
+            timeout=600,
+            headers=({"Authorization": f"Bearer {access_token}"} if access_token else {}),
+        )
         self._ip = ip
         self._pod_name = pod_name
         self.settings = settings
         self._host = host
         self._quota = quota
+        self._access_token = access_token
         self._base_url = f"http://{ip}:8080" if ip else ""
         self._vnc_url = f"ws://{ip}:5901" if ip else ""
         self._cdp_url = f"http://{ip}:9222" if ip else ""
@@ -66,6 +72,13 @@ class KubernetesSandbox(Sandbox):
     @property
     def cdp_url(self) -> str:
         return self._cdp_url
+
+    @property
+    def vnc_headers(self) -> dict[str, str]:
+        """Auth headers the api VNC proxy must forward to the sandbox :8080."""
+        if not self._access_token:
+            return {}
+        return {"Authorization": f"Bearer {self._access_token}"}
 
     @classmethod
     def _api(cls):
@@ -112,21 +125,30 @@ class KubernetesSandbox(Sandbox):
             from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 
             ip = await DockerSandbox._resolve_hostname_to_ip(deployment.address)
-            return cls(settings=settings, host=host, quota=quota, ip=ip)
+            access_token = derive_sandbox_token(host.token_seed, "opencitadel-sandbox")
+            return cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                access_token=access_token,
+            )
         if not deployment.name_prefix:
             raise RuntimeError("sandbox name prefix is not configured")
         pod_name = f"{deployment.name_prefix}-{str(uuid.uuid4())[:8]}"
+        access_token = derive_sandbox_token(host.token_seed, pod_name)
         if not await quota.acquire(pod_name, settings.policy):
             raise RuntimeError("沙箱准入未通过：集群配额不足")
         sandbox: Self | None = None
         try:
-            ip = await asyncio.to_thread(cls._create_pod_sync, settings, pod_name)
+            ip = await asyncio.to_thread(cls._create_pod_sync, settings, pod_name, access_token)
             sandbox = cls(
                 settings=settings,
                 host=host,
                 quota=quota,
                 ip=ip,
                 pod_name=pod_name,
+                access_token=access_token,
             )
             await sandbox.ensure_sandbox(max_retries=max_retries)
         except BaseException:
@@ -145,6 +167,7 @@ class KubernetesSandbox(Sandbox):
         cls,
         settings: SandboxEffectiveSettings,
         pod_name: str,
+        access_token: str = "",
     ) -> str:
         deployment = settings.deployment
         policy = settings.policy
@@ -221,6 +244,13 @@ class KubernetesSandbox(Sandbox):
                                 name="SERVER_TIMEOUT_MINUTES",
                                 value=str(policy.ttl_minutes),
                             ),
+                            # Per-sandbox data-plane bearer token. The sandbox
+                            # rejects any /api request that does not present it
+                            # and refuses to start without it.
+                            client.V1EnvVar(
+                                name="SANDBOX_ACCESS_TOKEN",
+                                value=access_token,
+                            ),
                             # Chromium must run with --no-sandbox under the
                             # hardened Pod (cap_drop ALL + read-only rootfs),
                             # and egress must go through the proxy -- matching
@@ -295,6 +325,9 @@ class KubernetesSandbox(Sandbox):
         sandbox_id: str,
     ) -> Self | None:
         deployment = settings.deployment
+        # Re-derive the token the pod was created with so re-attachment
+        # authenticates against the sandbox data plane.
+        access_token = derive_sandbox_token(host.token_seed, sandbox_id)
         if deployment.address:
             from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 
@@ -305,6 +338,7 @@ class KubernetesSandbox(Sandbox):
                 quota=quota,
                 ip=ip,
                 pod_name=sandbox_id,
+                access_token=derive_sandbox_token(host.token_seed, "opencitadel-sandbox"),
             )
         ip = await asyncio.to_thread(cls._get_pod_ip_sync, settings, sandbox_id)
         if not ip:
@@ -315,6 +349,7 @@ class KubernetesSandbox(Sandbox):
             quota=quota,
             ip=ip,
             pod_name=sandbox_id,
+            access_token=access_token,
         )
 
     @classmethod
@@ -432,6 +467,7 @@ class KubernetesSandbox(Sandbox):
             vision_enabled=bool(llm and llm.capabilities.vision),
             vision_llm=llm,
             allowed_domains=allowed_domains,
+            cdp_headers=self.vnc_headers,
         )
 
     async def ensure_sandbox(self, max_retries: int | None = None) -> None:

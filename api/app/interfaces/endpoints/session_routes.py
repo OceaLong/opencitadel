@@ -74,7 +74,8 @@ async def create_session(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[CreateSessionResponse]:
     """创建一个空白的新任务会话"""
-    await quota_service.check_session_quota(ctx.principal.user_id)
+    # 会话准入：日会话数 + 月 Token + 并发任务数（个人配额；team scope 时同时校验团队配额）。
+    await quota_service.check_session_quota(ctx.principal.user_id, scope=ctx.scope)
     session = await session_service.create_session(
         title=request.title or "新对话",
         model_id=request.model_id,
@@ -116,6 +117,7 @@ async def create_session(
 async def stream_sessions(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, description="按标题/最新消息关键词过滤会话"),
     ctx: WorkspaceContext = Depends(get_workspace_context),
     session_service: SessionService = Depends(get_session_service),
     policy_reader: RuntimePolicyReader = Depends(get_runtime_policy_reader),
@@ -128,7 +130,9 @@ async def stream_sessions(
 
         async def build_sessions_event() -> ServerSentEvent:
             sessions = await finish_snapshot_before_cancellation(
-                session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
+                session_service.get_all_sessions(
+                    limit=limit, offset=offset, scope=ctx.scope, search=q
+                )
             )
             session_items = [_session_to_list_item(session) for session in sessions]
             return ServerSentEvent(
@@ -164,11 +168,35 @@ async def stream_sessions(
 async def get_all_sessions(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, description="按标题/最新消息关键词过滤会话"),
     ctx: WorkspaceContext = Depends(get_workspace_context),
     session_service: SessionService = Depends(get_session_service),
 ) -> Response[ListSessionResponse]:
     """获取 OpenCitadel 项目中所有任务会话基础信息列表"""
-    sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
+    sessions = await session_service.get_all_sessions(
+        limit=limit, offset=offset, scope=ctx.scope, search=q
+    )
+    session_items = [_session_to_list_item(session) for session in sessions]
+    return Response.success(data=ListSessionResponse(sessions=session_items))
+
+
+# 回收站列表必须在 ``GET /{session_id}`` 之前注册，避免 "deleted" 被当作会话 id。
+@router.get(
+    path="/deleted",
+    response_model=Response[ListSessionResponse],
+    summary="获取回收站会话列表",
+    description="获取当前工作区内已软删除、可恢复的任务会话列表",
+)
+async def list_deleted_sessions(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    session_service: SessionService = Depends(get_session_service),
+) -> Response[ListSessionResponse]:
+    """获取回收站（已软删除）会话列表"""
+    sessions = await session_service.list_deleted_sessions(
+        limit=limit, offset=offset, scope=ctx.scope
+    )
     session_items = [_session_to_list_item(session) for session in sessions]
     return Response.success(data=ListSessionResponse(sessions=session_items))
 
@@ -194,16 +222,48 @@ async def clear_unread_message_count(
 @router.post(
     path="/{session_id}/delete",
     response_model=Response[dict | None],
-    summary="删除指定任务会话",
-    description="根据传递的会话id删除指定任务会话",
+    summary="删除指定任务会话（软删除，进入回收站）",
+    description="根据传递的会话id软删除任务会话；记录进入回收站，可恢复",
 )
 async def delete_session(
     session_id: str,
     ctx: WorkspaceContext = Depends(get_workspace_context),
     session_service: SessionService = Depends(get_session_service),
 ) -> Response[dict | None]:
-    """根据传递的会话id删除指定任务会话"""
+    """根据传递的会话id软删除指定任务会话（进入回收站）"""
     await session_service.delete_session(session_id, scope=ctx.scope)
+    return Response.success()
+
+
+@router.post(
+    path="/{session_id}/restore",
+    response_model=Response[dict | None],
+    summary="从回收站恢复任务会话",
+    description="根据传递的会话id恢复已软删除的任务会话",
+)
+async def restore_session(
+    session_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    session_service: SessionService = Depends(get_session_service),
+) -> Response[dict | None]:
+    """根据传递的会话id从回收站恢复任务会话"""
+    await session_service.restore_session(session_id, scope=ctx.scope)
+    return Response.success()
+
+
+@router.post(
+    path="/{session_id}/purge",
+    response_model=Response[dict | None],
+    summary="彻底清除回收站中的任务会话",
+    description="根据传递的会话id物理删除回收站中的任务会话（不可恢复）",
+)
+async def purge_session(
+    session_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    session_service: SessionService = Depends(get_session_service),
+) -> Response[dict | None]:
+    """根据传递的会话id彻底清除回收站中的任务会话"""
+    await session_service.purge_session(session_id, scope=ctx.scope)
     return Response.success()
 
 

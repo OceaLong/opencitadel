@@ -3,11 +3,20 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "opencitadel.fullname" . }}-ops-actuator
+{{- /*
+  Namespaced Role/RoleBinding per allowed namespace instead of a cluster-wide
+  ClusterRole. Every resource the Actuator patches (deployments, statefulsets,
+  replicasets) is namespaced, so the write grant is scoped exactly to the
+  namespaces the operator registered in opsActuator.allowedNamespaces. The
+  ServiceAccount can never patch workloads outside that set.
+*/}}
+{{- range $ns := .Values.opsActuator.allowedNamespaces }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: {{ include "opencitadel.fullname" . }}-ops-actuator-write
+  name: {{ include "opencitadel.fullname" $ }}-ops-actuator-write
+  namespace: {{ $ns }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
@@ -17,15 +26,17 @@ rules:
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: {{ include "opencitadel.fullname" . }}-ops-actuator-write
+  name: {{ include "opencitadel.fullname" $ }}-ops-actuator-write
+  namespace: {{ $ns }}
 subjects:
   - kind: ServiceAccount
-    name: {{ include "opencitadel.fullname" . }}-ops-actuator
-    namespace: {{ .Release.Namespace }}
+    name: {{ include "opencitadel.fullname" $ }}-ops-actuator
+    namespace: {{ $.Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ include "opencitadel.fullname" . }}-ops-actuator-write
+  kind: Role
+  name: {{ include "opencitadel.fullname" $ }}-ops-actuator-write
+{{- end }}
 {{- end }}

@@ -14,6 +14,8 @@ import {
   formatIngestStreamError,
 } from "@/components/knowledge/knowledge-utils";
 import { PageHeader } from "@/components/page-header";
+import type { RecycleBinItem } from "@/components/recycle-bin-dialog";
+import { RecycleBinDialog } from "@/components/recycle-bin-dialog";
 import { ResourceVersionStatus } from "@/components/resource/resource-version-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +102,7 @@ export function KnowledgeLibrary() {
   const [createOpen, setCreateOpen] = useState(false);
   const [addOpenFor, setAddOpenFor] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
+  const [recycleOpen, setRecycleOpen] = useState(false);
   // Mirrors of state used inside refreshExpandedDocs so that callback can read
   // the latest value without depending on the state itself — otherwise it
   // would be re-created (and the hook's `onLoaded` along with it) on every
@@ -263,6 +266,18 @@ export function KnowledgeLibrary() {
     }
   };
 
+  const loadDeleted = useCallback(async (): Promise<RecycleBinItem[]> => {
+    const data = await knowledgeApi.listDeleted();
+    return data.knowledge_bases.map((kb) => ({
+      id: kb.id,
+      primary: kb.name,
+      secondary: t("statusDocCount", {
+        status: t(KB_STATUS_LABEL_KEYS[kb.status]),
+        count: kb.doc_count ?? 0,
+      }),
+    }));
+  }, [t]);
+
   const deleteDialogTitle =
     pendingDelete?.kind === "document" ? t("deleteDocumentTitle") : t("deleteKbTitle");
   const deleteDialogDescription =
@@ -280,10 +295,21 @@ export function KnowledgeLibrary() {
         }
         description={t("librarySubtitle")}
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <IconAdd className="mr-1 size-4" />
-            {t("create")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setRecycleOpen(true)}
+              aria-label={t("recycleBinTitle")}
+            >
+              <IconDelete className="mr-1 size-4" />
+              {t("recycleBin")}
+            </Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <IconAdd className="mr-1 size-4" />
+              {t("create")}
+            </Button>
+          </div>
         }
       />
 
@@ -491,6 +517,17 @@ export function KnowledgeLibrary() {
         title={deleteDialogTitle}
         description={deleteDialogDescription}
         onConfirm={handleDeleteConfirm}
+      />
+
+      <RecycleBinDialog
+        open={recycleOpen}
+        onOpenChange={setRecycleOpen}
+        title={t("recycleBinTitle")}
+        description={t("recycleBinDescription")}
+        load={loadDeleted}
+        restore={knowledgeApi.restore}
+        purge={knowledgeApi.purge}
+        onChanged={loadList}
       />
     </div>
   );

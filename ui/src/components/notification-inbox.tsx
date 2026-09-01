@@ -60,7 +60,6 @@ export function NotificationInbox({ className }: { className?: string }) {
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const streamRef = useRef<EventSource | null>(null);
 
   const refresh = useCallback(async () => {
     const requestedUserId = authRef.current.userId;
@@ -94,20 +93,43 @@ export function NotificationInbox({ className }: { className?: string }) {
 
   useEffect(() => {
     if (authLoading || !userId) return;
-    const url = notificationsApi.streamUrl();
-    const source = new EventSource(url, { withCredentials: true });
-    streamRef.current = source;
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    source.addEventListener("notification", () => {
-      void refresh();
-    });
-    source.addEventListener("connected", () => {
-      void refresh();
-    });
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 3000);
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      cleanup = notificationsApi.stream(
+        (event) => {
+          // 后端在此流上发送 connected / notification / ping 事件，
+          // 这些类型不在共享的 SSEEventData 联合里，故按字符串比较。
+          const eventType = event.type as string;
+          if (eventType === "notification" || eventType === "connected") {
+            void refresh();
+          }
+        },
+        // 连接出错：稍后重连（对齐 EventSource 的自动重连语义）
+        scheduleReconnect,
+        undefined,
+        // 流正常结束：重连以维持长连接
+        scheduleReconnect,
+      );
+    };
+
+    connect();
 
     return () => {
-      source.close();
-      streamRef.current = null;
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      cleanup?.();
     };
   }, [authLoading, refresh, userId]);
 

@@ -5,7 +5,7 @@ from dataclasses import FrozenInstanceError, dataclass, field
 
 import pytest
 
-from app.application.services.auth_service import AuthService
+from app.application.services.auth_service import AuthService, RedisAuthThrottleStore
 from app.application.services.notification_service import NotificationService
 from app.application.services.runtime_policy_service import RuntimePolicyService
 from app.application.services.session_service import SessionService
@@ -136,6 +136,11 @@ async def test_api_runtime_builds_complete_graph_without_kernel_workers() -> Non
         assert isinstance(runtime.notification_service, NotificationService)
         assert isinstance(runtime.status_service, StatusService)
         assert runtime.auth_service._uow_factory is runtime.uow_factory
+        # F13: account lockout is activated in the integration graph — the
+        # AuthService must carry a Redis-backed throttle store bound to the
+        # shared general Redis client.
+        assert isinstance(runtime.auth_service._throttle_store, RedisAuthThrottleStore)
+        assert runtime.auth_service._throttle_store._redis is runtime.resources.general_redis
         assert runtime.session_service._uow_factory is runtime.uow_factory
         assert runtime.uow_factory()._secret_cipher is runtime.secret_cipher
         assert runtime.inference_endpoint_service._cipher is runtime.secret_cipher

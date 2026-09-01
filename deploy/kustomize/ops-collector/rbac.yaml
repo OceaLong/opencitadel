@@ -1,10 +1,17 @@
+# Namespaced Role/RoleBinding instead of a cluster-wide ClusterRole. Every
+# namespaced resource the Collector reads is confined to the deployment
+# namespace set by kustomization.yaml (namespace: opencitadel). Nodes are the
+# sole exception: a cluster-scoped resource that cannot be granted through a
+# namespaced Role, so a minimal read-only ClusterRole grants nodes get/list/watch
+# and nothing else.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: opencitadel-ops-collector-readonly
+  namespace: opencitadel
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "events", "services", "persistentvolumeclaims", "nodes"]
+    resources: ["pods", "pods/log", "events", "services", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
@@ -14,9 +21,32 @@ rules:
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: opencitadel-ops-collector-readonly
+  namespace: opencitadel
+subjects:
+  - kind: ServiceAccount
+    name: opencitadel-ops-collector
+    namespace: opencitadel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opencitadel-ops-collector-readonly
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opencitadel-ops-collector-nodes-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencitadel-ops-collector-nodes-readonly
 subjects:
   - kind: ServiceAccount
     name: opencitadel-ops-collector
@@ -24,4 +54,4 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: opencitadel-ops-collector-readonly
+  name: opencitadel-ops-collector-nodes-readonly

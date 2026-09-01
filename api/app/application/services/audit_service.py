@@ -9,9 +9,11 @@ from typing import Any
 from app.application.ports.observability import GovernanceMetricsPort
 from app.application.ports.queries import AuditSummaryQueryPort
 from app.application.ports.reporting import AuditVerificationKeyring
+from app.application.security.authorization_context import authorization_scope
 from app.domain.models.audit_log import AuditLog
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.services.audit_chain import GENESIS, compute_entry_hash, entry_fields
+from app.domain.services.audit_chain import verify_chain_logs
 
 _AUDIT_SECRET_KEY_HINTS = (
     "api_key",
@@ -60,9 +62,14 @@ class AuditService:
 
     async def record(self, log: AuditLog) -> None:
         sanitized = log.model_copy(update={"metadata": sanitize_audit_metadata(log.metadata)})
-        async with self._uow_factory() as uow:
-            await uow.audit.add(sanitized)
-            await uow.commit()
+        # Appending to the tamper-evident audit chain must read the current chain
+        # tip (written by any actor) and insert the new head. audit_logs is
+        # system/admin-read and append-only, so recording runs under a trusted
+        # system scope; the actor identity is preserved in the row itself.
+        with authorization_scope(AuthorizationContext.system("audit")):
+            async with self._uow_factory() as uow:
+                await uow.audit.add(sanitized)
+                await uow.commit()
 
     async def list_logs(
         self,
@@ -165,10 +172,11 @@ class AuditService:
                 "session_entries": 0,
                 "session_ok": global_result.get("ok", False),
             }
-        # The audit hash chain is global. A resource-filtered subset is not a
-        # standalone chain because its first entry normally does not follow
-        # GENESIS and unrelated entries may appear between session entries.
-        # Therefore session integrity inherits the result of the full chain.
+        # A session's rows span shards and are only a filtered slice of each,
+        # so they are not a standalone chain: a session-first entry normally
+        # does not follow its shard's GENESIS and unrelated entries sit between
+        # session entries. Session integrity therefore inherits the full
+        # (per-shard) chain verification result rather than re-walking a subset.
         return {
             **global_result,
             "session_id": session_id,
@@ -182,48 +190,10 @@ class AuditService:
         logs: list[AuditLog],
         keys: dict[str, tuple[str, ...]],
     ) -> dict:
-        from datetime import datetime
-
-        prev_hash = GENESIS
-        first_broken: int | None = None
-        for log in logs:
-            if log.chain_seq is None or not log.entry_hash:
-                first_broken = log.chain_seq
-                break
-            if log.prev_hash != prev_hash:
-                first_broken = log.chain_seq
-                break
-            fields = entry_fields(
-                chain_seq=log.chain_seq,
-                id=log.id,
-                actor_user_id=log.actor_user_id,
-                actor_ip=log.actor_ip,
-                action=log.action,
-                resource_type=log.resource_type,
-                resource_id=log.resource_id,
-                team_id=log.team_id,
-                session_id=log.session_id,
-                request_id=log.request_id,
-                metadata=log.metadata,
-                created_at=log.created_at,
-            )
-            candidates = keys.get(log.signing_key_id, ())
-            if not candidates or not any(
-                compute_entry_hash(secret, fields, prev_hash) == log.entry_hash
-                for secret in candidates
-            ):
-                first_broken = log.chain_seq
-                break
-            prev_hash = log.entry_hash
-        return {
-            "ok": first_broken is None,
-            "total": len(logs),
-            "first_broken_seq": first_broken,
-            "checked_at": datetime.now(UTC)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
-        }
+        # The chain is now sharded (per team / per user / system); each shard is
+        # an independent prev_hash chain. verify_chain_logs walks each shard on
+        # its own and returns a single aggregate {ok, total, first_broken_seq}.
+        return verify_chain_logs(logs, keys)
 
     async def summarize(
         self,

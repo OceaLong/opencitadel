@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 
 from .config import ActuatorSettings
-from .server import create_server
+from .server import run_server
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,7 +25,7 @@ def main() -> None:
         raise SystemExit(
             "stdio transport is disabled; set OPS_ACTUATOR_ALLOW_STDIO=true for development"
         )
-    create_server(settings).run(transport=transport)
+    run_server(settings, transport)
 
 
 if __name__ == "__main__":

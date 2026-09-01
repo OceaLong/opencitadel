@@ -103,6 +103,7 @@ def _audit_log(*, id: str, action: str, created_at: datetime) -> AuditLogORM:
         resource_type="",
         resource_id="",
         team_id=None,
+        shard_key="system",
         request_id="",
         metadata_json={},
         chain_seq=None,

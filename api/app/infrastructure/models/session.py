@@ -2,9 +2,11 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     String,
@@ -23,7 +25,19 @@ class SessionModel(Base):
     """会话ORM模型"""
 
     __tablename__ = "sessions"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_sessions_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_sessions_id"),
+        # RLS predicate shape: team-scoped listing ordered by recency. The leading
+        # team_id column also serves the teams FK (SET NULL) integrity scan.
+        Index("ix_sessions_team_latest", "team_id", "latest_message_at"),
+        # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
+        Index(
+            "ix_sessions_owner_latest",
+            "owner_user_id",
+            "latest_message_at",
+            postgresql_where=text("team_id IS NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(255),
@@ -55,11 +69,13 @@ class SessionModel(Base):
         String(255),
         ForeignKey("inference_models.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )  # 会话级模型
     skill_id: Mapped[str] = mapped_column(
         String(255),
         ForeignKey("skills.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )  # 会话级Skill
     thinking_enabled: Mapped[bool] = mapped_column(
         Boolean,
@@ -70,12 +86,13 @@ class SessionModel(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,  # users FK integrity scan (partial owner index above only covers team_id IS NULL rows)
     )  # 所属用户
     team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
-    )  # 所属团队
+    )  # 所属团队 (indexed via ix_sessions_team_latest composite)
     mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -103,6 +120,14 @@ class SessionModel(Base):
         PGUUID(as_uuid=True),
         nullable=True,
     )
+    # 投影器乐观守卫：记录最近应用到本行执行态列的 execution_events.position。
+    # 投影器写入执行态时带 WHERE last_event_position IS NULL OR < :position 并
+    # SET = :position，使其写入幂等且单调，旧/乱序 position 的重放不会回退状态。
+    # 仅由 PostgresFormalProjector 写；领域模型与 from_domain/update_from_domain 不触碰。
+    last_event_position: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -114,6 +139,11 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )  # 创建时间
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )  # 软删除时间戳；NULL 表示未删除。软删/回收站/恢复/purge 由仓储层维护，
+    # 不进入领域模型或普通写路径（from_domain/update_from_domain 不触碰该列）。
 
     @classmethod
     def from_domain(cls, session: Session) -> "SessionModel":

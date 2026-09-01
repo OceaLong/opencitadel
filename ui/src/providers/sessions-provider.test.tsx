@@ -75,4 +75,59 @@ describe("SessionsProvider stream lifecycle", () => {
     await unmount();
     expect(mocks.cleanup).toHaveBeenCalledTimes(1);
   });
+
+  it("does not stream until enabled, then keeps the stream resident once activated", async () => {
+    // 非活跃模块下挂载：不应发起 REST / SSE。
+    const { root, unmount } = await renderComponent(
+      <SessionsProvider enabled={false}>
+        <div>child</div>
+      </SessionsProvider>,
+    );
+    await settle();
+
+    expect(mocks.getSessions).not.toHaveBeenCalled();
+    expect(mocks.streamSessions).not.toHaveBeenCalled();
+
+    // 进入 chat 模块（enabled=true）：拉起一次 REST + 一条 SSE 长连接。
+    await act(async () => {
+      root.render(
+        <SessionsProvider enabled>
+          <div>child</div>
+        </SessionsProvider>,
+      );
+    });
+    await settle();
+
+    expect(mocks.streamSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+
+    // 离开 chat 模块（enabled=false）：流常驻，不断开、不重连。
+    await act(async () => {
+      root.render(
+        <SessionsProvider enabled={false}>
+          <div>child</div>
+        </SessionsProvider>,
+      );
+    });
+    await settle();
+
+    expect(mocks.streamSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+
+    // 再次进入：仍是同一条连接，不重复建立。
+    await act(async () => {
+      root.render(
+        <SessionsProvider enabled>
+          <div>child</div>
+        </SessionsProvider>,
+      );
+    });
+    await settle();
+
+    expect(mocks.streamSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+
+    await unmount();
+    expect(mocks.cleanup).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Loader2, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,42 +26,48 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { type PaginatedFetcher, usePaginatedList } from "@/hooks/use-paginated-list";
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type AdminTeam } from "@/lib/api/admin";
 import { memberDisplayName, type TeamMember, type TeamMemberDetail } from "@/lib/api/team";
 import { useClientDataScope } from "@/providers/client-data-provider";
 
-const PAGE_SIZE = 20;
-
 export default function AdminTeamsPage() {
   const t = useTranslations("adminTeams");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const { resetWorkspaceIfMatches } = useClientDataScope();
-  const [teams, setTeams] = useState<AdminTeam[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [members, setMembers] = useState<TeamMemberDetail[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminTeam | null>(null);
 
-  const loadTeams = useCallback(
-    async (nextOffset: number) => {
-      setLoading(true);
+  const fetchTeams = useCallback<PaginatedFetcher<AdminTeam>>(
+    async ({ limit, offset }) => {
       try {
-        const data = await adminApi.teams({ limit: PAGE_SIZE, offset: nextOffset });
-        setTeams(data.teams);
-        setTotal(data.total);
-        setOffset(nextOffset);
+        const data = await adminApi.teams({ limit, offset });
+        return { items: data.teams, total: data.total };
       } catch (error) {
         toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
-      } finally {
-        setLoading(false);
+        return null;
       }
     },
     [tCommon],
   );
+
+  const {
+    items: teams,
+    total,
+    offset,
+    loading,
+    totalPages,
+    currentPage,
+    canPrev,
+    canNext,
+    load: loadTeams,
+    nextPage,
+    prevPage,
+  } = usePaginatedList<AdminTeam>(fetchTeams);
 
   const loadMembers = useCallback(
     async (teamId: string) => {
@@ -131,8 +137,6 @@ export default function AdminTeamsPage() {
   }
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
 
   return (
     <div className="space-y-6">
@@ -174,7 +178,7 @@ export default function AdminTeamsPage() {
                           <div className="font-medium">{team.name}</div>
                           <div className="text-muted-foreground mt-1 text-xs">
                             {t("memberCount", { count: team.member_count })} ·{" "}
-                            {formatDateTime(team.created_at)}
+                            {formatDateTime(team.created_at, locale)}
                           </div>
                         </button>
                       </TableCell>
@@ -200,16 +204,16 @@ export default function AdminTeamsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={offset === 0}
-                  onClick={() => void loadTeams(Math.max(0, offset - PAGE_SIZE))}
+                  disabled={!canPrev}
+                  onClick={() => void prevPage()}
                 >
                   {tCommon("previousPage")}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => void loadTeams(offset + PAGE_SIZE)}
+                  disabled={!canNext}
+                  onClick={() => void nextPage()}
                 >
                   {tCommon("nextPage")}
                 </Button>
@@ -257,7 +261,7 @@ export default function AdminTeamsPage() {
                           </div>
                         ) : null}
                         <div className="text-muted-foreground text-xs">
-                          {formatDateTime(member.joined_at)}
+                          {formatDateTime(member.joined_at, locale)}
                         </div>
                       </TableCell>
                       <TableCell>

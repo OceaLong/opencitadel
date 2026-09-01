@@ -27,6 +27,7 @@ from app.domain.execution.store import (
 )
 from app.infrastructure.execution.models import (
     ExecutionEventORM,
+    ExecutionScopeHeadORM,
     ExecutionStreamOwnerORM,
 )
 from app.infrastructure.observability.execution_metrics import record_replay_failure
@@ -210,9 +211,29 @@ class PostgresEventStore:
         for event in events:
             self._validate_payload_size(event)
 
+        # C3a safe-watermark (gapless per-scope ordering): hold a *per owner
+        # scope* advisory lock — not merely per stream — across the whole append
+        # transaction. ``execution_events.position`` is a global BIGSERIAL whose
+        # value is assigned at INSERT but only becomes visible at COMMIT. Under a
+        # per-stream lock two different streams in the same scope could commit
+        # out of position order (position=N+1 visible before N), letting the
+        # scope projector advance its checkpoint past a not-yet-visible lower
+        # position and drop it forever. Serializing appends within a scope means
+        # a higher position cannot even be assigned until the transaction
+        # holding the lower one commits, so within a scope the position order is
+        # exactly the commit order and the projector's ``position > checkpoint``
+        # scan can never skip a gap. Cross-scope appends still run in parallel
+        # (distinct lock keys), and a single append transaction only ever touches
+        # one owner scope (one command → one stream → one scope), so no
+        # lock-ordering deadlock is possible.
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
-            {"lock_key": self._advisory_lock_key(stream)},
+            {
+                "lock_key": self._scope_advisory_lock_key(
+                    context.owner_user_id,
+                    context.team_id,
+                )
+            },
         )
         await self._session.execute(
             pg_insert(ExecutionStreamOwnerORM)
@@ -305,6 +326,32 @@ class PostgresEventStore:
         self._session.add_all(records)
         await self._session.flush()
         stored = tuple(self._to_stored(record) for record in records)
+        if stored:
+            # C3b: maintain the per-scope head watermark in the same transaction
+            # as the events so scope discovery (``list_pending``) is an indexed
+            # ``head_position > checkpoint`` lookup instead of a full-table
+            # ``GROUP BY ... max(position)`` aggregate over execution_events.
+            last_position = stored[-1].position
+            await self._session.execute(
+                pg_insert(ExecutionScopeHeadORM)
+                .values(
+                    owner_scope_key=self._owner_scope_key(
+                        context.owner_user_id,
+                        context.team_id,
+                    ),
+                    head_position=last_position,
+                )
+                .on_conflict_do_update(
+                    index_elements=["owner_scope_key"],
+                    set_={
+                        "head_position": func.greatest(
+                            ExecutionScopeHeadORM.head_position,
+                            last_position,
+                        ),
+                        "updated_at": func.now(),
+                    },
+                )
+            )
         return AppendResult(
             events=stored,
             first_position=stored[0].position if stored else None,
@@ -334,8 +381,17 @@ class PostgresEventStore:
             raise
 
     @staticmethod
-    def _advisory_lock_key(stream: StreamRef) -> int:
-        digest = hashlib.sha256(f"{stream.stream_type}\0{stream.stream_id}".encode()).digest()
+    def _owner_scope_key(owner_user_id: str | None, team_id: str | None) -> str:
+        if (owner_user_id is None) == (team_id is None):
+            raise ValueError("exactly one owner scope is required")
+        if owner_user_id is not None:
+            return f"user:{owner_user_id}"
+        return f"team:{team_id}"
+
+    @staticmethod
+    def _scope_advisory_lock_key(owner_user_id: str | None, team_id: str | None) -> int:
+        scope_key = PostgresEventStore._owner_scope_key(owner_user_id, team_id)
+        digest = hashlib.sha256(f"scope\0{scope_key}".encode()).digest()
         return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
     @staticmethod

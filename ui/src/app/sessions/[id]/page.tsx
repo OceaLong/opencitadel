@@ -1,76 +1,20 @@
-"use client";
+import { Suspense } from "react";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
-
-import { SessionDetailView } from "@/components/session/session-detail-view";
+import { SessionDetailPageClient } from "./session-detail-page-client";
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
 /**
- * 任务详情页：展示会话标题、事件时间线、任务进度与输入框。
- * - 通过 getSessionDetail 获取任务详情与事件列表（若后端返回 events）
- * - 未完成任务通过 chat 空 body 流式拉取事件
- * - 发送消息通过 chat 带 message/attachments 流式追加事件
- * - 支持从 URL 参数读取初始消息（用于首页跳转场景）
+ * 任务详情页（服务端薄壳）：从路由参数解析 sessionId 后交给客户端视图。
+ * useSearchParams 需要在 Suspense 边界内使用。
  */
-export default function SessionDetailPage({ params }: PageProps) {
-  const searchParams = useSearchParams();
-  const tCommon = useTranslations("common");
-  const [sessionData, setSessionData] = useState<{
-    id: string;
-    initialMessage?: string;
-    initialAttachments?: string[];
-    hasInitialMessage: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    params.then((p) => {
-      // 尝试从 URL 参数读取初始消息（Base64 编码）
-      const initParam = searchParams.get("init");
-
-      if (initParam) {
-        try {
-          // 解码 Base64
-          const decoded = decodeURIComponent(atob(initParam));
-          const { message, attachments } = JSON.parse(decoded);
-
-          // 一次性设置所有状态
-          setSessionData({
-            id: p.id,
-            initialMessage: message,
-            initialAttachments: attachments,
-            hasInitialMessage: true,
-          });
-        } catch {
-          setSessionData({
-            id: p.id,
-            hasInitialMessage: false,
-          });
-        }
-      } else {
-        // 没有初始消息
-        setSessionData({
-          id: p.id,
-          hasInitialMessage: false,
-        });
-      }
-    });
-  }, [params, searchParams]);
-
-  if (!sessionData) {
-    return <div className="flex h-full items-center justify-center">{tCommon("loading")}</div>;
-  }
-
+export default async function SessionDetailPage({ params }: PageProps) {
+  const { id } = await params;
   return (
-    <SessionDetailView
-      sessionId={sessionData.id}
-      initialMessage={sessionData.initialMessage}
-      initialAttachments={sessionData.initialAttachments}
-      hasInitialMessage={sessionData.hasInitialMessage}
-    />
+    <Suspense fallback={null}>
+      <SessionDetailPageClient sessionId={id} />
+    </Suspense>
   );
 }

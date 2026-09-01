@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
+from functools import cache
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +19,27 @@ from app.domain.runtime_policy import (
     RuntimePolicyUnavailableError,
 )
 from app.domain.utils.time_utils import utc_now
+
+
+@cache
+def _default_pdf_probe() -> bool:
+    """Report whether the PDF report renderer is actually usable.
+
+    ``weasyprint`` may be pip-installed yet still fail to import when its
+    native GObject/Cairo/Pango libraries are missing on the host -- and that
+    import raises ``OSError`` rather than ``ImportError``. Probing with
+    ``importlib.util.find_spec`` would therefore report a false positive: it
+    only checks that the Python package is present, not that it can load. So
+    we attempt the same import the renderer performs (see
+    ``infrastructure/external/report/pdf_renderer.py``) and treat *any*
+    failure as "renderer unavailable". Cached so the heavy native probe runs
+    at most once per process.
+    """
+    try:
+        from weasyprint import HTML  # noqa: F401
+    except Exception:  # noqa: BLE001 -- ImportError or native-lib OSError both mean unavailable
+        return False
+    return True
 
 
 class CapabilityStateValue(StrEnum):
@@ -49,9 +72,11 @@ class CapabilityService:
         bindings: InferenceBindingService,
         *,
         policy_heads: PolicyHeadReader,
+        pdf_probe: Callable[[], bool] | None = None,
     ) -> None:
         self._bindings = bindings
         self._policy_heads = policy_heads
+        self._pdf_probe = pdf_probe or _default_pdf_probe
 
     async def get_capabilities(
         self,
@@ -64,6 +89,7 @@ class CapabilityService:
             "a2a",
             "ops_patrol",
             "ops_patrol_remediation",
+            "report_pdf",
         )
         if scope is None:
             denied = CapabilityState(
@@ -137,6 +163,18 @@ class CapabilityService:
                 details={"mode": remediation_mode.value},
             ),
         }[remediation_mode]
+        report_pdf = (
+            CapabilityState(
+                state=CapabilityStateValue.AVAILABLE,
+                details={"engine": "weasyprint"},
+            )
+            if self._pdf_probe()
+            else CapabilityState(
+                state=CapabilityStateValue.NOT_CONFIGURED,
+                reason_key="capabilities.reason.pdfRendererUnavailable",
+                details={"engine": "weasyprint"},
+            )
+        )
         return CapabilitySnapshot(
             items={
                 "chat": chat,
@@ -145,6 +183,7 @@ class CapabilityService:
                 "a2a": a2a,
                 "ops_patrol": patrol,
                 "ops_patrol_remediation": remediation,
+                "report_pdf": report_pdf,
             }
         )
 

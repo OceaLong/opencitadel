@@ -44,6 +44,11 @@ class DBKnowledgeBaseRepository(
         )
 
     @staticmethod
+    def _exclude_deleted(stmt):
+        """普通读路径过滤软删行；软删语义在仓储层实现，不进 RLS 谓词。"""
+        return stmt.where(KnowledgeBaseModel.deleted_at.is_(None))
+
+    @staticmethod
     def _active_version_join_predicate():
         """Close every public read over one authoritative active version."""
         return and_(
@@ -80,8 +85,10 @@ class DBKnowledgeBaseRepository(
         record.updated_at = kb.updated_at
 
     async def get_kb(self, kb_id: str, scope: OwnerScope | None = None) -> KnowledgeBase | None:
-        stmt = self._apply_scope(
-            select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id), scope
+        stmt = self._exclude_deleted(
+            self._apply_scope(
+                select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id), scope
+            )
         )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -92,9 +99,11 @@ class DBKnowledgeBaseRepository(
         kb_id: str,
         scope: OwnerScope | None = None,
     ) -> KnowledgeBase | None:
-        stmt = self._apply_scope(
-            select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id).with_for_update(),
-            scope,
+        stmt = self._exclude_deleted(
+            self._apply_scope(
+                select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id).with_for_update(),
+                scope,
+            )
         )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -104,13 +113,66 @@ class DBKnowledgeBaseRepository(
         self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
     ) -> list[KnowledgeBase]:
         stmt = (
-            self._apply_scope(select(KnowledgeBaseModel), scope)
+            self._exclude_deleted(self._apply_scope(select(KnowledgeBaseModel), scope))
             .order_by(KnowledgeBaseModel.updated_at.desc())
             .offset(max(offset, 0))
             .limit(max(1, min(limit, 500)))
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def list_deleted_kbs(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[KnowledgeBase]:
+        """回收站：仅返回已软删的知识库（owner 作用域内，按删除时间倒序）。"""
+        stmt = (
+            self._apply_scope(select(KnowledgeBaseModel), scope)
+            .where(KnowledgeBaseModel.deleted_at.is_not(None))
+            .order_by(KnowledgeBaseModel.deleted_at.desc())
+            .offset(max(offset, 0))
+            .limit(max(1, min(limit, 500)))
+        )
+        result = await self.db_session.execute(stmt)
+        return [record.to_domain() for record in result.scalars().all()]
+
+    async def soft_delete(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """软删除：设置 ``deleted_at``；仅命中未删除的行。"""
+        stmt = self._apply_scope(
+            update(KnowledgeBaseModel).where(
+                KnowledgeBaseModel.id == kb_id,
+                KnowledgeBaseModel.deleted_at.is_(None),
+            ),
+            scope,
+        ).values(deleted_at=datetime.now(UTC))
+        result = await self.db_session.execute(stmt)
+        return result.rowcount > 0
+
+    async def restore(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """恢复：清空 ``deleted_at``；仅命中回收站中的行。"""
+        stmt = self._apply_scope(
+            update(KnowledgeBaseModel).where(
+                KnowledgeBaseModel.id == kb_id,
+                KnowledgeBaseModel.deleted_at.is_not(None),
+            ),
+            scope,
+        ).values(deleted_at=None)
+        result = await self.db_session.execute(stmt)
+        return result.rowcount > 0
+
+    async def purge_kb(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+        """清除：物理删除回收站中的知识库（owner 作用域内）。"""
+        guard = self._apply_scope(
+            select(KnowledgeBaseModel.id).where(
+                KnowledgeBaseModel.id == kb_id,
+                KnowledgeBaseModel.deleted_at.is_not(None),
+            ),
+            scope,
+        )
+        result = await self.db_session.execute(guard)
+        if result.scalar_one_or_none() is None:
+            return False
+        await self.delete_kb(kb_id)
+        return True
 
     async def delete_kb(self, kb_id: str) -> None:
         await self.clear_index_data(kb_id)

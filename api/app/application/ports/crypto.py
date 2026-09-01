@@ -11,6 +11,43 @@ REFRESH_COOKIE = "refresh_token"
 CSRF_COOKIE = "csrf_token"
 CSRF_HEADER = "x-csrf-token"
 
+# The `__Host-` prefix locks a cookie to the exact host over HTTPS: the browser
+# only accepts it when it is Secure, has Path=/, and carries no Domain attribute.
+# That is precisely what defeats the sibling-subdomain overwrite that would let a
+# cousin origin shadow the CSRF double-submit cookie on a shared parent domain.
+_HOST_COOKIE_PREFIX = "__Host-"
+
+
+def _use_host_prefix(cookie_domain: str | None, cookie_secure: bool) -> bool:
+    """`__Host-` is usable only when no cookie Domain is configured (the prefix
+    forbids the Domain attribute) and cookies are Secure (the prefix requires it).
+    In non-secure dev over http, or when a shared Domain is deliberately set, the
+    bare base name is used so the write side stays valid."""
+    return bool(cookie_secure) and not cookie_domain
+
+
+def host_cookie_name(base_name: str, *, cookie_domain: str | None, cookie_secure: bool) -> str:
+    """Central write-side name resolver. Returns the `__Host-`-prefixed name when
+    the prefix is usable for the given deployment, otherwise the bare base name.
+    The read side pairs with :func:`read_host_cookie`."""
+    if _use_host_prefix(cookie_domain, cookie_secure):
+        return f"{_HOST_COOKIE_PREFIX}{base_name}"
+    return base_name
+
+
+def read_host_cookie(cookies: Any, base_name: str) -> str | None:
+    """Central read-side resolver that pairs with :func:`host_cookie_name` without
+    needing the request-time cookie Domain/Secure flags (not every read point can
+    reach them). The write side ever emits exactly one of the two names, so trying
+    the `__Host-` name first and the bare name second always recovers it. Trying
+    the prefixed name first is also the secure choice: a `__Host-` cookie can only
+    have been set host-locked over HTTPS, so a sibling-subdomain-planted bare-name
+    cookie can never shadow it."""
+    prefixed = cookies.get(f"{_HOST_COOKIE_PREFIX}{base_name}")
+    if prefixed is not None:
+        return prefixed
+    return cookies.get(base_name)
+
 
 class TokenCodecError(ValueError):
     """A token cannot be authenticated or does not satisfy its expected kind."""

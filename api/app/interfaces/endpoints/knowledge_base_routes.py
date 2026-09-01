@@ -74,6 +74,21 @@ async def list_knowledge_bases(
     )
 
 
+# 回收站列表必须在 ``GET /{kb_id}`` 之前注册，避免 "deleted" 被当作 kb_id。
+@router.get("/deleted", response_model=Response[ListKnowledgeBasesResponse])
+async def list_deleted_knowledge_bases(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[ListKnowledgeBasesResponse]:
+    """获取回收站（已软删除）知识库列表"""
+    items = await service.list_deleted_kbs(limit=limit, offset=offset, scope=ctx.scope)
+    return Response.success(
+        data=ListKnowledgeBasesResponse(knowledge_bases=[_to_kb_response(item) for item in items])
+    )
+
+
 @router.get("/{kb_id}", response_model=Response[KnowledgeBaseResponse])
 async def get_knowledge_base(
     kb_id: str,
@@ -213,7 +228,32 @@ async def delete_knowledge_base(
     _write_guard: NonAuditorWriteGuardDep,
     service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[dict | None]:
+    """软删除知识库；记录进入回收站，可恢复。"""
     await service.delete_kb(kb_id, scope=ctx.scope)
+    return Response.success()
+
+
+@router.post("/{kb_id}/restore", response_model=Response[dict | None])
+async def restore_knowledge_base(
+    kb_id: str,
+    ctx: WorkspaceContextDep,
+    _write_guard: NonAuditorWriteGuardDep,
+    service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[dict | None]:
+    """从回收站恢复已软删除的知识库。"""
+    await service.restore_kb(kb_id, scope=ctx.scope)
+    return Response.success()
+
+
+@router.delete("/{kb_id}/purge", response_model=Response[dict | None])
+async def purge_knowledge_base(
+    kb_id: str,
+    ctx: WorkspaceContextDep,
+    _write_guard: NonAuditorWriteGuardDep,
+    service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[dict | None]:
+    """彻底清除回收站中的知识库及其级联数据（不可恢复）。"""
+    await service.purge_kb(kb_id, scope=ctx.scope)
     return Response.success()
 
 

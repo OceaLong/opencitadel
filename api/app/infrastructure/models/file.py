@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     String,
@@ -19,7 +20,18 @@ class FileModel(Base):
     """文件数据ORM模型"""
 
     __tablename__ = "files"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_files_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_files_id"),
+        # RLS predicate shape; leading team_id also serves the teams FK scan.
+        Index("ix_files_team_created", "team_id", "created_at"),
+        # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
+        Index(
+            "ix_files_owner_created",
+            "owner_user_id",
+            "created_at",
+            postgresql_where=text("team_id IS NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(255),
@@ -61,12 +73,13 @@ class FileModel(Base):
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,  # users FK integrity scan (partial owner index only covers team_id IS NULL rows)
     )
     team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
-    )
+    )  # indexed via ix_files_team_created composite
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

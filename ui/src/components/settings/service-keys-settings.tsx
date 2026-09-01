@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,6 +29,7 @@ import {
 export function ServiceKeysSettings() {
   const t = useTranslations("settingsServiceKeys");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const [keys, setKeys] = useState<ServiceApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -126,9 +127,9 @@ export function ServiceKeysSettings() {
                   </Badge>
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">
-                  {t("createdAt", { time: formatDateTime(key.created_at) })}
+                  {t("createdAt", { time: formatDateTime(key.created_at, locale) })}
                   {key.last_used_at
-                    ? ` · ${t("lastUsedAt", { time: formatDateTime(key.last_used_at) })}`
+                    ? ` · ${t("lastUsedAt", { time: formatDateTime(key.last_used_at, locale) })}`
                     : ""}
                 </p>
               </div>
