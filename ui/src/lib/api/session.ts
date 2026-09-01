@@ -186,7 +186,7 @@ export const sessionApi = {
 
   getAvailableResourceVersions: (
     sessionId: string,
-    resourceKind: "knowledge_base" | "codebase",
+    resourceKind: "knowledge_base",
   ): Promise<SessionResourceBinding[]> => {
     return get<SessionResourceBinding[]>(
       `/sessions/${sessionId}/resource-bindings/${resourceKind}/available-versions`,
@@ -195,7 +195,7 @@ export const sessionApi = {
 
   upgradeResourceBinding: (
     sessionId: string,
-    resourceKind: "knowledge_base" | "codebase",
+    resourceKind: "knowledge_base",
     targetVersionId: string,
   ): Promise<ResourceBindingUpgrade> => {
     return post<ResourceBindingUpgrade>(

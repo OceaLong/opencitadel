@@ -49,7 +49,7 @@ explicit operator resolution.
 
 ## 6. Immutable resource publication
 
-Knowledge and codebase ingestion build immutable candidates. Publication
+Knowledge ingestion builds immutable candidates. Publication
 validates the complete closure and compare-and-swaps the active version.
 Sessions bind a concrete published version, so later builds cannot change the
 evidence boundary of an existing Run.

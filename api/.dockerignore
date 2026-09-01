@@ -30,7 +30,6 @@ wheels/
 
 # 测试相关
 tests/
-pytest.ini
 .pytest_cache/
 .coverage
 htmlcov/

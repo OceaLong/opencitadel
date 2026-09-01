@@ -35,8 +35,6 @@ from app.infrastructure.execution.models import (
     ExecutionRunProjectionORM,
 )
 from app.infrastructure.execution.postgres_event_store import PostgresEventStore
-from app.infrastructure.models.codebase import CodebaseModel
-from app.infrastructure.models.codebase_version import CodebaseVersionORM
 from app.infrastructure.models.knowledge_base import KnowledgeBaseModel
 from app.infrastructure.models.knowledge_version import KnowledgeBaseVersionORM
 from app.infrastructure.models.patrol import (
@@ -536,10 +534,10 @@ class PostgresFormalProjector:
         event: StoredEvent,
         state: RunState,
     ) -> None:
-        if state.family not in {RunFamily.KB_INGEST, RunFamily.CODEBASE_INGEST}:
+        if state.family is not RunFamily.KB_INGEST:
             return
         build_id = str(state.semantic_payload.get("build_id") or state.source_entity_id)
-        resource_kind = "knowledge_base" if state.family == RunFamily.KB_INGEST else "codebase"
+        resource_kind = "knowledge_base"
         progress = {
             RunStatus.NEW: 0,
             RunStatus.QUEUED: 0,
@@ -602,51 +600,29 @@ class PostgresFormalProjector:
                 if event.event_type == "RunCancelled"
                 else state.failure_code or "BUILD_FAILED"
             )
-            if state.family == RunFamily.CODEBASE_INGEST:
-                await session.execute(
-                    update(CodebaseVersionORM)
-                    .where(
-                        CodebaseVersionORM.build_id == build_id,
-                        CodebaseVersionORM.published_at.is_(None),
-                    )
-                    .values(state="failed")
+            await session.execute(
+                update(KnowledgeBaseVersionORM)
+                .where(
+                    KnowledgeBaseVersionORM.build_id == build_id,
+                    KnowledgeBaseVersionORM.published_at.is_(None),
                 )
-                await session.execute(
-                    update(CodebaseModel)
-                    .where(CodebaseModel.id == values["resource_id"])
-                    .values(
-                        status=case(
-                            (CodebaseModel.active_version_id.is_not(None), "ready"),
-                            else_="failed",
+                .values(state="failed")
+            )
+            await session.execute(
+                update(KnowledgeBaseModel)
+                .where(KnowledgeBaseModel.id == values["resource_id"])
+                .values(
+                    status=case(
+                        (
+                            KnowledgeBaseModel.active_version_id.is_not(None),
+                            "ready",
                         ),
-                        error=error_code,
-                        updated_at=event.occurred_at,
-                    )
+                        else_="failed",
+                    ),
+                    error=error_code,
+                    updated_at=event.occurred_at,
                 )
-            else:
-                await session.execute(
-                    update(KnowledgeBaseVersionORM)
-                    .where(
-                        KnowledgeBaseVersionORM.build_id == build_id,
-                        KnowledgeBaseVersionORM.published_at.is_(None),
-                    )
-                    .values(state="failed")
-                )
-                await session.execute(
-                    update(KnowledgeBaseModel)
-                    .where(KnowledgeBaseModel.id == values["resource_id"])
-                    .values(
-                        status=case(
-                            (
-                                KnowledgeBaseModel.active_version_id.is_not(None),
-                                "ready",
-                            ),
-                            else_="failed",
-                        ),
-                        error=error_code,
-                        updated_at=event.occurred_at,
-                    )
-                )
+            )
 
     @staticmethod
     async def _project_public_event(

@@ -21,16 +21,13 @@ export type HistoricalVersionsProps<TVersion extends VersionShape> = {
   messages: HistoricalVersionMessages;
   /**
    * Resource-specific actions rendered after the historical version list
-   * (shown regardless of whether there is any history). Knowledge bases use
-   * this for their "create build"/reindex button; codebases pass nothing.
+   * (shown regardless of whether there is any history).
    */
   extraActions?: ReactNode;
 };
 
 /**
- * Shared "previous versions" panel behind the codebase and knowledge base
- * version-status widgets. Identical markup/copy across both resources
- * except for the `extraActions` slot.
+ * Shared "previous versions" panel for resource version-status widgets.
  */
 export function HistoricalVersions<TVersion extends VersionShape>({
   historical,

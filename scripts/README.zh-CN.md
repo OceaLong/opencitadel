@@ -13,6 +13,9 @@
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh) | 管理隔离的全栈验收、证据 Manifest 与精确 Label 清理 |
 | [`run-patrol-fixtures.sh`](run-patrol-fixtures.sh) | 创建一次性 kind 集群，运行/重置 20 个 Patrol 案例，验证 Collector 只读权限并评分 |
 | [`score_patrol_fixtures.py`](score_patrol_fixtures.py) | 校验机器可读 Patrol Fixture 结果；通常由 Runner 调用 |
+| [`drive_remediation_fixture.py`](drive_remediation_fixture.py) | 修复 Fixture 的确定性无 LLM 测试驱动；`PATROL_RUN_REMEDIATION_FIXTURE=true` 时由 `run-patrol-fixtures.sh` 调用 |
+| [`verify_evidence_package.py`](verify_evidence_package.py) | 离线校验证据包 ZIP（Manifest HMAC 签名 + 逐文件 SHA-256 摘要） |
+| [`acceptance/`](acceptance/) | `run-acceptance-e2e.sh` 背后的 Python 辅助模块：所有权安全编排（`runner.py`）与证据 Manifest（`manifest.py`） |
 
 ## 用法
 

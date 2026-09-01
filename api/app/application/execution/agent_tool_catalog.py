@@ -9,7 +9,6 @@ from pydantic_core import to_jsonable_python
 
 from app.application.execution.tool_catalog import ToolDefinition
 from app.application.services.artifact_service import ArtifactService
-from app.application.services.codebase_service import CodebaseService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.integration_server_service import (
     A2AIntegrationService,
@@ -25,22 +24,19 @@ from app.domain.external.connection_pool import (
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.image_generation import ImageGenerator
 from app.domain.external.llm import LLM
-from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.sandbox import Sandbox, SandboxFactoryPort
 from app.domain.external.search import SearchEngine
-from app.domain.models.codebase import SessionMode
 from app.domain.models.resource_bindings import ResourceKind
 from app.domain.models.scope import OwnerScope
+from app.domain.models.session_mode import SessionMode
 from app.domain.models.skill import Skill
 from app.domain.models.tool_policy import ApprovalMode, ToolEffect
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.services.codebase.snapshot_service import VersionedCodeSource
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.browser import BrowserTool
 from app.domain.services.tools.capability_policy import CapabilityPolicy
-from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.file import FileTool
 from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
@@ -67,11 +63,9 @@ class AgentToolCatalog:
         a2a_connection_pool: A2AConnectionPoolPort,
         mcp_servers: MCPServerService,
         a2a_servers: A2AIntegrationService,
-        object_storage: ObjectStoragePort,
         file_storage: FileStorage,
         models: InferenceModelService,
         image_generator: ImageGenerator,
-        codebases: CodebaseService,
         artifacts: ArtifactService,
         memories: MemoryService,
         embeddings: EmbeddingPort | None = None,
@@ -84,11 +78,9 @@ class AgentToolCatalog:
         self._a2a_pool = a2a_connection_pool
         self._mcp_servers = mcp_servers
         self._a2a_servers = a2a_servers
-        self._object_storage = object_storage
         self._file_storage = file_storage
         self._models = models
         self._image_generator = image_generator
-        self._codebases = codebases
         self._artifacts = artifacts
         self._memories = memories
         self._embeddings = embeddings
@@ -161,17 +153,6 @@ class AgentToolCatalog:
                             "result": to_jsonable_python(result),
                         }
                     )
-                if pack.has_tool("semantic_search"):
-                    result = await pack.invoke(
-                        "semantic_search",
-                        query=query,
-                    )
-                    sources.append(
-                        {
-                            "kind": "codebase",
-                            "result": to_jsonable_python(result),
-                        }
-                    )
             return {"query": query, "sources": sources}
         finally:
             await _cleanup(packs)
@@ -192,22 +173,10 @@ class AgentToolCatalog:
             raise ValueError("session_id is required for conversational tools")
         bindings = _bindings(payload)
         attachments = _attachments(payload)
-        code_binding = next(
-            (item for item in bindings if item["resource_kind"] == ResourceKind.CODEBASE.value),
-            None,
-        )
 
         async def on_sandbox_ready(sandbox: Sandbox) -> None:
             if mode != SessionMode.AGENT:
                 return
-            if code_binding is not None:
-                await self._codebases.attach_to_session_sandbox(
-                    str(code_binding["resource_id"]),
-                    sandbox,
-                    self._object_storage,
-                    scope=scope,
-                    codebase_version_id=str(code_binding["version_id"]),
-                )
             for attachment in attachments:
                 file_id = attachment["file_id"]
                 async with self._uow_factory() as uow:
@@ -329,24 +298,6 @@ class AgentToolCatalog:
                         owner_scope=scope,
                     )
                 )
-            elif kind == ResourceKind.CODEBASE.value:
-                source = await self._versioned_code_source(
-                    codebase_id=str(binding["resource_id"]),
-                    version_id=str(binding["version_id"]),
-                )
-                candidates.append(
-                    CodebaseTool(
-                        uow_factory=self._uow_factory,
-                        codebase_id=str(binding["resource_id"]),
-                        sandbox=sandbox,
-                        policy=family_policy.codebase_retrieval,
-                        version_id=str(binding["version_id"]),
-                        source_reader=source if mode == SessionMode.ASK else None,
-                        base_version_id=str(binding["version_id"]),
-                        embeddings=self._embeddings,
-                        owner_scope=scope,
-                    )
-                )
         return ToolRegistry.build_tools(
             policy=CapabilityPolicy.for_mode(
                 mode,
@@ -422,26 +373,6 @@ class AgentToolCatalog:
                 finalize_fn=finalize_artifact,
             ),
         ]
-
-    async def _versioned_code_source(
-        self,
-        *,
-        codebase_id: str,
-        version_id: str,
-    ) -> VersionedCodeSource:
-        async with self._uow_factory() as uow:
-            version = await uow.codebase_version.get_version(
-                version_id,
-                codebase_id=codebase_id,
-            )
-        if version is None or not version.source_snapshot_key or not version.source_digest:
-            raise ValueError("bound codebase version snapshot is unavailable")
-        return VersionedCodeSource(
-            version_id=version.id,
-            snapshot_key=version.source_snapshot_key,
-            source_digest=version.source_digest,
-            object_storage=self._object_storage,
-        )
 
 
 def _owner_scope(context: ActivityContext) -> OwnerScope:

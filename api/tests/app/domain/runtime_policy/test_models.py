@@ -24,26 +24,6 @@ def test_execution_policy_is_closed_frozen_and_bounded() -> None:
         policy.agent = policy_module.AgentExecutionPolicy(max_iterations=2)
 
 
-def test_codebase_policy_exposes_only_enforced_build_and_retrieval_bounds() -> None:
-    policy_module = _runtime_policy_module()
-
-    analysis = policy_module.CodebaseExecutionPolicy().analysis
-
-    assert analysis.model_dump() == {
-        "max_file_size_bytes": 512_000,
-        "max_files": 5_000,
-        "chunk_max_chars": 2_000,
-        "source_read_batch_size": 50,
-    }
-    assert "ignore_dirs" not in type(analysis).model_fields
-    assert "ignore_extensions" not in type(analysis).model_fields
-    assert policy_module.CodebaseExecutionPolicy().retrieval.model_dump() == {
-        "fetch_multiplier": 3,
-        "rrf_k": 60,
-        "final_top_k": 8,
-    }
-
-
 def test_operations_policy_rejects_unbounded_or_inconsistent_values() -> None:
     policy_module = _runtime_policy_module()
 

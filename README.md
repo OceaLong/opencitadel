@@ -44,7 +44,7 @@ Due to the large size of the video file, please click on the image or link below
 | **Agent chat** | `/`, `/sessions/[id]` | Event-sourced Agent/Ask Runs, per-invocation approval, VNC takeover, durable replay |
 | **Ops Patrol** | `/patrols` | Read-only infrastructure checks with approval-gated remediation: closed-world collector, server-side assertion engine, signed evidence packages |
 | **Automation** | `/automation` | Scheduled jobs, webhooks, notifications |
-| **Governed context sources** | `/knowledge`, `/codebase` | Document & code knowledge bases: versioning, atomic publish, session version binding, retrieval Q&A |
+| **Governed context sources** | `/knowledge` | Document knowledge bases: versioning, atomic publish, session version binding, retrieval Q&A |
 | **Integrations** | Settings modal → Integrations | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
 | **Admin** | `/admin/*` | Users, quotas, audit, usage, compliance evidence |
 

@@ -40,7 +40,6 @@ class ScheduledJob(BaseModel):
     prompt_template: str = ""
     skill_id: str | None = None
     model_id: str | None = None
-    codebase_id: str | None = None
     knowledge_base_id: str | None = None
     notify_channels: list[NotifyChannel] = Field(default_factory=list)
     operator_scope: Literal["owned", "third_party_saas"] | None = None

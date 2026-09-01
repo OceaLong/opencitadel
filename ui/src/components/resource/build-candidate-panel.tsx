@@ -40,16 +40,13 @@ export type BuildCandidatePanelProps<TVersion extends VersionShape, TBuild exten
   messages: BuildCandidateMessages;
   /**
    * Resource-specific extra info rendered right after the capabilities line
-   * (only while a version is being viewed). Codebase uses this for its
-   * degraded-reasons/unsupported-views blocks; knowledge bases pass nothing.
+   * while a version is being viewed.
    */
   extraInfo?: ReactNode;
 };
 
 /**
- * Shared "current version + candidate build" panel behind the codebase and
- * knowledge base version-status widgets. Identical markup/copy across both
- * resources except for the `extraInfo` slot.
+ * Shared "current version + candidate build" panel for resource status views.
  */
 export function BuildCandidatePanel<TVersion extends VersionShape, TBuild extends BuildShape>({
   active,

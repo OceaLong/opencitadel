@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 type ContextFilter = "all" | SessionContextKind;
 
-const FILTER_OPTIONS: ContextFilter[] = ["all", "general", "codebase", "knowledge", "hybrid"];
+const FILTER_OPTIONS: ContextFilter[] = ["all", "general", "knowledge"];
 
 export function SessionList() {
   const router = useRouter();

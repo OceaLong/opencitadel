@@ -37,11 +37,11 @@ arguments. VNC gives the user interactive access to the isolated sandbox but
 does not itself mark an Activity successful.
 
 Session deletion is rejected while a formal Run is active. Resource context
-shows the exact published knowledge/codebase version bound to the session.
+shows the exact published knowledge-base version bound to the session.
 
 ## Resource builds
 
-Knowledge and codebase pages use one candidate-build model: create candidate,
+Knowledge-base pages use one candidate-build model: create candidate,
 observe formal progress, retry/cancel when the projection permits, and publish
 atomically. The active published version remains visible during a failed or
 cancelled candidate. Document reads require an explicit version and document

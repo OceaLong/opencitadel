@@ -71,16 +71,6 @@ const EXECUTION_POLICY = {
     ocr: { mode: "vision_llm", max_pages: 50 },
     document: { max_bytes: 52428800, max_pages: 1000 },
   },
-  codebase: {
-    vector_enabled: true,
-    analysis: {
-      max_file_size_bytes: 512000,
-      max_files: 5000,
-      chunk_max_chars: 2000,
-      source_read_batch_size: 50,
-    },
-    retrieval: { fetch_multiplier: 3, rrf_k: 60, final_top_k: 8 },
-  },
 } satisfies ExecutionPolicy;
 
 const OPERATIONS_POLICY = {
@@ -119,7 +109,6 @@ const OPERATIONS_POLICY = {
   },
   resource_gc: {
     knowledge_base: { enabled: false, retention_count: 10, retention_min_days: 30, batch_size: 50 },
-    codebase: { enabled: false, retention_count: 10, retention_min_days: 30, batch_size: 50 },
   },
   patrol_retention: {
     run_days: 30,

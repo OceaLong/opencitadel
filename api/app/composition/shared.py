@@ -32,8 +32,6 @@ from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.auth_service import AuthService
 from app.application.services.capability_service import CapabilityService
-from app.application.services.codebase_service import CodebaseService
-from app.application.services.codebase_version_service import CodebaseVersionService
 from app.application.services.compliance_service import (
     ADMIN_AUDIT_ACTION_PREFIX,
     EVIDENCE_EXPORT_AUDIT_ACTION,
@@ -193,7 +191,6 @@ class SharedServices:
     resource_binding_service: ResourceBindingService
     resource_guard: ResourceGuardService
     agent_service: AgentService
-    codebase_service: CodebaseService
     knowledge_base_service: KnowledgeBaseService
     a2a_server_service: A2AServerService
     artifact_service: ArtifactService
@@ -554,11 +551,8 @@ def build_shared_services(
     llm_token_usage_service = LLMTokenUsageService(uow_factory=uow_factory)
     file_service = FileService(uow_factory=uow_factory, file_storage=file_storage)
 
-    codebase_version_service = CodebaseVersionService(uow_factory=uow_factory)
     knowledge_version_service = KnowledgeVersionService(uow_factory=uow_factory)
-    version_providers = ResourceVersionProviderRegistry(
-        providers=[codebase_version_service, knowledge_version_service]
-    )
+    version_providers = ResourceVersionProviderRegistry(providers=[knowledge_version_service])
     resource_binding_service = ResourceBindingService(
         uow_factory=uow_factory,
         providers=version_providers,
@@ -571,18 +565,6 @@ def build_shared_services(
         session_list_publisher=session_publisher,
         resource_guard=resource_guard,
         resource_binding_service=resource_binding_service,
-    )
-    codebase_service = CodebaseService(
-        uow_factory=uow_factory,
-        sandbox_factory=sandbox_factory,
-        file_storage=file_storage,
-        resource_guard=resource_guard,
-        resource_binding_service=resource_binding_service,
-        codebase_version_service=codebase_version_service,
-        run_admission_service=run_admission_service,
-        run_control_service=run_control_service,
-        run_projection=run_projection,
-        inference_bindings=inference_binding_service,
     )
     knowledge_base_service = KnowledgeBaseService(
         uow_factory=uow_factory,
@@ -735,7 +717,6 @@ def build_shared_services(
         resource_binding_service=resource_binding_service,
         resource_guard=resource_guard,
         agent_service=agent_service,
-        codebase_service=codebase_service,
         knowledge_base_service=knowledge_base_service,
         a2a_server_service=a2a_server_service,
         artifact_service=artifact_service,

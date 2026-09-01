@@ -84,7 +84,7 @@ def _shadow_table(orm_cls, metadata: MetaData, *, fk: dict[str, str] | None = No
     named in `fk` (column name -> "table.column" target) -- this test only wants the
     one FK under investigation (scheduled_job_id) actually enforced; patrol_packs/
     scheduled_jobs also reference users/teams/skills/mcp_servers/inference_models/
-    codebases/knowledge_bases, none of which are in scope here and would otherwise
+    knowledge_bases, none of which are in scope here and would otherwise
     require seeding unrelated rows just to satisfy SQLite's checker.
 
     Non-primary-key columns are all made nullable here regardless of the source

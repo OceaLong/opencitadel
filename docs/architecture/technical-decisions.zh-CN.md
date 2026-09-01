@@ -38,7 +38,7 @@ Fencing 拒绝过期完成；非幂等未知结果等待显式 Operator 处理�
 
 ## 6. 不可变资源发布
 
-知识库与代码库摄取构建不可变 Candidate。发布前验证完整闭包，并 CAS 更新 Active Version。
+知识库摄取构建不可变 Candidate。发布前验证完整闭包，并 CAS 更新 Active Version。
 Session 绑定具体已发布版本，因此后续构建不会改变已有 Run 的证据边界。
 
 ## 7. 强制租户隔离与最小权限

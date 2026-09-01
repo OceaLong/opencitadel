@@ -1,13 +1,13 @@
 import pytest
 
 from app.domain.errors import BadRequestError
-from app.domain.models.codebase import SessionMode
 from app.domain.models.resource_bindings import (
     PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
 from app.domain.models.scope import OwnerScope
+from app.domain.models.session_mode import SessionMode
 from app.domain.services.resource_version_provider import ResourceVersionProviderRegistry
 
 
@@ -44,8 +44,6 @@ async def test_guard_resolves_only_matching_published_versions():
 
     validated = await guard.validate_session_request(
         mode=SessionMode.AGENT,
-        codebase_id=None,
-        codebase_version_id=None,
         knowledge_base_id="kb1",
         knowledge_base_version_id="v2",
         scope=scope,
@@ -62,10 +60,10 @@ async def test_guard_rejects_unpublished_resources_with_the_same_error():
     from app.application.services.resource_guard_service import ResourceGuardService
 
     provider = _Provider(
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         PublishedResourceVersion(
-            ResourceKind.CODEBASE,
-            "cb1",
+            ResourceKind.KNOWLEDGE_BASE,
+            "kb1",
             "v1",
             state=PublicationState.READY,
             published=False,
@@ -78,9 +76,7 @@ async def test_guard_rejects_unpublished_resources_with_the_same_error():
     with pytest.raises(BadRequestError, match="resource version is not published"):
         await guard.validate_session_request(
             mode=SessionMode.ASK,
-            codebase_id="cb1",
-            codebase_version_id=None,
-            knowledge_base_id=None,
+            knowledge_base_id="kb1",
             knowledge_base_version_id=None,
             scope=OwnerScope.personal("u1"),
         )

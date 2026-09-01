@@ -10,17 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.application.services.codebase_service import CodebaseService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.application.services.session_service import SessionService
-from app.domain.models.codebase import (
-    Codebase,
-    CodebaseSourceType,
-    CodebaseStatus,
-    SessionMode,
-)
 from app.domain.models.knowledge_base import KBStatus, KnowledgeBase
 from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
@@ -34,6 +27,7 @@ from app.domain.models.resource_bindings import (
 )
 from app.domain.models.scope import OwnerScope
 from app.domain.models.session import Session
+from app.domain.models.session_mode import SessionMode
 from app.domain.services.resource_version_provider import (
     ResourceVersionProviderRegistry,
 )
@@ -74,17 +68,6 @@ class _Store:
                 status=KBStatus.READY,
                 active_version_id="kb1-v1",
                 ready_doc_count=1,
-                owner_user_id="owner",
-            ),
-        }
-    )
-    codebases: dict[str, Codebase] = field(
-        default_factory=lambda: {
-            "cb1": Codebase(
-                id="cb1",
-                name="Code",
-                source_type=CodebaseSourceType.FILES,
-                status=CodebaseStatus.READY,
                 owner_user_id="owner",
             ),
         }
@@ -185,19 +168,6 @@ class _KnowledgeVersionRepository:
         return None
 
 
-class _CodebaseRepository:
-    def __init__(self, uow: _AtomicUow) -> None:
-        self._uow = uow
-
-    async def get_by_id(self, codebase_id: str, scope=None):
-        codebase = self._uow.store.codebases.get(codebase_id)
-        if codebase is None:
-            return None
-        if scope is not None and codebase.owner_user_id != scope.user_id:
-            return None
-        return codebase.model_copy(deep=True)
-
-
 class _OptionalRepository:
     async def get_by_id(self, _item_id: str, scope=None):
         del scope
@@ -218,7 +188,6 @@ class _AtomicUow:
         self.resource_bindings = _SessionResourceBindingRepository(self)
         self.knowledge_base = _KnowledgeBaseRepository(self)
         self.knowledge_version = _KnowledgeVersionRepository()
-        self.codebase = _CodebaseRepository(self)
         self.inference_model = _OptionalRepository()
         self.skill = _OptionalRepository()
         return self
@@ -238,12 +207,7 @@ def _services(store: _Store):
     def factory():
         return _AtomicUow(store)
 
-    providers = ResourceVersionProviderRegistry(
-        [
-            _Provider(ResourceKind.CODEBASE),
-            _Provider(ResourceKind.KNOWLEDGE_BASE),
-        ]
-    )
+    providers = ResourceVersionProviderRegistry([_Provider(ResourceKind.KNOWLEDGE_BASE)])
     guard = ResourceGuardService(providers=providers)
     binding = ResourceBindingService(
         uow_factory=factory,
@@ -268,16 +232,6 @@ def _services(store: _Store):
             resource_guard=guard,
             resource_binding_service=binding,
         ),
-        "codebase": CodebaseService(
-            uow_factory=factory,
-            sandbox_factory=MagicMock(),
-            file_storage=MagicMock(),
-            run_admission_service=AsyncMock(),
-            run_control_service=AsyncMock(),
-            run_projection=AsyncMock(),
-            resource_guard=guard,
-            resource_binding_service=binding,
-        ),
     }
 
 
@@ -286,19 +240,12 @@ async def _create(factory: str, store: _Store) -> Session:
     scope = OwnerScope.personal("owner")
     if factory == "generic":
         return await service.create_session(
-            codebase_id="cb1",
             knowledge_base_id="kb1",
             mode=SessionMode.AGENT,
             scope=scope,
         )
-    if factory == "knowledge_base":
-        return await service.create_session_for_kb(
-            "kb1",
-            mode=SessionMode.AGENT,
-            scope=scope,
-        )
-    return await service.create_session_for_codebase(
-        "cb1",
+    return await service.create_session_for_kb(
+        "kb1",
         mode=SessionMode.AGENT,
         scope=scope,
     )
@@ -308,9 +255,8 @@ async def _create(factory: str, store: _Store) -> Session:
 @pytest.mark.parametrize(
     ("factory", "expected_kinds"),
     [
-        ("generic", {ResourceKind.CODEBASE, ResourceKind.KNOWLEDGE_BASE}),
+        ("generic", {ResourceKind.KNOWLEDGE_BASE}),
         ("knowledge_base", {ResourceKind.KNOWLEDGE_BASE}),
-        ("codebase", {ResourceKind.CODEBASE}),
     ],
 )
 async def test_successful_creation_commits_session_and_all_pins_in_one_uow(
@@ -333,7 +279,7 @@ async def test_successful_creation_commits_session_and_all_pins_in_one_uow(
 
 
 @pytest.mark.asyncio
-async def test_generic_second_binding_failure_rolls_back_session_and_first_pin():
+async def test_generic_binding_failure_rolls_back_session():
     store = _Store(fail_binding_kind=ResourceKind.KNOWLEDGE_BASE)
 
     with pytest.raises(RuntimeError, match="knowledge_base binding failure"):
@@ -343,7 +289,6 @@ async def test_generic_second_binding_failure_rolls_back_session_and_first_pin()
     assert store.bindings == []
     assert [operation for _, operation, _ in store.operations] == [
         "session",
-        "binding:codebase",
         "binding:knowledge_base",
     ]
 
@@ -353,7 +298,6 @@ async def test_generic_second_binding_failure_rolls_back_session_and_first_pin()
     ("factory", "kind"),
     [
         ("knowledge_base", ResourceKind.KNOWLEDGE_BASE),
-        ("codebase", ResourceKind.CODEBASE),
     ],
 )
 async def test_specialized_binding_failure_rolls_back_session(factory, kind):
@@ -367,7 +311,7 @@ async def test_specialized_binding_failure_rolls_back_session(factory, kind):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("factory", ["generic", "knowledge_base", "codebase"])
+@pytest.mark.parametrize("factory", ["generic", "knowledge_base"])
 async def test_commit_failure_rolls_back_session_and_all_initial_pins(factory):
     store = _Store(fail_write_commit=True)
 

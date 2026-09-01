@@ -1,18 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """OpsConsole — enterprise ticket & settlement operations backend (web + read-only API)."""
+
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
 from seed import compute_expected_reconciliation, get_connection, init_db
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,17 +23,17 @@ _sessions: dict[str, str] = {}
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
-def _current_user(request: Request) -> Optional[str]:
+def _current_user(request: Request) -> str | None:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
     return _sessions.get(token)
 
 
-def _require_user(request: Request) -> Optional[str]:
+def _require_user(request: Request) -> str | None:
     return _current_user(request)
 
 
@@ -69,9 +67,7 @@ async def api_tickets():
 async def api_settlements():
     conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM settlement_records ORDER BY settled_at ASC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM settlement_records ORDER BY settled_at ASC").fetchall()
     finally:
         conn.close()
     return [_row_to_dict(r) for r in rows]
@@ -108,7 +104,7 @@ async def root(request: Request):
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: Optional[str] = None):
+async def login_page(request: Request, error: str | None = None):
     return templates.TemplateResponse(
         request,
         "login.html",
@@ -157,9 +153,9 @@ async def logout(request: Request):
 @app.get("/tickets", response_class=HTMLResponse)
 async def ticket_list(
     request: Request,
-    status: Optional[str] = None,
-    assignee: Optional[str] = None,
-    refund_status: Optional[str] = None,
+    status: str | None = None,
+    assignee: str | None = None,
+    refund_status: str | None = None,
 ):
     if not _require_user(request):
         return _redirect_login()
@@ -180,9 +176,7 @@ async def ticket_list(
         tickets = conn.execute(query, params).fetchall()
         statuses = [
             r[0]
-            for r in conn.execute(
-                "SELECT DISTINCT status FROM tickets ORDER BY status"
-            ).fetchall()
+            for r in conn.execute("SELECT DISTINCT status FROM tickets ORDER BY status").fetchall()
         ]
         assignees = [
             r[0]
@@ -236,14 +230,12 @@ async def settlement_list(request: Request):
 
 
 @app.get("/tickets/{ticket_id}", response_class=HTMLResponse)
-async def ticket_detail(request: Request, ticket_id: int, message: Optional[str] = None):
+async def ticket_detail(request: Request, ticket_id: int, message: str | None = None):
     if not _require_user(request):
         return _redirect_login()
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     finally:
         conn.close()
     if not ticket:
@@ -271,9 +263,7 @@ async def ticket_update(
         return _redirect_login()
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
         if not ticket:
             return HTMLResponse("Ticket not found", status_code=404)
         notes = ticket["notes"]
@@ -287,9 +277,7 @@ async def ticket_update(
         conn.commit()
     finally:
         conn.close()
-    return RedirectResponse(
-        url=f"/tickets/{ticket_id}?message=updated", status_code=303
-    )
+    return RedirectResponse(url=f"/tickets/{ticket_id}?message=updated", status_code=303)
 
 
 @app.get("/tickets/{ticket_id}/close", response_class=HTMLResponse)
@@ -298,9 +286,7 @@ async def ticket_close_confirm(request: Request, ticket_id: int):
         return _redirect_login()
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     finally:
         conn.close()
     if not ticket:
@@ -321,14 +307,10 @@ async def ticket_close_submit(
     if not _require_user(request):
         return _redirect_login()
     if confirm.strip().lower() != "close":
-        return RedirectResponse(
-            url=f"/tickets/{ticket_id}/close?error=confirm", status_code=303
-        )
+        return RedirectResponse(url=f"/tickets/{ticket_id}/close?error=confirm", status_code=303)
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
         if not ticket:
             return HTMLResponse("Ticket not found", status_code=404)
         notes = (ticket["notes"] + "\n" if ticket["notes"] else "") + (
@@ -341,9 +323,7 @@ async def ticket_close_submit(
         conn.commit()
     finally:
         conn.close()
-    return RedirectResponse(
-        url=f"/tickets/{ticket_id}?message=closed", status_code=303
-    )
+    return RedirectResponse(url=f"/tickets/{ticket_id}?message=closed", status_code=303)
 
 
 @app.get("/tickets/{ticket_id}/refund", response_class=HTMLResponse)
@@ -352,9 +332,7 @@ async def ticket_refund_confirm(request: Request, ticket_id: int):
         return _redirect_login()
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     finally:
         conn.close()
     if not ticket:
@@ -375,14 +353,10 @@ async def ticket_refund_submit(
     if not _require_user(request):
         return _redirect_login()
     if confirm.strip().lower() != "refund":
-        return RedirectResponse(
-            url=f"/tickets/{ticket_id}/refund?error=confirm", status_code=303
-        )
+        return RedirectResponse(url=f"/tickets/{ticket_id}/refund?error=confirm", status_code=303)
     conn = get_connection()
     try:
-        ticket = conn.execute(
-            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
+        ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
         if not ticket:
             return HTMLResponse("Ticket not found", status_code=404)
         refund_amt = float(ticket["refund_amount"] or ticket["amount"] or 0)
@@ -397,6 +371,4 @@ async def ticket_refund_submit(
         conn.commit()
     finally:
         conn.close()
-    return RedirectResponse(
-        url=f"/tickets/{ticket_id}?message=refunded", status_code=303
-    )
+    return RedirectResponse(url=f"/tickets/{ticket_id}?message=refunded", status_code=303)

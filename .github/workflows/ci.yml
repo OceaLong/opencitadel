@@ -12,6 +12,12 @@ concurrency:
 permissions:
   contents: read
 
+# Single source of truth for the uv pin in CI. Keep aligned with the
+# UV_VERSION ARG defaults in api/, sandbox/, ops-*/ Dockerfiles and
+# docker-compose.yml.
+env:
+  UV_VERSION: "0.11.33"
+
 jobs:
   patrol-collector-test:
     name: Ops Collector tests
@@ -25,7 +31,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv==0.11.19
+        run: pip install "uv==${UV_VERSION}"
       - name: Install locked dependencies
         run: uv sync --frozen
       - name: Run unit, contract, and fixture-structure tests
@@ -43,7 +49,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv==0.11.19
+        run: pip install "uv==${UV_VERSION}"
       - name: Install locked dependencies
         run: uv sync --frozen
       - name: Run unit, contract, and fixture-structure tests
@@ -101,13 +107,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv==0.11.19
+        run: pip install "uv==${UV_VERSION}"
       - name: Install dependencies
         run: uv sync --frozen --all-groups
       - name: Ruff lint and format (all first-party Python)
-        run: |
-          uv run ruff check --config ../ruff.toml . ../ops-actuator ../ops-collector ../sandbox ../scripts
-          uv run ruff format --config ../ruff.toml --check . ../ops-actuator ../ops-collector ../sandbox ../scripts
+        working-directory: ${{ github.workspace }}
+        run: make lint
       - name: Import boundaries (zero waivers)
         run: |
           uv run lint-imports
@@ -156,7 +161,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install uv==0.11.19
+      - run: pip install "uv==${UV_VERSION}"
       - run: npm ci
       - run: npm run format:check
       - run: npm run i18n:check
@@ -204,9 +209,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv==0.11.19
-      - name: Run sandbox tests from the locked environment
-        run: uv run --frozen --with pytest==8.4.2 --with pytest-asyncio==0.24.0 pytest
+        run: pip install "uv==${UV_VERSION}"
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Run sandbox tests
+        run: uv run pytest -q
 
   deployment-render:
     name: Deployment render
@@ -300,7 +307,7 @@ jobs:
           python-version: "3.12"
       - name: Install uv and kind
         run: |
-          pip install uv==0.11.19
+          pip install "uv==${UV_VERSION}"
           go install sigs.k8s.io/kind@v0.31.0
       - name: Install locked test environments
         run: |
@@ -351,7 +358,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pinned uv
-        run: pip install uv==0.11.19
+        run: pip install "uv==${UV_VERSION}"
       - name: Resolve docker socket gid
         run: echo "DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
       - name: Install locked Playwright dependencies

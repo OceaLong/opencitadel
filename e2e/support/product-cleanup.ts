@@ -18,7 +18,6 @@ type PatrolPackState = {
 
 const RESOURCE_PATHS = {
   "knowledge-base": "/knowledge-bases",
-  codebase: "/codebases",
   session: "/sessions",
   team: "/teams",
   "patrol-pack": "/patrol-packs",

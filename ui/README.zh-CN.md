@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-基于 Next.js 16 / React 19 的前端，覆盖事件溯源 Agent 会话、不可变知识/代码版本、
+基于 Next.js 16 / React 19 的前端，覆盖事件溯源 Agent 会话、不可变知识版本、
 自动化、巡检、治理与平台管理。
 
 ## 契约边界
@@ -25,7 +25,6 @@ src/
 │   ├── session/         时间线、审批、错误、VNC、交付物
 │   ├── resource/        候选构建与版本状态
 │   ├── knowledge/       知识库与文档阅读
-│   ├── codebase/        代码库
 │   ├── patrol/          巡检与修复
 │   ├── admin/           治理、用量、合规
 │   ├── settings/        通用、Agent、推理、Skill、记忆、集成、运行时
@@ -39,7 +38,7 @@ messages/                权威中英文词典
 scripts/                 严格 i18n 一致性检查
 ```
 
-主要路由包括 `/sessions/[id]`、`/knowledge`、`/codebase`、`/automation`、
+主要路由包括 `/sessions/[id]`、`/knowledge`、`/automation`、
 `/patrols`、`/patrol-runs/[id]`、`/teams` 与 `/admin/*`。设置包含通用、Agent、
 推理、Skill、记忆、集成，以及仅管理员可见的运行时配置。
 

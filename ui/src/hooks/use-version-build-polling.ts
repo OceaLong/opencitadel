@@ -62,8 +62,8 @@ export type UseVersionBuildPollingOptions<TVersionsData> = {
 };
 
 /**
- * Shared load + 5s poll + retry/cancel logic behind the codebase and
- * knowledge base "version status" widgets. Callers own everything
+ * Shared load + 5s poll + retry/cancel logic behind resource version-status
+ * widgets. Callers own everything
  * resource-specific (endpoints, extra actions, extra derived info); this
  * hook only knows about the generic version/build shape.
  */

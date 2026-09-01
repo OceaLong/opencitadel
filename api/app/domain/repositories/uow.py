@@ -7,8 +7,6 @@ from app.domain.models.authorization import AuthorizationContext
 
 from .artifact_repository import ArtifactRepository
 from .audit_repository import AuditRepository
-from .codebase_repository import CodebaseRepository
-from .codebase_version_repository import CodebaseVersionRepository
 from .file_repository import FileRepository
 from .inference_binding_repository import InferenceBindingRepository
 from .inference_endpoint_repository import InferenceEndpointRepository
@@ -66,8 +64,6 @@ class IUnitOfWork(ABC):
     """Uow模式协议接口"""
 
     audit: AuditRepository
-    codebase: CodebaseRepository
-    codebase_version: CodebaseVersionRepository
     knowledge_base: KnowledgeBaseRepository
     knowledge_version: KnowledgeVersionRepository
     file: FileRepository

@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Ops-console reconciliation seed assertions."""
+
 from seed import compute_expected_reconciliation, init_db
 
 

@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from app.application.services.audit_service import AuditService
     from app.application.services.auth_service import AuthService
     from app.application.services.capability_service import CapabilityService
-    from app.application.services.codebase_service import CodebaseService
     from app.application.services.compliance_service import ComplianceService
     from app.application.services.evidence_service import EvidenceService
     from app.application.services.file_service import FileService
@@ -168,7 +167,6 @@ class ApiRuntime:
     session_service: SessionService
     resource_binding_service: ResourceBindingService
     agent_service: AgentService
-    codebase_service: CodebaseService
     knowledge_base_service: KnowledgeBaseService
     a2a_server_service: A2AServerService
     artifact_service: ArtifactService

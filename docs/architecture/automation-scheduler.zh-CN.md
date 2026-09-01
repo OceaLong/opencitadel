@@ -41,7 +41,7 @@ Command Transaction 提交前验证 Resource Access 并绑定具体 Active Versi
 把 Terminal Run State 投影到 Summary，并发送持久 Inbox Notification 与可选 MCP IM。进程死亡
 不会制造 Terminal State。
 
-同一个 Leased Loop 还运行有界 Knowledge/Codebase Version GC 与 Patrol Retention。它们使用独立
+同一个 Leased Loop 还运行有界 Knowledge Version GC 与 Patrol Retention。它们使用独立
 数据库 Lease，且不会删除 Active/Bound Version 或 Audit Row。
 
 调度准入、轮询、Lease、并发与 Webhook 幂等配置位于 Operations Policy `scheduler`；Job Definition 的 UI 入口为 `/automation`。

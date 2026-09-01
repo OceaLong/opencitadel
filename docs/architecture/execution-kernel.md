@@ -3,7 +3,7 @@
 [简体中文](execution-kernel.zh-CN.md)
 
 OpenCitadel has one execution runtime for Agent, Ask, knowledge ingestion,
-codebase analysis, automation, patrol, and remediation. PostgreSQL execution
+automation, patrol, and remediation. PostgreSQL execution
 events are the only lifecycle authority. Product tables store content and query
 projections; Redis is only a disposable wake-up transport.
 
@@ -51,8 +51,8 @@ may lag but cannot create facts or decide terminal state.
 
 ## Run and Activity protocol
 
-Every production behavior is a `Run` in one of seven families: `agent`, `ask`,
-`kb_ingest`, `codebase_ingest`, `automation`, `patrol`, or `remediation`.
+Every production behavior is a `Run` in one of six families: `agent`, `ask`,
+`kb_ingest`, `automation`, `patrol`, or `remediation`.
 A Run accepts typed commands and produces typed events through a pure decision
 handler. Only one terminal event can be accepted.
 
@@ -69,8 +69,8 @@ chat text cannot bypass the gate.
 
 ## Resource candidates
 
-Knowledge and codebase rebuilds have one artifact authority: their immutable
-candidate version. The candidate carries `build_id`, request idempotency key,
+Knowledge rebuilds have one artifact authority: their immutable candidate
+version. The candidate carries `build_id`, request idempotency key,
 state, capability result, metrics, and publication timestamp. Build lifecycle
 and progress come exclusively from the source Run projection.
 

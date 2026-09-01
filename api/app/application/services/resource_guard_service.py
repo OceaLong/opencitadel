@@ -3,13 +3,13 @@
 from dataclasses import dataclass
 
 from app.domain.errors import BadRequestError
-from app.domain.models.codebase import SessionMode
 from app.domain.models.resource_bindings import (
     PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
 from app.domain.models.scope import OwnerScope
+from app.domain.models.session_mode import SessionMode
 from app.domain.services.resource_version_provider import (
     ResourceVersionProvider,
     ResourceVersionProviderNotRegisteredError,
@@ -22,14 +22,11 @@ class ValidatedSessionResources:
     """Resolved immutable resource versions, pinned at session creation."""
 
     mode: SessionMode
-    codebase: PublishedResourceVersion | None = None
     knowledge_base: PublishedResourceVersion | None = None
 
     @property
     def versions(self) -> tuple[PublishedResourceVersion, ...]:
-        return tuple(
-            version for version in (self.codebase, self.knowledge_base) if version is not None
-        )
+        return (self.knowledge_base,) if self.knowledge_base is not None else ()
 
 
 class ResourceGuardService:
@@ -42,18 +39,10 @@ class ResourceGuardService:
         self,
         *,
         mode: SessionMode,
-        codebase_id: str | None,
-        codebase_version_id: str | None,
         knowledge_base_id: str | None,
         knowledge_base_version_id: str | None,
         scope: OwnerScope,
     ) -> ValidatedSessionResources:
-        codebase = await self._resolve(
-            ResourceKind.CODEBASE,
-            codebase_id,
-            codebase_version_id,
-            scope,
-        )
         knowledge_base = await self._resolve(
             ResourceKind.KNOWLEDGE_BASE,
             knowledge_base_id,
@@ -62,7 +51,6 @@ class ResourceGuardService:
         )
         return ValidatedSessionResources(
             mode=mode,
-            codebase=codebase,
             knowledge_base=knowledge_base,
         )
 

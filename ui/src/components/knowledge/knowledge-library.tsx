@@ -351,7 +351,6 @@ export function KnowledgeLibrary() {
                   <ResourceVersionStatus
                     api={knowledgeApi}
                     resourceId={kb.id}
-                    ns="knowledge"
                     onBuildChanged={loadList}
                   />
                   <div className="flex flex-wrap gap-2">

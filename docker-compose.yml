@@ -5,7 +5,7 @@ x-pip-build-args: &pip-build-args
   PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
   PIP_RETRIES: ${PIP_RETRIES:-5}
   UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-  UV_VERSION: ${UV_VERSION:-0.11.19}
+  UV_VERSION: ${UV_VERSION:-0.11.33}
   UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-300}
   PYPI_FILES_MIRROR: ${PYPI_FILES_MIRROR-https://mirrors.aliyun.com/pypi/packages/}
   NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
@@ -399,8 +399,8 @@ services:
       context: ./ui
       dockerfile: Dockerfile
       args:
+        <<: *pip-build-args
         NEXT_PUBLIC_API_BASE_URL: /api
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     image: opencitadel-ui
     restart: unless-stopped
     mem_limit: 384m
@@ -427,6 +427,8 @@ services:
     build:
       context: ./ops-collector
       dockerfile: Dockerfile
+      args:
+        <<: *pip-build-args
     image: opencitadel-ops-collector
     restart: unless-stopped
     user: "10001:10001"
@@ -469,6 +471,8 @@ services:
     build:
       context: ./ops-actuator
       dockerfile: Dockerfile
+      args:
+        <<: *pip-build-args
     image: opencitadel-ops-actuator
     restart: unless-stopped
     user: "10001:10001"
@@ -506,6 +510,8 @@ services:
     build:
       context: ./demo/ops-console
       dockerfile: Dockerfile
+      args:
+        <<: *pip-build-args
     image: opencitadel-ops-console
     restart: unless-stopped
     mem_limit: 256m
@@ -532,6 +538,8 @@ services:
     build:
       context: ./e2e/fixtures/inference-provider
       dockerfile: Dockerfile
+      args:
+        <<: *pip-build-args
     image: opencitadel-acceptance-inference
     restart: "no"
     read_only: true

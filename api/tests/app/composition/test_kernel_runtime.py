@@ -41,7 +41,6 @@ async def test_kernel_runtime_contains_execution_services_only(monkeypatch) -> N
         assert runtime.scheduler_service._policy_reader is runtime.policy_reader
         assert runtime.execution.activity_registry.registered_types == (
             "child_run.start",
-            "codebase.build",
             "knowledge.build",
             "model.call",
             "patrol.execute",

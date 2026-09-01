@@ -71,4 +71,4 @@ docker compose --profile local up --build
 
 ## 许可证
 
-提交贡献即表示您同意将贡献内容以 [Apache License 2.0](LICENSE) 授权。
+提交贡献即表示您同意将贡献内容以 [Apache License 2.0](../LICENSE) 授权。

@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Seed SQLite database for OpsConsole demo (tickets + settlement ledger)."""
+
 from __future__ import annotations
 
 import sqlite3

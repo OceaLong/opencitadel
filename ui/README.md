@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Next.js 16 / React 19 frontend for event-sourced Agent sessions, immutable
-knowledge and codebase versions, automation, patrol, governance, and platform
+knowledge versions, automation, patrol, governance, and platform
 administration.
 
 ## Contract boundary
@@ -29,7 +29,6 @@ src/
 │   ├── session/         timeline, approvals, errors, VNC, artifacts
 │   ├── resource/        candidate build and version status
 │   ├── knowledge/       knowledge library and document reader
-│   ├── codebase/        codebase library
 │   ├── patrol/          patrol and remediation views
 │   ├── admin/           governance, usage, compliance
 │   ├── settings/        general, Agent, inference, Skills, memory, integrations, runtime
@@ -43,8 +42,8 @@ messages/                authoritative English and Chinese catalogs
 scripts/                 strict i18n consistency checks
 ```
 
-Important routes include `/sessions/[id]`, `/knowledge`, `/codebase`,
-`/automation`, `/patrols`, `/patrol-runs/[id]`, `/teams`, and `/admin/*`.
+Important routes include `/sessions/[id]`, `/knowledge`, `/automation`,
+`/patrols`, `/patrol-runs/[id]`, `/teams`, and `/admin/*`.
 Settings contains General, Agent, Inference, Skills, Memory, Integrations, and an
 administrator-only Runtime section.
 

@@ -44,7 +44,7 @@ OpenCitadel 是**受治理的私有化 AI Agent 平台**。数据、模型调用
 | **Agent 对话** | `/`、`/sessions/[id]` | 事件溯源 Agent/Ask Run、逐 Invocation 审批、VNC 接管、持久回放 |
 | **Ops Patrol 巡检** | `/patrols` | 只读基础设施巡检，含审批制修复闭环：闭世界采集器、服务端断言引擎、签名证据包 |
 | **自动化** | `/automation` | 定时任务、Webhook、通知 |
-| **受治理的上下文源** | `/knowledge`、`/codebase` | 文档与代码知识库：版本化、原子发布、会话版本绑定、检索问答 |
+| **受治理的上下文源** | `/knowledge` | 文档知识库：版本化、原子发布、会话版本绑定、检索问答 |
 | **协议集成** | 设置弹窗 → 集成 | MCP（stdio / SSE / streamable HTTP）与 A2A 远程 Agent |
 | **管理后台** | `/admin/*` | 用户、配额、审计、用量、合规证据 |
 

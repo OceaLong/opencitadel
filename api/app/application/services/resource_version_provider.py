@@ -21,9 +21,9 @@ TVersion = TypeVar("TVersion")
 class OwnerScopedVersionProvider[TResource, TVersion](ABC):
     kind: ClassVar[ResourceKind]
     _PAGE_SIZE = 500
-    _resource_label: ClassVar[str]  # "knowledge base" / "codebase"
-    _version_label: ClassVar[str]  # "knowledge-base version" / "codebase version"
-    _cursor_label: ClassVar[str]  # "knowledge-version" / "codebase-version"
+    _resource_label: ClassVar[str]
+    _version_label: ClassVar[str]
+    _cursor_label: ClassVar[str]
 
     def __init__(self, *, uow_factory: Callable[[], IUnitOfWork]) -> None:
         self._uow_factory = uow_factory

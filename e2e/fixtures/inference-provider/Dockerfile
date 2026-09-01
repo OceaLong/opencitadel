@@ -1,5 +1,7 @@
 FROM node:22-alpine
 
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

@@ -32,17 +32,16 @@ Compose 将生成后的配置挂载到 `opencitadel-nginx` 服务。详见[生�
 ## 上传大小限制
 
 ```nginx
-client_max_body_size 200m;
+client_max_body_size 100m;
 ```
 
 这是所有 POST 请求的**网关上限**。各功能可能有更低限制：
 
 | 功能 | 有效限制 | 执行方 |
 |------|----------|--------------|
-| Codebase ZIP | 200 MB | UI `CODEBASE_ZIP_MAX_BYTES` + nginx |
 | 知识库文档 | 默认 50 MB | Execution Policy `knowledge_base.document.max_bytes` |
 
-修改上传上限时需同步 UI 常量、nginx 与类型化 Execution Policy。
+修改上传上限时需同步 nginx 与类型化 Execution Policy。
 
 ## SSE 与 WebSocket
 

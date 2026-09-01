@@ -22,7 +22,7 @@ flowchart LR
 ## Policy Family
 
 Execution Policy 使用 Snapshot Semantics。准入会把 Revision ID 与完整、已校验 Policy Snapshot
-写入每个 Run。Agent Limit、Model Resilience、Activity Timeout、Memory、Knowledge 与 Codebase
+写入每个 Run。Agent Limit、Model Resilience、Activity Timeout、Memory 与 Knowledge
 行为在 Retry、Approval、Restart、Replay 期间都不会漂移。
 
 Operations Policy 使用 Live Semantics。Traffic Admission、Scheduler Action、Patrol

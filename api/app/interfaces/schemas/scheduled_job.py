@@ -20,7 +20,6 @@ class CreateScheduledJobRequest(BaseModel):
     prompt_template: str
     skill_id: str | None = None
     model_id: str | None = None
-    codebase_id: str | None = None
     knowledge_base_id: str | None = None
     notify_channels: list[NotifyChannelRequest] = Field(default_factory=list)
     operator_scope: str | None = None
@@ -36,7 +35,6 @@ class UpdateScheduledJobRequest(BaseModel):
     prompt_template: str | None = None
     skill_id: str | None = None
     model_id: str | None = None
-    codebase_id: str | None = None
     knowledge_base_id: str | None = None
     notify_channels: list[NotifyChannelRequest] | None = None
     operator_scope: str | None = None
@@ -55,7 +53,6 @@ class ScheduledJobResponse(BaseModel):
     prompt_template: str
     skill_id: str | None = None
     model_id: str | None = None
-    codebase_id: str | None = None
     knowledge_base_id: str | None = None
     notify_channels: list[NotifyChannelRequest] = Field(default_factory=list)
     operator_scope: str | None = None

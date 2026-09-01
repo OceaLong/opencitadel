@@ -2,7 +2,7 @@
 
 # 团队与工作区
 
-通过团队工作区实现多用户协作。资源（会话、代码库、知识库、交付物）可归属个人或团队。
+通过团队工作区实现多用户协作。资源（会话、知识库、交付物）可归属个人或团队。
 
 ## UI 入口
 
@@ -110,7 +110,7 @@ flowchart LR
 | POST | `/api/invitations/{token}/register` | 注册并入队（公开，需邮箱绑定邀请） |
 | POST | `/api/invitations/{token}/accept` | 接受邀请（需登录） |
 
-会话、代码库、知识库、文件、调度、记忆等写路由需通过 `require_non_auditor`，并遵守 `WorkspaceContext`。
+会话、知识库、文件、调度、记忆等写路由需通过 `require_non_auditor`，并遵守 `WorkspaceContext`。
 
 ## 相关文档
 

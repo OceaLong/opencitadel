@@ -144,10 +144,6 @@ vi.mock("@/components/workspace/knowledge-context-panel", () => ({
   KnowledgeContextPanel: () => <div>knowledge context</div>,
 }));
 
-vi.mock("@/components/workspace/codebase-context-panel", () => ({
-  CodebaseContextPanel: () => <div>codebase context</div>,
-}));
-
 vi.mock("@/components/session/chat-input", () => ({
   ChatInput: () => <div>chat input</div>,
 }));

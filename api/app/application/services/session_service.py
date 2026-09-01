@@ -9,11 +9,11 @@ from app.application.services.resource_binding_service import ResourceBindingSer
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.domain.errors import BadRequestError, NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import SandboxFactoryPort
-from app.domain.models.codebase import SessionMode
 from app.domain.models.file import File
 from app.domain.models.operator import normalize_operator_domains
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session
+from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -55,8 +55,6 @@ class SessionService:
         model_id: str | None = None,
         skill_id: str | None = None,
         thinking_enabled: bool = False,
-        codebase_id: str | None = None,
-        codebase_version_id: str | None = None,
         knowledge_base_id: str | None = None,
         knowledge_base_version_id: str | None = None,
         mode: SessionMode | None = None,
@@ -66,16 +64,12 @@ class SessionService:
     ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info("创建一个空白新任务会话")
-        default_mode = (
-            SessionMode.ASK if knowledge_base_id and not codebase_id else SessionMode.AGENT
-        )
+        default_mode = SessionMode.ASK if knowledge_base_id else SessionMode.AGENT
         resolved_mode = mode or default_mode
         validated_resources = None
-        if self._resource_guard and scope and (codebase_id or knowledge_base_id):
+        if self._resource_guard and scope and knowledge_base_id:
             validated_resources = await self._resource_guard.validate_session_request(
                 mode=resolved_mode,
-                codebase_id=codebase_id,
-                codebase_version_id=codebase_version_id,
                 knowledge_base_id=knowledge_base_id,
                 knowledge_base_version_id=knowledge_base_version_id,
                 scope=scope,
@@ -96,8 +90,6 @@ class SessionService:
                 raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
             if skill_id and await uow.skill.get_by_id(skill_id, scope=scope) is None:
                 raise NotFoundError("指定 Skill 不存在或无权访问")
-            if codebase_id and await uow.codebase.get_by_id(codebase_id, scope=scope) is None:
-                raise NotFoundError("指定代码库不存在或无权访问")
             if (
                 knowledge_base_id
                 and await uow.knowledge_base.get_kb(knowledge_base_id, scope=scope) is None

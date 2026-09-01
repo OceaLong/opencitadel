@@ -38,7 +38,6 @@
 | [推理控制面](architecture/inference-control-plane.zh-CN.md) | Endpoint/Model/Binding 所有权、能力、加密与 UI 流程 |
 | [前端 UI](architecture/frontend-ui.zh-CN.md) | Next.js Shell、公开 SSE 投影、审批界面 |
 | [执行内核](architecture/execution-kernel.zh-CN.md) | Command、Event Store、Activity、恢复、投影、SSE 与权限边界 |
-| [执行内核切换证据](architecture/execution-kernel-cutover-evidence.zh-CN.md) | Greenfield Schema 边界与可复核验收结果 |
 | [安全模型](architecture/security-model.zh-CN.md) | 信任边界、沙箱隔离、认证与授权 |
 | [Web Operator](architecture/web-operator.zh-CN.md) | 精确主机边界、逐调用审批、证据 |
 | [团队与工作区](architecture/teams-and-workspaces.zh-CN.md) | 团队角色、`X-Workspace-Id`、邀请 |
@@ -50,7 +49,6 @@
 | [配置来源治理](architecture/config-source-governance.zh-CN.md) | Deployment Settings、Runtime Policy、Integration 边界 |
 | [Runtime Policy 控制面](architecture/runtime-policy-control-plane.zh-CN.md) | 不可变 Revision、原子 Head、CAS 与 Fail-closed Consumer |
 | [模型韧性设计](architecture/model-resilience.zh-CN.md) | 熔断、fallback、SLO 与运行手册 |
-| [Codebase 向量降级与重新索引](architecture/codebase-reindex.zh-CN.md) | embedding 不可用时的降级与恢复 |
 | [知识库摄取](architecture/knowledge-base-ingestion.zh-CN.md) | 解析、OCR、GraphRAG、摄取失败 |
 | [架构演进指南](architecture/architecture-evolution.zh-CN.md) | Compose → K8s / 外置沙箱演进 |
 
@@ -68,6 +66,7 @@
 | [E2E 验收](../e2e/README.zh-CN.md) | 确定性隔离全栈门禁、证据与清理 |
 | [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh`、验收 Runner |
 | [部署脚本](../deploy/scripts/README.zh-CN.md) | 生产主机调优工具 |
+| [Ops Patrol 故障实验室](../deploy/patrol-demo/README.zh-CN.md) | 一次性 kind 集群与可复现 Patrol Fixture |
 
 ### 开源治理
 
@@ -76,6 +75,7 @@
 | [CONTRIBUTING.zh-CN.md](../.github/CONTRIBUTING.zh-CN.md) | 贡献指南 |
 | [SECURITY.zh-CN.md](../.github/SECURITY.zh-CN.md) | 漏洞披露政策 |
 | [CODE_OF_CONDUCT.zh-CN.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 |
+| [Pull Request 模板](../.github/pull_request_template.zh-CN.md) | 含双语文档同步项的 PR 检查单 |
 
 ## 维护规则
 

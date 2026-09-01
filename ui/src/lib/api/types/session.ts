@@ -36,8 +36,6 @@ export type CreateSessionParams = {
   model_id?: string;
   skill_id?: string;
   thinking_enabled?: boolean;
-  codebase_id?: string;
-  codebase_version_id?: string;
   knowledge_base_id?: string;
   knowledge_base_version_id?: string;
   mode?: SessionMode;
@@ -46,7 +44,7 @@ export type CreateSessionParams = {
   [key: string]: unknown;
 };
 
-export type ResourceKind = "knowledge_base" | "codebase";
+export type ResourceKind = "knowledge_base";
 
 export type SessionResourceBinding = {
   binding_id: string;

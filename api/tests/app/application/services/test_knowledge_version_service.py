@@ -1,11 +1,4 @@
-"""Owner-scoped provider contract for immutable knowledge versions.
-
-Cases that mirror ``CodebaseVersionService`` 1:1 (unpublished/non-terminal
-rejection, foreign version-id rejection, list filtering) are parametrized
-across both providers in ``test_codebase_version_service.py``. This file
-keeps the knowledge-base-specific enrichments: team-scoped ownership, the
-one-UoW/call-log invariant, keyset-pagination survival, and UoW wiring.
-"""
+"""Owner-scoped provider contract for immutable knowledge versions."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock

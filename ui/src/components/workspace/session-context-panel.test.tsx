@@ -24,22 +24,12 @@ vi.mock("@/components/workspace/knowledge-context-panel", () => ({
     return <div>knowledge</div>;
   },
 }));
-vi.mock("@/components/workspace/codebase-context-panel", () => ({
-  CodebaseContextPanel: () => <div>code</div>,
-}));
 vi.mock("@/components/workspace/session-resource-version", () => ({
   SessionResourceVersion: (props: unknown) => {
     mocks.resourceVersionProps(props);
     return null;
   },
 }));
-vi.mock("@/components/ui/tabs", () => ({
-  Tabs: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TabsTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
-  TabsContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
 import { SessionContextPanel } from "./session-context-panel";
 
 describe("SessionContextPanel", () => {

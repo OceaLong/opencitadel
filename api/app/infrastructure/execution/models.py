@@ -478,7 +478,7 @@ class ExecutionRunProjectionORM(Base):
 
 
 class ExecutionResourceBuildProjectionORM(Base):
-    """Rebuildable product projection for KB and codebase build runs."""
+    """Rebuildable product projection for knowledge-base build runs."""
 
     __tablename__ = "execution_resource_build_projection"
     __table_args__ = (

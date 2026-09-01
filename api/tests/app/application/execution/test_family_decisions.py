@@ -265,7 +265,6 @@ def test_ask_retrieves_bound_context_before_model_call() -> None:
     ("family", "activity_type"),
     [
         (RunFamily.KB_INGEST, "knowledge.build"),
-        (RunFamily.CODEBASE_INGEST, "codebase.build"),
         (RunFamily.AUTOMATION, "child_run.start"),
         (RunFamily.PATROL, "patrol.execute"),
         (RunFamily.REMEDIATION, "remediation.execute"),
@@ -304,7 +303,7 @@ def test_patrol_validation_run_has_a_dedicated_kernel_activity() -> None:
 
 
 def test_resource_run_preserves_its_activity_failure_code() -> None:
-    running = _state(RunFamily.CODEBASE_INGEST)
+    running = _state(RunFamily.KB_INGEST)
     request = _next(running)
     assert request is not None
     activity_id = UUID(str(request.payload["activity_id"]))
@@ -312,7 +311,7 @@ def test_resource_run_preserves_its_activity_failure_code() -> None:
         update={
             "stream_version": 4,
             "settled_activities": ((activity_id, "failed", 0),),
-            "activity_failure_codes": ((activity_id, 0, "CODEBASE_NO_INDEXABLE_SOURCE"),),
+            "activity_failure_codes": ((activity_id, 0, "KNOWLEDGE_NO_INDEXABLE_SOURCE"),),
         }
     )
 
@@ -320,7 +319,7 @@ def test_resource_run_preserves_its_activity_failure_code() -> None:
 
     assert terminal_failure is not None
     assert terminal_failure.command_type == "FailRun"
-    assert terminal_failure.payload["failure_code"] == "CODEBASE_NO_INDEXABLE_SOURCE"
+    assert terminal_failure.payload["failure_code"] == "KNOWLEDGE_NO_INDEXABLE_SOURCE"
 
 
 def test_repeated_activity_failure_exhausts_run_retries() -> None:

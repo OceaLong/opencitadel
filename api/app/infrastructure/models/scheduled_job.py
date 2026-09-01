@@ -40,9 +40,6 @@ class ScheduledJobModel(Base):
     model_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("inference_models.id", ondelete="SET NULL")
     )
-    codebase_id: Mapped[str | None] = mapped_column(
-        String(255), ForeignKey("codebases.id", ondelete="SET NULL")
-    )
     knowledge_base_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
@@ -89,7 +86,6 @@ class ScheduledJobModel(Base):
                 "prompt_template": self.prompt_template,
                 "skill_id": self.skill_id,
                 "model_id": self.model_id,
-                "codebase_id": self.codebase_id,
                 "knowledge_base_id": self.knowledge_base_id,
                 "notify_channels": channels,
                 "operator_scope": self.operator_scope,

@@ -49,7 +49,6 @@ export function jobToFormValues(job: ScheduledJob): CreateScheduledJobParams {
     prompt_template: job.prompt_template,
     skill_id: job.skill_id,
     model_id: job.model_id,
-    codebase_id: job.codebase_id,
     knowledge_base_id: job.knowledge_base_id,
     notify_channels: job.notify_channels ?? [],
     operator_scope: job.operator_scope ?? null,
@@ -176,13 +175,11 @@ export function JobFormSheet({
             <Label>{t("contextLabel")}</Label>
             <ContextSelector
               value={{
-                codebaseId: form.codebase_id ?? undefined,
                 knowledgeBaseId: form.knowledge_base_id ?? undefined,
               }}
               onChange={(ctx) =>
                 onFormChange((prev) => ({
                   ...prev,
-                  codebase_id: ctx.codebaseId ?? null,
                   knowledge_base_id: ctx.knowledgeBaseId ?? null,
                 }))
               }

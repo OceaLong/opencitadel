@@ -24,7 +24,7 @@ flowchart LR
 
 Execution Policy is snapshot semantics. Admission writes its revision ID and
 complete validated policy snapshot into every Run. Agent limits, model
-resilience, activity timeouts, memory, knowledge, and codebase behavior therefore
+resilience, activity timeouts, memory, and knowledge behavior therefore
 cannot drift during retries, approvals, restarts, or replay.
 
 Operations Policy is live semantics. Consumers require a fresh verified head

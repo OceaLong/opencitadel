@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 SCHEDULER_LEADER_KEY = "scheduler:leader"
 KNOWLEDGE_VERSION_GC_LEASE_KEY = "scheduler:knowledge-version-gc"
-CODEBASE_VERSION_GC_LEASE_KEY = "scheduler:codebase-version-gc"
 PATROL_RETENTION_LEASE_KEY = "scheduler:patrol-retention"
 
 
@@ -118,55 +117,6 @@ async def run_knowledge_version_gc_tick(
         await asyncio.gather(keepalive, return_exceptions=True)
         await leases.release(
             KNOWLEDGE_VERSION_GC_LEASE_KEY,
-            token,
-        )
-
-
-async def run_codebase_version_gc_tick(
-    service: "ResourceVersionGCService",
-    *,
-    leases: LeaseManagerPort,
-    worker_id: str,
-    lease_seconds: float,
-    owner_token: str | None = None,
-):
-    """Run one codebase GC transaction inside a token-owned cluster lease."""
-    token = owner_token or f"{worker_id}:{uuid.uuid4().hex}"
-    if not await leases.acquire(
-        CODEBASE_VERSION_GC_LEASE_KEY,
-        token,
-        ttl_seconds=lease_seconds,
-    ):
-        return None
-
-    collection = asyncio.create_task(service.collect_codebase_versions())
-    keepalive = asyncio.create_task(
-        _keep_scheduler_lease_alive(
-            leases,
-            CODEBASE_VERSION_GC_LEASE_KEY,
-            token,
-            lease_seconds,
-        )
-    )
-    try:
-        done, _pending = await asyncio.wait(
-            {collection, keepalive},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if collection in done:
-            return await collection
-        collection.cancel()
-        await asyncio.gather(collection, return_exceptions=True)
-        await keepalive
-        raise RuntimeError("codebase-version GC lease ended unexpectedly")
-    finally:
-        if not collection.done():
-            collection.cancel()
-            await asyncio.gather(collection, return_exceptions=True)
-        keepalive.cancel()
-        await asyncio.gather(keepalive, return_exceptions=True)
-        await leases.release(
-            CODEBASE_VERSION_GC_LEASE_KEY,
             token,
         )
 
@@ -310,22 +260,6 @@ async def run_scheduler_loop(
                     )
             except (OSError, RuntimeError, ValueError):
                 logger.exception("Knowledge-version GC tick failed")
-
-        if operations.resource_gc.codebase.enabled and resource_version_gc_service is not None:
-            try:
-                result = await run_codebase_version_gc_tick(
-                    resource_version_gc_service,
-                    leases=leases,
-                    worker_id=worker_id,
-                    lease_seconds=sched_cfg.leader_lease_seconds,
-                )
-                if result is not None:
-                    logger.info(
-                        "Codebase-version GC tick metrics=%s",
-                        result.metrics(),
-                    )
-            except (OSError, RuntimeError, ValueError):
-                logger.exception("Codebase-version GC tick failed")
 
         if patrol_retention_service is not None:
             try:

@@ -15,10 +15,7 @@ from app.domain.execution.activity import (
 from app.domain.external.llm import LLM
 from app.domain.models.build_progress import BuildProgress
 from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
-from app.domain.runtime_policy import (
-    CodebaseExecutionPolicy,
-    KnowledgeBaseExecutionPolicy,
-)
+from app.domain.runtime_policy import KnowledgeBaseExecutionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +30,6 @@ class KnowledgeBuildPipeline(Protocol):
         embedding_dimensions: int | None,
         graph_llm: LLM | None = None,
         ocr_llm: LLM | None = None,
-    ) -> AsyncIterator[BuildProgress]: ...
-    async def cancel(self, build_id: str) -> None: ...
-
-
-class CodebaseBuildPipeline(Protocol):
-    def run_build(
-        self,
-        build_id: str,
-        *,
-        policy: CodebaseExecutionPolicy,
-        embedding_model_id: str | None,
-        embedding_dimensions: int | None,
     ) -> AsyncIterator[BuildProgress]: ...
     async def cancel(self, build_id: str) -> None: ...
 
@@ -222,50 +207,4 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
             raise
 
 
-class CodebaseBuildActivityHandler(_ResourceBuildActivity):
-    activity_type = "codebase.build"
-    phases = (
-        "materialize",
-        "analyze",
-        "index",
-        "artifacts",
-    )
-
-    def __init__(
-        self,
-        *,
-        objects: ActivityObjectStore,
-        pipeline: CodebaseBuildPipeline,
-    ) -> None:
-        super().__init__(objects=objects)
-        self._pipeline = pipeline
-
-    async def execute(
-        self,
-        request: ActivityRequest,
-        context: ActivityContext,
-    ) -> ActivityOutcome:
-        build_input = await self._build_input(request)
-        if build_input is None:
-            return ActivityOutcome.failed(failure_code="RESOURCE_BUILD_INPUT_INVALID")
-        build_id, embedding_model_id, embedding_dimensions = build_input
-        family_policy = context.run.policy_snapshot.family_policy
-        if family_policy.kind != "codebase_ingest":
-            return ActivityOutcome.failed(failure_code="POLICY_SNAPSHOT_INVALID")
-        try:
-            return await self._consume(
-                request,
-                context,
-                self._pipeline.run_build(
-                    build_id,
-                    policy=family_policy.codebase,
-                    embedding_model_id=embedding_model_id,
-                    embedding_dimensions=embedding_dimensions,
-                ),
-            )
-        except asyncio.CancelledError:
-            await self._pipeline.cancel(build_id)
-            raise
-
-
-__all__ = ["CodebaseBuildActivityHandler", "KnowledgeBuildActivityHandler"]
+__all__ = ["KnowledgeBuildActivityHandler"]

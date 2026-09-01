@@ -41,7 +41,6 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | 部署、Policy、Integration 权威边界 | primary | paired | none | `core/config.py`、`runtime_policy_service.py` | medium |
 | [runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.zh-CN.md) | Runtime Policy Revision、Head、Reader、Consumer Model | primary | paired | mermaid | `runtime_policy_service.py`、`runtime_policy_reader.py` | medium |
 | [model-resilience.md](architecture/model-resilience.zh-CN.md) | 熔断、回退 | primary | paired | mermaid | `resilient_llm.py` | low |
-| [codebase-reindex.md](architecture/codebase-reindex.zh-CN.md) | Codebase 摄取、向量恢复 | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
 | [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.zh-CN.md) | KB 解析、OCR、GraphRAG、摄取失败 | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.zh-CN.md) | Compose → K8s 演进 | primary | paired | mermaid | `deploy/helm/` | low |
 | [inference-control-plane.md](architecture/inference-control-plane.zh-CN.md) | 推理 Endpoint/Model/Binding 控制面 | primary | paired | mermaid | `inference_routes.py`、`inference-settings.tsx` | low |

@@ -126,7 +126,7 @@ function requirementProject(requirementId: string): AcceptanceProject {
   if (requirementId.startsWith("INF-") || requirementId.startsWith("POL-")) {
     return "control-plane";
   }
-  if (requirementId.startsWith("KB-") || requirementId.startsWith("CB-")) {
+  if (requirementId.startsWith("KB-")) {
     return "resources";
   }
   if (requirementId.startsWith("RUN-")) return "execution";

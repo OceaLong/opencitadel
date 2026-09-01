@@ -1,4 +1,9 @@
-.PHONY: quickstart build quality-check test test-api test-ui test-patrol test-patrol-fixtures test-actuator acceptance-e2e
+.PHONY: quickstart build lint quality-check test test-api test-ui test-patrol test-patrol-fixtures test-actuator acceptance-e2e
+
+# Single source of truth for first-party Python lint scope (paths relative to
+# api/, where the ruff-carrying venv lives). CI calls `make lint` — extend the
+# scope here, not in .github/workflows/ci.yml.
+PY_LINT_PATHS := . ../ops-actuator ../ops-collector ../sandbox ../scripts ../demo
 
 quickstart:
 	@bash scripts/quickstart.sh
@@ -6,9 +11,11 @@ quickstart:
 build:
 	docker compose build opencitadel-sandbox opencitadel-api opencitadel-execution-kernel opencitadel-ui
 
-quality-check:
-	cd api && uv run ruff check --config ../ruff.toml . ../ops-actuator ../ops-collector ../sandbox ../scripts
-	cd api && uv run ruff format --config ../ruff.toml --check . ../ops-actuator ../ops-collector ../sandbox ../scripts
+lint:
+	cd api && uv run ruff check --config ../ruff.toml $(PY_LINT_PATHS)
+	cd api && uv run ruff format --config ../ruff.toml --check $(PY_LINT_PATHS)
+
+quality-check: lint
 	cd api && uv run lint-imports
 	cd api && uv run pytest -q \
 		tests/app/contracts/test_architecture_debt.py \

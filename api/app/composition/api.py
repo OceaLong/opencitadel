@@ -139,7 +139,6 @@ async def open_api_runtime(
                 session_service=shared.session_service,
                 resource_binding_service=shared.resource_binding_service,
                 agent_service=shared.agent_service,
-                codebase_service=shared.codebase_service,
                 knowledge_base_service=shared.knowledge_base_service,
                 a2a_server_service=shared.a2a_server_service,
                 artifact_service=shared.artifact_service,

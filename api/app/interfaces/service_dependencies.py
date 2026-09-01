@@ -23,7 +23,6 @@ from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.auth_service import AuthService
 from app.application.services.capability_service import CapabilityService
-from app.application.services.codebase_service import CodebaseService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
 from app.application.services.file_service import FileService
@@ -254,10 +253,6 @@ def get_resource_binding_service(
 
 def get_agent_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> AgentService:
     return runtime.agent_service
-
-
-def get_codebase_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> CodebaseService:
-    return runtime.codebase_service
 
 
 def get_knowledge_base_service(

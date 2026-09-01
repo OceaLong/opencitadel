@@ -33,7 +33,6 @@ class _SessionUnitOfWork:
         self.session = SimpleNamespace(save=self._save)
         self.inference_model = SimpleNamespace(get_by_id=AsyncMock(return_value=None))
         self.skill = SimpleNamespace(get_by_id=AsyncMock(return_value=None))
-        self.codebase = SimpleNamespace(get_by_id=AsyncMock(return_value=None))
         self.knowledge_base = SimpleNamespace(get_kb=AsyncMock(return_value=None))
 
     async def __aenter__(self):

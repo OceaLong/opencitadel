@@ -10,20 +10,15 @@ type IngestStreamErrorEvent = Extract<SSEEventData, { type: "error" }>;
 
 /**
  * The slice of a resource's API client the shared library state needs.
- * Both `codebaseApi` and `knowledgeApi` expose `listVersions`/`delete`/
- * `ingestStream` already (via `makeResourceClient` and `createIngestStream`
- * respectively) — callers adapt them into this shape (renaming `delete` to
- * `remove`, unwrapping the `{ codebases }`/`{ knowledge_bases }` envelope of
- * `list()`) rather than the hook branching on resource type.
+ * Callers adapt the resource client into this shape so the hook remains
+ * independent of transport envelopes.
  */
 export type ResourceLibraryApi<TItem, TVersionsData> = {
   list: () => Promise<TItem[]>;
   /**
    * Omit for resources whose version history isn't tracked at the library
-   * level — the knowledge library leaves this to `ResourceVersionStatus`
-   * (`ns="knowledge"`), which self-fetches per card instead of being handed
-   * a controlled `history` prop the way the codebase library's
-   * `ResourceVersionStatus` (`ns="codebase"`) is.
+   * level; the knowledge library leaves this to `ResourceVersionStatus`,
+   * which self-fetches per card.
    */
   listVersions?: (id: string) => Promise<TVersionsData>;
   remove: (id: string) => Promise<void>;
@@ -69,8 +64,7 @@ export type UseResourceLibraryResult<TItem, TVersionsData> = {
 };
 
 /**
- * Shared list/poll/delete/ingest-watch/start-task state behind the codebase
- * and knowledge base library pages.
+ * Shared list/poll/delete/ingest-watch/start-task state for resource libraries.
  *
  * The two pages render very different JSX (per spec decision, extracting
  * that would hurt readability more than it helps), but the state machine

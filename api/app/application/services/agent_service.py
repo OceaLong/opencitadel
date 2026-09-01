@@ -17,9 +17,9 @@ from app.application.execution.public_projection import (
 from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunFamily
-from app.domain.models.codebase import SessionMode
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
+from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.uow import IUnitOfWork
 
 _TERMINAL_EVENTS = frozenset({"done", "error"})

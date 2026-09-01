@@ -6,10 +6,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .codebase import SessionMode
 from .file import File
 from .operator import normalize_operator_domains
 from .resource_bindings import ResourceBindingProjection, ResourceKind
+from .session_mode import SessionMode
 
 
 class SessionStatus(StrEnum):

@@ -609,7 +609,6 @@ async def test_scheduler_tightening_rolls_back_before_run_admission() -> None:
             empty_repo = SimpleNamespace(get_by_id=AsyncMock())
             self.inference_model = empty_repo
             self.skill = empty_repo
-            self.codebase = empty_repo
             self.knowledge_base = SimpleNamespace(get_kb=AsyncMock())
             self.execution_commands = object()
 

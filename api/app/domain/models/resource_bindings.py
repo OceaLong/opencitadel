@@ -12,7 +12,6 @@ from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 
 class ResourceKind(StrEnum):
     KNOWLEDGE_BASE = "knowledge_base"
-    CODEBASE = "codebase"
 
 
 class PublicationState(StrEnum):
@@ -122,7 +121,6 @@ class PublishedResourceVersion(BaseModel):
         normalized = dict(data)
         kind_aliases = {
             "kb": ResourceKind.KNOWLEDGE_BASE,
-            "cb": ResourceKind.CODEBASE,
         }
         normalized["resource_kind"] = kind_aliases.get(
             normalized.get("resource_kind"),

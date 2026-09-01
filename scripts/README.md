@@ -13,6 +13,9 @@ Operational and documentation maintenance scripts at the repository root.
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh) | Own an isolated full-stack acceptance run, evidence manifest, and exact-label cleanup |
 | [`run-patrol-fixtures.sh`](run-patrol-fixtures.sh) | Create a disposable kind cluster, run/reset 20 Patrol cases, verify Collector read-only access, and score the gate |
 | [`score_patrol_fixtures.py`](score_patrol_fixtures.py) | Validate the machine-readable Patrol fixture result; normally invoked by the runner |
+| [`drive_remediation_fixture.py`](drive_remediation_fixture.py) | Deterministic, LLM-free harness for the remediation fixture; invoked by `run-patrol-fixtures.sh` when `PATROL_RUN_REMEDIATION_FIXTURE=true` |
+| [`verify_evidence_package.py`](verify_evidence_package.py) | Verify an evidence package ZIP offline (manifest HMAC signature + per-file SHA-256 digests) |
+| [`acceptance/`](acceptance/) | Python helpers behind `run-acceptance-e2e.sh`: ownership-safe orchestration (`runner.py`) and evidence manifests (`manifest.py`) |
 
 ## Usage
 

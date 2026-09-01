@@ -36,10 +36,6 @@ ACCEPTANCE_PROJECT_REQUIREMENTS = {
             "KB-PUBLISH",
             "KB-PIN",
             "KB-DEGRADED",
-            "CB-BUILD",
-            "CB-ARTIFACT",
-            "CB-PIN",
-            "CB-FAILSAFE",
         }
     ),
     "execution": frozenset(

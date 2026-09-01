@@ -11,7 +11,6 @@ import {
   CircuitBoard,
   ClipboardList,
   Clock,
-  Code2,
   Coins,
   Copy,
   Cpu,
@@ -37,8 +36,6 @@ import {
   Wrench,
 } from "lucide-react";
 
-/** Code repository / codebase context */
-export const IconCodebase: LucideIcon = Code2;
 /** Document knowledge base context */
 export const IconKnowledge: LucideIcon = BookOpen;
 /** Scheduled / automation jobs */
@@ -100,18 +97,15 @@ export const IconAudit: LucideIcon = ClipboardList;
 /** Generic tool / MCP server row */
 export const IconTool: LucideIcon = Wrench;
 
-export type SessionContextKind = "general" | "codebase" | "knowledge" | "hybrid";
+export type SessionContextKind = "general" | "knowledge";
 
 export function getSessionContextKind(session: {
   resource_bindings?: Array<{
-    resource_kind: "codebase" | "knowledge_base";
+    resource_kind: "knowledge_base";
   }>;
 }): SessionContextKind {
   const bindings = session.resource_bindings ?? [];
-  const hasCode = bindings.some((binding) => binding.resource_kind === "codebase");
   const hasKb = bindings.some((binding) => binding.resource_kind === "knowledge_base");
-  if (hasCode && hasKb) return "hybrid";
-  if (hasCode) return "codebase";
   if (hasKb) return "knowledge";
   return "general";
 }

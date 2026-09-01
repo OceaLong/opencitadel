@@ -578,7 +578,7 @@ def test_activity_failure_code_is_preserved_by_replay(
             "CreateRun",
             0,
             {
-                "family": "codebase_ingest",
+                "family": "kb_ingest",
                 "source_entity_type": "resource_build",
                 "source_entity_id": "build-1",
                 "parent_run_id": None,
@@ -595,7 +595,7 @@ def test_activity_failure_code_is_preserved_by_replay(
             2,
             {
                 "activity_id": str(activity_id),
-                "activity_type": "codebase.build",
+                "activity_type": "knowledge.build",
                 "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
                 "input_ref": "object://request",
                 "input_digest": "a" * 64,
@@ -612,13 +612,13 @@ def test_activity_failure_code_is_preserved_by_replay(
             {
                 "activity_id": str(activity_id),
                 "generation": 0,
-                "failure_code": "CODEBASE_NO_INDEXABLE_SOURCE",
+                "failure_code": "KNOWLEDGE_NO_INDEXABLE_SOURCE",
             },
         ),
     )
 
     assert settled.settled_activities == ((activity_id, expected_status, 0),)
-    assert settled.activity_failure_codes == ((activity_id, 0, "CODEBASE_NO_INDEXABLE_SOURCE"),)
+    assert settled.activity_failure_codes == ((activity_id, 0, "KNOWLEDGE_NO_INDEXABLE_SOURCE"),)
 
 
 def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:

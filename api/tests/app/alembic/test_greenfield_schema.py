@@ -1,5 +1,7 @@
 """The project starts from one complete schema, without upgrade bridges."""
 
+from pathlib import Path
+
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
@@ -21,6 +23,8 @@ def test_greenfield_schema_is_the_single_root_and_head() -> None:
     assert revision.down_revision is None
     assert script.get_bases() == ["0001greenfield"]
     assert script.get_heads() == ["0001greenfield"]
+    versions = sorted(path.name for path in Path("alembic/versions").glob("*.py"))
+    assert versions == ["0001greenfield_initial.py"]
 
 
 def test_registry_explicitly_loads_execution_kernel_models() -> None:
@@ -40,10 +44,16 @@ def test_current_metadata_contains_only_current_execution_authorities() -> None:
         "execution_run_projection",
         "execution_public_events",
         "knowledge_base_versions",
-        "codebase_versions",
         "session_resource_bindings",
     } <= set(tables)
     assert {
+        "codebases",
+        "codebase_versions",
+        "codebase_files",
+        "codebase_symbols",
+        "codebase_edges",
+        "codebase_chunks",
+        "codebase_artifacts",
         "session_events",
         "session_checkpoints",
         "resource_builds",
@@ -85,7 +95,6 @@ def test_rls_catalog_references_only_current_metadata() -> None:
         "knowledge_base_version_documents",
         "knowledge_document_revisions",
         "knowledge_entity_refs",
-        "codebase_versions",
     } <= set(CHILD_TABLES)
 
 
@@ -106,17 +115,14 @@ def test_runtime_policy_tables_replace_app_config_tables() -> None:
 
 def test_vector_and_keyword_storage_are_first_class_schema_columns() -> None:
     knowledge_chunks = model_metadata.tables["knowledge_chunks"]
-    codebase_chunks = model_metadata.tables["codebase_chunks"]
     memory_entries = model_metadata.tables["memory_entries"]
 
     assert {"content_tsv", "embedding"} <= set(knowledge_chunks.c.keys())
-    assert "embedding" in codebase_chunks.c
     assert "embedding" in memory_entries.c
     assert {index.name for index in knowledge_chunks.indexes} >= {
         "ix_kb_chunks_embedding",
         "ix_kb_chunks_tsv",
     }
-    assert "ix_codebase_chunks_embedding" in {index.name for index in codebase_chunks.indexes}
     assert "ix_memory_entries_embedding_hnsw" in {index.name for index in memory_entries.indexes}
 
 

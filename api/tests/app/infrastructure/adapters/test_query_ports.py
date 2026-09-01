@@ -47,7 +47,6 @@ def test_target_application_services_have_no_persistence_imports() -> None:
         "governance_overview_service.py",
         "governance_profile_service.py",
         "agent_service.py",
-        "codebase_service.py",
         "knowledge_base_service.py",
         "scheduled_job_service.py",
     )

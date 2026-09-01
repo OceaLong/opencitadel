@@ -1,8 +1,8 @@
 """Shared GC skeleton for immutable resource-version repositories.
 
 `VersionGarbageCollector` lifts the reference-safe, deterministic garbage
-collection skeleton shared by the knowledge-base and codebase version
-repositories.  The lock order (resource row -> version row, both
+collection skeleton used by immutable resource-version repositories. The lock
+order (resource row -> version row, both
 ``with_for_update``), the batch selection query, the ranked-version CTE, the
 protected-count aggregation, the timezone normalisation in the collectibility
 re-check, and the delete-and-count helper are byte-for-byte the same between the
@@ -18,14 +18,7 @@ here as abstract hooks:
   (KB: manifests/revisions/chunks/entities/relations/entity_refs; CB:
   files/symbols/edges/chunks/artifacts + snapshot bookkeeping).
 * ``_empty_totals`` / ``_empty_extras`` / ``_accumulate_deleted`` /
-  ``_build_gc_result`` -- the result assembly.  These stay in the subclasses
-  because the two GC results carry different counter fields, and, more
-  importantly, because the two ``collect_garbage`` merge loops are *not*
-  identical: the codebase repository routes the non-integer
-  ``snapshot_keys_to_delete`` list out of the integer totals before summing,
-  while the knowledge-base repository sums every returned counter directly.
-  That is a real semantic difference, so the merge loop is kept in the
-  subclasses rather than lifted.
+  ``_build_gc_result`` -- resource-specific result assembly.
 """
 
 import abc

@@ -13,7 +13,7 @@ const runtimeKeyManifest = JSON.parse(
 );
 
 const RUNTIME_POLICY_GROUPS = {
-  execution: ["agent", "model_resilience", "activity", "memory", "knowledge_base", "codebase"],
+  execution: ["agent", "model_resilience", "activity", "memory", "knowledge_base"],
   operations: [
     "traffic",
     "scheduler",
@@ -65,14 +65,6 @@ const RUNTIME_POLICY_FIELD_PATHS = [
   "knowledge_base.ocr.max_pages",
   "knowledge_base.document.max_bytes",
   "knowledge_base.document.max_pages",
-  "codebase.vector_enabled",
-  "codebase.analysis.max_file_size_bytes",
-  "codebase.analysis.max_files",
-  "codebase.analysis.chunk_max_chars",
-  "codebase.analysis.source_read_batch_size",
-  "codebase.retrieval.fetch_multiplier",
-  "codebase.retrieval.rrf_k",
-  "codebase.retrieval.final_top_k",
   "traffic.rate_limit_enabled",
   "traffic.requests_per_minute",
   "traffic.session_stream_interval_seconds",
@@ -105,10 +97,6 @@ const RUNTIME_POLICY_FIELD_PATHS = [
   "resource_gc.knowledge_base.retention_count",
   "resource_gc.knowledge_base.retention_min_days",
   "resource_gc.knowledge_base.batch_size",
-  "resource_gc.codebase.enabled",
-  "resource_gc.codebase.retention_count",
-  "resource_gc.codebase.retention_min_days",
-  "resource_gc.codebase.batch_size",
   "patrol_retention.run_days",
   "patrol_retention.finding_days",
   "patrol_retention.collector_evidence_days",
@@ -138,24 +126,12 @@ const DYNAMIC_EXPANSIONS = [
   {
     namespace: "sessionList",
     template: "filter.${option}",
-    keys: ["filter.all", "filter.general", "filter.codebase", "filter.knowledge", "filter.hybrid"],
+    keys: ["filter.all", "filter.general", "filter.knowledge"],
   },
   {
     namespace: "sessionList",
     template: "filter.${contextKind}",
-    keys: ["filter.codebase", "filter.knowledge", "filter.hybrid"],
-  },
-  {
-    namespace: "codebase",
-    template: "artifacts.${key}",
-    keys: [
-      "artifacts.architecture",
-      "artifacts.dataFlow",
-      "artifacts.moduleDir",
-      "artifacts.callChain",
-      "artifacts.flowchart",
-      "artifacts.overview",
-    ],
+    keys: ["filter.knowledge"],
   },
   {
     namespace: "settingsInference",
@@ -213,25 +189,12 @@ const DYNAMIC_EXPANSIONS = [
   {
     namespace: "nav",
     template: "module.key",
-    keys: ["chat", "patrol", "automation", "knowledge", "codebase", "admin"],
+    keys: ["chat", "patrol", "automation", "knowledge", "admin"],
   },
   {
     namespace: "nav",
     template: "activeModule.key",
-    keys: ["chat", "patrol", "automation", "knowledge", "codebase", "admin"],
-  },
-  {
-    namespace: "codebase",
-    template: "CODEBASE_STATUS_LABEL_KEYS[cb.status]",
-    keys: [
-      "status.pending",
-      "status.materializing",
-      "status.analyzing",
-      "status.indexing",
-      "status.generating",
-      "status.ready",
-      "status.failed",
-    ],
+    keys: ["chat", "patrol", "automation", "knowledge", "admin"],
   },
   {
     namespace: "knowledge",

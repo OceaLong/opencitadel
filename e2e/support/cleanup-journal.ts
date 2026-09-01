@@ -25,7 +25,6 @@ type ResourceCleanup = {
   action: "delete-resource";
   resource:
     | "knowledge-base"
-    | "codebase"
     | "session"
     | "team"
     | "patrol-pack"

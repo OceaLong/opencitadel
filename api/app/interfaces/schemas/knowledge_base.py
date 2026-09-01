@@ -4,10 +4,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.domain.execution.run import RunStatus
-from app.domain.models.codebase import SessionMode
 from app.domain.models.knowledge_base import DocStatus, KBSourceType, KBStatus
 from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.models.knowledge_version import KnowledgeVersionState
+from app.domain.models.session_mode import SessionMode
 
 
 class CreateKnowledgeBaseRequest(BaseModel):

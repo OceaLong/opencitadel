@@ -30,7 +30,7 @@ def next_command(
         return next_agent_command(state, context, now=now)
     if state.family == RunFamily.ASK:
         return next_ask_command(state, context, now=now)
-    if state.family in {RunFamily.KB_INGEST, RunFamily.CODEBASE_INGEST}:
+    if state.family is RunFamily.KB_INGEST:
         plan = resource_build_plan(
             state.family,
             state.semantic_payload,

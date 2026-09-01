@@ -1,21 +1,36 @@
+# Env files (deployment inputs; .env.example / .env.e2e are the tracked schemas)
 .env
 .env.*
 !.env.example
 !.env.e2e
 
+# OS / editor / IDE
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 .worktrees/
 docker-compose.override.yml
-/tmp/
-/tmp/acceptance/
 
+# Local working files (never committed)
+.superpowers/
+docs/superpowers/
+
+# Temp / scratch (covers root tmp/ and api/tmp/)
+tmp/
+
+# Python
 __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.ruff_cache/
+.grimp_cache/
+.import_linter_cache/
+.hypothesis/
+.mypy_cache/
 
+# Node / frontend
 node_modules/
 .next/
 dist/

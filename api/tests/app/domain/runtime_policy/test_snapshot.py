@@ -96,9 +96,6 @@ def test_agent_snapshot_contains_only_execution_subsets_needed_by_agent_runs() -
         "agent",
         "memory",
         "knowledge_retrieval",
-        "codebase_retrieval",
     }
     assert "document" not in payload["knowledge_retrieval"]
-    assert "analysis" not in payload["codebase_retrieval"]
     assert payload["knowledge_retrieval"]["graph_enabled"] is True
-    assert payload["codebase_retrieval"]["retrieval"]["final_top_k"] == 8

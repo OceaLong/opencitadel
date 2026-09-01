@@ -32,7 +32,7 @@ class DBScheduledJobRepository(ScheduledJobRepository):
             model.update_from_domain(job)
             model.id = job.id
             self.db_session.add(model)
-            # Sessions in this codebase are created with autoflush=False (see
+            # Sessions are created with autoflush=False (see
             # infrastructure/storage/postgres.py), and ScheduledJobModel has no
             # ORM `relationship()` wiring to PatrolPackModel (only a Column-level
             # ForeignKey), so SQLAlchemy's flush-time insert ordering has no

@@ -36,10 +36,10 @@ from tests.app.execution_test_support import authenticated_session_factory
 
 
 class _Provider:
-    kind = ResourceKind.CODEBASE
+    kind = ResourceKind.KNOWLEDGE_BASE
 
     def __init__(self) -> None:
-        self.version_id = "cbv1"
+        self.version_id = "kbv1"
 
     async def resolve_published_version(
         self,
@@ -130,45 +130,45 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current()
         initial_left, initial_right = await asyncio.gather(
             service.bind_initial(
                 session_id,
-                ResourceKind.CODEBASE,
-                "cb1",
+                ResourceKind.KNOWLEDGE_BASE,
+                "kb1",
                 None,
                 scope,
             ),
             service.bind_initial(
                 session_id,
-                ResourceKind.CODEBASE,
-                "cb1",
+                ResourceKind.KNOWLEDGE_BASE,
+                "kb1",
                 None,
                 scope,
             ),
         )
-        provider.version_id = "cbv2"
+        provider.version_id = "kbv2"
         upgrade_left, upgrade_right = await asyncio.gather(
             service.upgrade(
                 session_id,
-                ResourceKind.CODEBASE,
-                "cbv2",
+                ResourceKind.KNOWLEDGE_BASE,
+                "kbv2",
                 actor_id=user_id,
                 scope=scope,
             ),
             service.upgrade(
                 session_id,
-                ResourceKind.CODEBASE,
-                "cbv2",
+                ResourceKind.KNOWLEDGE_BASE,
+                "kbv2",
                 actor_id=user_id,
                 scope=scope,
             ),
         )
         history = await service.history(
             session_id,
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             scope,
         )
 
         assert initial_left.id == initial_right.id
         assert upgrade_left.id == upgrade_right.id
-        assert [item.version_id for item in history] == ["cbv1", "cbv2"]
+        assert [item.version_id for item in history] == ["kbv1", "kbv2"]
         assert sum(item.is_current for item in history) == 1
     finally:
         async with session_factory() as cleanup:

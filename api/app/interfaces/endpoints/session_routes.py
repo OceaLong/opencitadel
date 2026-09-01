@@ -82,8 +82,6 @@ async def create_session(
         thinking_enabled=bool(request.thinking_enabled)
         if request.thinking_enabled is not None
         else False,
-        codebase_id=request.codebase_id,
-        codebase_version_id=request.codebase_version_id,
         knowledge_base_id=request.knowledge_base_id,
         knowledge_base_version_id=request.knowledge_base_version_id,
         mode=request.mode,

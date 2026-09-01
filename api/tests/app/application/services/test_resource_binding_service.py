@@ -367,19 +367,19 @@ async def test_explicit_initial_retry_rejects_a_different_version(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     service = _service(store, provider)
     await service.bind_initial(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv1",
         scope,
     )
     provider.response = _published(
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv2",
     )
@@ -387,7 +387,7 @@ async def test_explicit_initial_retry_rejects_a_different_version(
     with pytest.raises(ConflictError):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             "cbv2",
             scope,
@@ -404,31 +404,11 @@ async def test_missing_provider_is_rejected(store, scope):
     with pytest.raises(BadRequestError, match="provider"):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             None,
             scope,
         )
-
-
-@pytest.mark.asyncio
-async def test_provider_result_kind_mismatch_is_rejected(store, scope):
-    provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
-    )
-    service = _service(store, provider)
-
-    with pytest.raises(BadRequestError, match="kind"):
-        await service.bind_initial(
-            "s1",
-            ResourceKind.CODEBASE,
-            "cb1",
-            "cbv1",
-            scope,
-        )
-
-    assert store.bindings == []
 
 
 @pytest.mark.asyncio
@@ -437,29 +417,29 @@ async def test_provider_foreign_resource_or_version_is_rejected(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "other", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "other", "cbv1"),
     )
     service = _service(store, provider)
 
     with pytest.raises(BadRequestError, match="resource"):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             "cbv1",
             scope,
         )
 
     provider.response = _published(
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "other-version",
     )
     with pytest.raises(BadRequestError, match="version"):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             "cbv1",
             scope,
@@ -513,15 +493,15 @@ async def test_cross_owner_session_is_denied_before_provider_resolution(
     store,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     service = _service(store, provider)
 
     with pytest.raises(NotFoundError):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             None,
             OwnerScope.personal("intruder"),
@@ -534,15 +514,15 @@ async def test_cross_owner_session_is_denied_before_provider_resolution(
 @pytest.mark.asyncio
 async def test_initial_binding_rejects_spoofed_actor(store, scope):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     service = _service(store, provider)
 
     with pytest.raises(ForbiddenError):
         await service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             None,
             scope,
@@ -559,8 +539,8 @@ async def test_initial_race_creates_exactly_one_current_binding(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     provider.release = asyncio.Event()
     service = _service(store, provider)
@@ -568,7 +548,7 @@ async def test_initial_race_creates_exactly_one_current_binding(
     first = asyncio.create_task(
         service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             None,
             scope,
@@ -577,7 +557,7 @@ async def test_initial_race_creates_exactly_one_current_binding(
     second = asyncio.create_task(
         service.bind_initial(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cb1",
             None,
             scope,
@@ -598,40 +578,40 @@ async def test_upgrade_keeps_history_and_same_target_is_idempotent(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     service = _service(store, provider)
     old = await service.bind_initial(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv1",
         scope,
     )
     provider.response = _published(
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv2",
     )
 
     new = await service.upgrade(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cbv2",
         actor_id="u1",
         scope=scope,
     )
     retry = await service.upgrade(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cbv2",
         actor_id="u1",
         scope=scope,
     )
     history = await service.history(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         scope,
     )
 
@@ -642,7 +622,7 @@ async def test_upgrade_keeps_history_and_same_target_is_idempotent(
     assert (
         await service.current_version_id(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             scope,
         )
         == "cbv2"
@@ -701,19 +681,19 @@ async def test_upgrade_insert_failure_rolls_back_old_current(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv1"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv1"),
     )
     service = _service(store, provider)
     old = await service.bind_initial(
         "s1",
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv1",
         scope,
     )
     provider.response = _published(
-        ResourceKind.CODEBASE,
+        ResourceKind.KNOWLEDGE_BASE,
         "cb1",
         "cbv2",
     )
@@ -722,7 +702,7 @@ async def test_upgrade_insert_failure_rolls_back_old_current(
     with pytest.raises(RuntimeError, match="injected insert failure"):
         await service.upgrade(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cbv2",
             actor_id="u1",
             scope=scope,
@@ -739,15 +719,15 @@ async def test_upgrade_rejects_spoofed_actor_and_missing_binding(
     scope,
 ):
     provider = _FakeProvider(
-        ResourceKind.CODEBASE,
-        _published(ResourceKind.CODEBASE, "cb1", "cbv2"),
+        ResourceKind.KNOWLEDGE_BASE,
+        _published(ResourceKind.KNOWLEDGE_BASE, "cb1", "cbv2"),
     )
     service = _service(store, provider)
 
     with pytest.raises(ForbiddenError):
         await service.upgrade(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cbv2",
             actor_id="other-user",
             scope=scope,
@@ -755,7 +735,7 @@ async def test_upgrade_rejects_spoofed_actor_and_missing_binding(
     with pytest.raises(NotFoundError, match="binding"):
         await service.upgrade(
             "s1",
-            ResourceKind.CODEBASE,
+            ResourceKind.KNOWLEDGE_BASE,
             "cbv2",
             actor_id="u1",
             scope=scope,

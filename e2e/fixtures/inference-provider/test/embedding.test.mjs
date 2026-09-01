@@ -15,7 +15,7 @@ test("embeddingFor returns a deterministic normalized 1536-dimensional vector", 
 });
 
 test("embeddingFor separates distinct Unicode inputs", () => {
-  assert.notDeepEqual(embeddingFor("知识库"), embeddingFor("代码库"));
+  assert.notDeepEqual(embeddingFor("知识库"), embeddingFor("另一个知识库"));
 });
 
 test("embeddingsFor preserves input order and rejects invalid inputs", () => {

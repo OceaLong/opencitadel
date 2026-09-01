@@ -6,15 +6,15 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "kubernetes>=31.0.0",
   "mcp>=1.22.0,<2",
-  "pydantic>=2.11.7",
-  "pydantic-settings>=2.10.1",
+  "pydantic>=2.12.5",
+  "pydantic-settings>=2.12.0",
 ]
 
 [project.scripts]
 opencitadel-ops-actuator = "opencitadel_ops_actuator.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.4.1", "pytest-asyncio>=1.0.0"]
+dev = ["pytest>=8.4.2", "pytest-asyncio>=1.0.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,4 +26,5 @@ packages = ["src/opencitadel_ops_actuator"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

@@ -73,7 +73,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 Sandbox deploys via root `docker-compose.yml`. After `UV_INDEX_URL` is set, Dockerfile runs `uv sync --frozen`; dependencies install to `/venv` with `PATH=/venv/bin` for `uvicorn`.
 
-`pip install uv` and `uv sync` use overridable build args (default Aliyun PyPI, `UV_VERSION=0.11.19`, `UV_HTTP_TIMEOUT=300`). npm defaults to `registry.npmmirror.com`.
+`pip install uv` and `uv sync` use overridable build args (default Aliyun PyPI, `UV_VERSION=0.11.33`, `UV_HTTP_TIMEOUT=300`). npm defaults to `registry.npmmirror.com`.
 
 ```bash
 docker compose build opencitadel-sandbox

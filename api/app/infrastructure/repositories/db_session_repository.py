@@ -4,10 +4,10 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.codebase import SessionMode
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session, SessionStatus
+from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.session_repository import SessionRepository
 from app.infrastructure.models.session import SessionModel
 from app.infrastructure.models.session_file_attachment import (

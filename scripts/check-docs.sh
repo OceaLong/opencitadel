@@ -81,7 +81,7 @@ check_size_parity docs/tutorials 60
 
 echo "==> Checking module README bilingual pairs ..."
 for en in README.md api/README.md ui/README.md sandbox/README.md nginx/README.md \
-  ops-collector/README.md \
+  ops-collector/README.md ops-actuator/README.md \
   deploy/helm/opencitadel/README.md demo/ops-console/README.md \
   deploy/patrol-demo/README.md e2e/README.md scripts/README.md deploy/scripts/README.md; do
   check_pair "$en"
@@ -139,7 +139,7 @@ fi
 
 echo "==> Checking stale single 200MB upload claim for KB ..."
 if rg -n 'upload.*200\s*MB|200\s*MB.*upload' docs/tutorials/02-internal-knowledge-base.md \
-  docs/tutorials/02-internal-knowledge-base.zh-CN.md 2>/dev/null | rg -v '50 MB|50\s*MB|gateway|网关|nginx|CODEBASE'; then
+  docs/tutorials/02-internal-knowledge-base.zh-CN.md 2>/dev/null | rg -v '50 MB|50\s*MB|gateway|网关|nginx'; then
   fail "KB tutorial should not imply 200MB document limit without the 50MB Execution Policy caveat"
 fi
 
@@ -226,6 +226,21 @@ for f in deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.
   require_marker "$f" "rolbypassrls" "runtime-role verification"
 done
 
+echo "==> Checking .env.example / .env.e2e key-set parity ..."
+# .env.example is the single env schema. Every active key in it must also be
+# declared in .env.e2e (values may differ); every key in .env.e2e must exist
+# in .env.example at least as a commented-out entry. ACCEPTANCE_* keys are
+# acceptance-run-only and exempt.
+env_keys() { rg -o '^[A-Z][A-Z0-9_]*(?==)' -N --pcre2 "$1" | sort -u; }
+env_keys_incl_commented() { rg -o '^#?\s*[A-Z][A-Z0-9_]*(?==)' -N --pcre2 "$1" | tr -d '# ' | sort -u; }
+while IFS= read -r key; do
+  fail ".env.example key $key is missing from .env.e2e (declare it, even empty)"
+done < <(comm -23 <(env_keys .env.example) <(env_keys .env.e2e))
+while IFS= read -r key; do
+  case "$key" in ACCEPTANCE_*) continue ;; esac
+  fail ".env.e2e key $key is not declared in .env.example (the env schema)"
+done < <(comm -23 <(env_keys .env.e2e) <(env_keys_incl_commented .env.example))
+
 echo "==> Checking production examples for empty Redis passwords ..."
 if rg -n '^REDIS_PASSWORD=[[:space:]]*$' \
   docs/operations/deployment.md \
@@ -282,20 +297,13 @@ for f in e2e/README.md e2e/README.zh-CN.md; do
   done
 done
 for f in scripts/README.md scripts/README.zh-CN.md \
-  docs/operations/deployment.md docs/operations/deployment.zh-CN.md \
-  docs/architecture/execution-kernel-cutover-evidence.md \
-  docs/architecture/execution-kernel-cutover-evidence.zh-CN.md; do
+  docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
   require_marker "$f" './scripts/run-acceptance-e2e.sh --disposable' \
     "deterministic acceptance entrypoint"
 done
 if rg -n 'PATROL_E2E|PATROL_E2E_ENABLED|patrol\.spec\.ts' \
   .github/workflows/ci.yml e2e/README.md e2e/README.zh-CN.md 2>/dev/null; then
   fail "found removed external-model Patrol E2E gate in current acceptance docs or CI"
-fi
-if rg -ni '[0-9][0-9,]*[[:space:]]+(passed|skipped|tests?[[:space:]]+passed)' \
-  docs/architecture/execution-kernel-cutover-evidence.md \
-  docs/architecture/execution-kernel-cutover-evidence.zh-CN.md 2>/dev/null; then
-  fail "found volatile hand-maintained test counts in cutover evidence"
 fi
 
 if [[ "$errors" -gt 0 ]]; then

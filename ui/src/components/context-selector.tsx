@@ -16,13 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { useIsMobile } from "@/hooks/use-mobile";
-import { codebaseApi } from "@/lib/api/codebase";
 import { knowledgeApi } from "@/lib/api/knowledge";
-import type { Codebase, KnowledgeBase } from "@/lib/api/types";
+import type { KnowledgeBase } from "@/lib/api/types";
 import {
   getSessionContextKind,
-  IconAsk,
-  IconCodebase,
   IconKnowledge,
   IconSearch,
   IconTask,
@@ -32,7 +29,6 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 export type SessionContextSelection = {
-  codebaseId?: string;
   knowledgeBaseId?: string;
 };
 
@@ -89,12 +85,8 @@ function SessionContextTriggerIcon({
   className?: string;
 }) {
   switch (kind) {
-    case "codebase":
-      return <IconCodebase className={className} />;
     case "knowledge":
       return <IconKnowledge className={className} />;
-    case "hybrid":
-      return <IconAsk className={className} />;
     default:
       return <IconTask className={className} />;
   }
@@ -104,7 +96,6 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   const t = useTranslations("contextSelector");
   const { user } = useAuth();
   const { isMobile } = useIsMobile();
-  const [codebases, setCodebases] = useState<Codebase[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -112,7 +103,6 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
 
   useEffect(() => {
     if (!user) {
-      setCodebases([]);
       setKnowledgeBases([]);
       setLoading(false);
       return;
@@ -123,13 +113,11 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
 
     void (async () => {
       try {
-        const [cb, kb] = await Promise.all([codebaseApi.list(), knowledgeApi.list()]);
+        const kb = await knowledgeApi.list();
         if (cancelled) return;
-        setCodebases(cb.codebases.filter((item) => item.status === "ready"));
         setKnowledgeBases(kb.knowledge_bases.filter((item) => item.status === "ready"));
       } catch {
         if (!cancelled) {
-          setCodebases([]);
           setKnowledgeBases([]);
         }
       } finally {
@@ -144,25 +132,11 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
     };
   }, [user]);
 
-  const readyCodebases = useMemo(() => (user ? codebases : []), [user, codebases]);
   const readyKnowledgeBases = useMemo(() => (user ? knowledgeBases : []), [user, knowledgeBases]);
-
-  const getCodebaseDescription = useCallback(
-    (cb: Codebase) => t("codebaseMeta", { count: cb.file_count ?? 0 }),
-    [t],
-  );
 
   const getKnowledgeDescription = useCallback(
     (kb: KnowledgeBase) => t("knowledgeMeta", { count: kb.doc_count }),
     [t],
-  );
-
-  const filteredCodebases = useMemo(
-    () =>
-      readyCodebases.filter((cb) =>
-        matchesSearch(searchQuery, cb.name, getCodebaseDescription(cb)),
-      ),
-    [readyCodebases, searchQuery, getCodebaseDescription],
   );
 
   const filteredKnowledgeBases = useMemo(
@@ -173,13 +147,10 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
     [readyKnowledgeBases, searchQuery, getKnowledgeDescription],
   );
 
-  const hasSelection = Boolean(value.codebaseId || value.knowledgeBaseId);
+  const hasSelection = Boolean(value.knowledgeBaseId);
 
   const label = (() => {
     const parts: string[] = [];
-    if (value.codebaseId) {
-      parts.push(readyCodebases.find((c) => c.id === value.codebaseId)?.name ?? t("codebase"));
-    }
     if (value.knowledgeBaseId) {
       parts.push(
         readyKnowledgeBases.find((k) => k.id === value.knowledgeBaseId)?.name ?? t("knowledge"),
@@ -189,22 +160,12 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   })();
 
   const contextKind = getSessionContextKind({
-    resource_bindings: [
-      ...(value.codebaseId ? [{ resource_kind: "codebase" as const }] : []),
-      ...(value.knowledgeBaseId ? [{ resource_kind: "knowledge_base" as const }] : []),
-    ],
+    resource_bindings: value.knowledgeBaseId ? [{ resource_kind: "knowledge_base" }] : [],
   });
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setSearchQuery("");
-  };
-
-  const toggleCodebase = (id: string) => {
-    onChange({
-      ...value,
-      codebaseId: value.codebaseId === id ? undefined : id,
-    });
   };
 
   const toggleKnowledgeBase = (id: string) => {
@@ -269,30 +230,6 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
           <p className="text-muted-foreground px-3 py-4 text-center text-xs">{t("loading")}</p>
         ) : (
           <>
-            <div className="px-2 pb-1">
-              <p className="text-muted-foreground mb-1 text-xs font-medium">
-                {t("codebaseSection")}
-              </p>
-              {readyCodebases.length === 0 ? (
-                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noCodebase")}</p>
-              ) : filteredCodebases.length === 0 ? (
-                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noSearchResults")}</p>
-              ) : (
-                filteredCodebases.map((cb) => (
-                  <ContextOptionRow
-                    key={cb.id}
-                    icon={<IconCodebase className="size-3.5 shrink-0" />}
-                    title={cb.name}
-                    description={getCodebaseDescription(cb)}
-                    selected={value.codebaseId === cb.id}
-                    onSelect={() => toggleCodebase(cb.id)}
-                  />
-                ))
-              )}
-            </div>
-
-            <DropdownMenuSeparator />
-
             <div className="px-2 pb-1">
               <p className="text-muted-foreground mb-1 text-xs font-medium">
                 {t("knowledgeSection")}

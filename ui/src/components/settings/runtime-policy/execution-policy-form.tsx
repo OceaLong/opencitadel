@@ -115,19 +115,6 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
       { path: "knowledge_base.document.max_pages", type: "number", min: 1, max: 10000 },
     ],
   },
-  {
-    key: "codebase",
-    fields: [
-      { path: "codebase.vector_enabled", type: "boolean" },
-      { path: "codebase.analysis.max_file_size_bytes", type: "number", min: 1, max: 50000000 },
-      { path: "codebase.analysis.max_files", type: "number", min: 1, max: 100000 },
-      { path: "codebase.analysis.chunk_max_chars", type: "number", min: 100, max: 100000 },
-      { path: "codebase.analysis.source_read_batch_size", type: "number", min: 1, max: 1000 },
-      { path: "codebase.retrieval.fetch_multiplier", type: "number", min: 1, max: 20 },
-      { path: "codebase.retrieval.rrf_k", type: "number", min: 1, max: 1000 },
-      { path: "codebase.retrieval.final_top_k", type: "number", min: 1, max: 30 },
-    ],
-  },
 ];
 
 export function ExecutionPolicyForm({

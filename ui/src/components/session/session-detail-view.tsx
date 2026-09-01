@@ -11,7 +11,6 @@ import { ChatInput } from "@/components/session/chat-input";
 import { FilePreviewPanel } from "@/components/session/file-preview-panel";
 import { OperatorScopeDialog } from "@/components/session/operator-scope-dialog";
 import { SessionHeader } from "@/components/session/session-header";
-import { SessionModeToggle } from "@/components/session/session-mode-toggle";
 import { ThinkingToggle } from "@/components/session/thinking-toggle";
 import { ToolPreviewPanel } from "@/components/session/tool-preview-panel";
 import { VirtualizedTimeline } from "@/components/session/virtualized-timeline";
@@ -53,7 +52,7 @@ export function SessionDetailView({
   const [operatorScopeOpen, setOperatorScopeOpen] = useState(false);
   const [contextSheetOpen, setContextSheetOpen] = useState(false);
   const [savingOperatorScope, setSavingOperatorScope] = useState(false);
-  const { codeSourceRef, kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
+  const { kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
   const {
     session,
     files,
@@ -112,14 +111,10 @@ export function SessionDetailView({
 
   useReportPageTitle(session?.title ?? undefined);
 
-  const codebaseId = session?.resource_bindings?.find(
-    (binding) => binding.resource_kind === "codebase",
-  )?.resource_id;
   const knowledgeBaseId = session?.resource_bindings?.find(
     (binding) => binding.resource_kind === "knowledge_base",
   )?.resource_id;
-  const hasContext = Boolean(codebaseId || knowledgeBaseId);
-  const showModeToggle = Boolean(codebaseId);
+  const hasContext = Boolean(knowledgeBaseId);
 
   const handleOperatorScopeSave = async (config: { operatorDomains: string[] }) => {
     setSavingOperatorScope(true);
@@ -376,7 +371,6 @@ export function SessionDetailView({
                 onStop={handleStop}
                 toolbarRight={
                   <>
-                    {showModeToggle && <SessionModeToggle mode={mode} onChange={setMode} />}
                     <ThinkingToggle
                       enabled={session?.thinking_enabled ?? false}
                       onChange={handleThinkingChange}
@@ -409,11 +403,9 @@ export function SessionDetailView({
         {hasContext && !showMobilePanels && (
           <div className={hasPreview ? "hidden" : undefined}>
             <SessionContextPanel
-              codebaseId={codebaseId}
               knowledgeBaseId={knowledgeBaseId}
               sessionId={session.session_id}
               resourceBindings={session.resource_bindings}
-              codeSourceRef={codeSourceRef}
               kbSourceRef={kbSourceRef}
             />
           </div>
@@ -435,11 +427,9 @@ export function SessionDetailView({
         <Sheet open={contextSheetOpen} onOpenChange={setContextSheetOpen}>
           <SheetContent side="right" className="w-full max-w-full overflow-hidden p-0 sm:max-w-md">
             <SessionContextPanel
-              codebaseId={codebaseId}
               knowledgeBaseId={knowledgeBaseId}
               sessionId={session.session_id}
               resourceBindings={session.resource_bindings}
-              codeSourceRef={codeSourceRef}
               kbSourceRef={kbSourceRef}
               className="h-full w-full max-w-none border-0"
             />

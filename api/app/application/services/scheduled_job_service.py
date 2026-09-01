@@ -27,7 +27,8 @@ from app.domain.models.scheduled_job import (
     ScheduledRunStatus,
 )
 from app.domain.models.scope import OwnerScope, OwnerScopeType
-from app.domain.models.session import Session, SessionMode, SessionStatus
+from app.domain.models.session import Session, SessionStatus
+from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.utils.schedule_utils import (
     compute_next_run,
@@ -106,7 +107,6 @@ class ScheduledJobService:
         checks = (
             (job.model_id, uow.inference_model.get_by_id, "模型"),
             (job.skill_id, uow.skill.get_by_id, "Skill"),
-            (job.codebase_id, uow.codebase.get_by_id, "代码库"),
             (job.knowledge_base_id, uow.knowledge_base.get_kb, "知识库"),
         )
         for resource_id, getter, label in checks:
@@ -128,7 +128,6 @@ class ScheduledJobService:
         *,
         skill_id: str | None = None,
         model_id: str | None = None,
-        codebase_id: str | None = None,
         knowledge_base_id: str | None = None,
         notify_channels: list[NotifyChannel] | None = None,
         operator_scope: str | None = None,
@@ -151,7 +150,6 @@ class ScheduledJobService:
             prompt_template=prompt_template,
             skill_id=skill_id,
             model_id=model_id,
-            codebase_id=codebase_id,
             knowledge_base_id=knowledge_base_id,
             notify_channels=notify_channels or [],
             operator_scope=operator_scope,
@@ -397,13 +395,11 @@ class ScheduledJobService:
                 job = locked_job
                 scope = self._scope_for_job(job)
                 validated_resources = None
-                if job.codebase_id or job.knowledge_base_id:
+                if job.knowledge_base_id:
                     if not self._resource_guard or not self._resource_binding_service:
                         raise BadRequestError("Scheduled job resource binding is unavailable")
                     validated_resources = await self._resource_guard.validate_session_request(
                         mode=SessionMode.AGENT,
-                        codebase_id=job.codebase_id,
-                        codebase_version_id=None,
                         knowledge_base_id=job.knowledge_base_id,
                         knowledge_base_version_id=None,
                         scope=scope,

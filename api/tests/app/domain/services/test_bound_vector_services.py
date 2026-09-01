@@ -4,15 +4,13 @@ import pytest
 
 from app.domain.errors import ConflictError
 from app.domain.models.scope import OwnerScope
-from app.domain.services.codebase.vector_service import CodebaseVectorService
 from app.domain.services.knowledge_base.vector_service import KBVectorService
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("service_type", [KBVectorService, CodebaseVectorService])
-async def test_disabled_vector_consumer_does_not_resolve_embedding(service_type) -> None:
+async def test_disabled_vector_consumer_does_not_resolve_embedding() -> None:
     embeddings = AsyncMock()
-    service = service_type(
+    service = KBVectorService(
         embeddings,
         scope=OwnerScope.personal("user-1"),
         enabled=False,
@@ -24,11 +22,10 @@ async def test_disabled_vector_consumer_does_not_resolve_embedding(service_type)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("service_type", [KBVectorService, CodebaseVectorService])
-async def test_enabled_vector_consumer_propagates_missing_binding(service_type) -> None:
+async def test_enabled_vector_consumer_propagates_missing_binding() -> None:
     embeddings = AsyncMock()
     embeddings.embed.side_effect = ConflictError("embedding binding missing")
-    service = service_type(
+    service = KBVectorService(
         embeddings,
         scope=OwnerScope.personal("user-1"),
         enabled=True,

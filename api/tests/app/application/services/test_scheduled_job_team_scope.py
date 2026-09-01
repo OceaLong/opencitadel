@@ -31,7 +31,6 @@ class _Uow:
         self.scheduled_job = repo
         self.inference_model = _DeniedRepo()
         self.skill = _DeniedRepo()
-        self.codebase = _DeniedRepo()
         self.knowledge_base = _DeniedRepo()
 
     async def __aenter__(self):

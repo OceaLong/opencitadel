@@ -16,7 +16,6 @@ _OWNED_RESOURCE_TABLES = (
     "sessions",
     "memory_entries",
     "knowledge_bases",
-    "codebases",
     "files",
     "llm_token_usages",
 )

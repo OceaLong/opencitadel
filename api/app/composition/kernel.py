@@ -16,10 +16,7 @@ from app.application.execution.activities.patrol import (
     PatrolValidationActivityHandler,
 )
 from app.application.execution.activities.remediation import RemediationActivityHandler
-from app.application.execution.activities.resource_build import (
-    CodebaseBuildActivityHandler,
-    KnowledgeBuildActivityHandler,
-)
+from app.application.execution.activities.resource_build import KnowledgeBuildActivityHandler
 from app.application.execution.activities.retrieval import RetrievalActivityHandler
 from app.application.execution.activities.tool_call import ToolCallActivityHandler
 from app.application.execution.activity_registry import (
@@ -46,7 +43,6 @@ from app.composition.shared import (
 from app.composition.tasks import RestartPolicy, TaskFailure, TaskKind, TaskSupervisor
 from app.composition.types import KernelRuntime, RuntimeReadiness
 from app.domain.models.authorization import AuthorizationContext
-from app.domain.services.codebase.ingestion_runner import CodebaseIngestionRunner
 from app.domain.services.knowledge_base.ingestion_runner import KBIngestionRunner
 from app.infrastructure.adapters.execution_ports import build_execution_kernel_runtime
 from app.infrastructure.adapters.query_ports import SqlAlchemyPatrolRetentionStore
@@ -78,11 +74,9 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
         a2a_connection_pool=shared.a2a_connection_pool,
         mcp_servers=shared.mcp_integration_service,
         a2a_servers=shared.a2a_integration_service,
-        object_storage=shared.object_storage,
         file_storage=shared.file_storage,
         models=shared.inference_model_service,
         image_generator=shared.image_generator,
-        codebases=shared.codebase_service,
         artifacts=shared.artifact_service,
         memories=shared.memory_service,
         embeddings=shared.embedding_service,
@@ -93,13 +87,6 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
         file_storage=shared.file_storage,
         web_documents=HttpWebDocumentGateway(policy_reader=shared.runtime_policy_reader),
         json_parser=shared.json_parser,
-        embeddings=shared.embedding_service,
-    )
-    codebase_pipeline = CodebaseIngestionRunner(
-        uow_factory=shared.uow_factory,
-        sandbox_factory=shared.sandbox_factory,
-        file_storage=shared.file_storage,
-        object_storage=shared.object_storage,
         embeddings=shared.embedding_service,
     )
     collector = MCPPatrolCollectorValidator(shared.mcp_connection_pool)
@@ -134,10 +121,6 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
             pipeline=knowledge_pipeline,
             models=shared.inference_model_service,
             client_factory=shared.resilient_llm_factory,
-        ),
-        CodebaseBuildActivityHandler(
-            objects=shared.activity_objects,
-            pipeline=codebase_pipeline,
         ),
         PatrolExecutionActivityHandler(
             objects=shared.activity_objects,
@@ -196,7 +179,6 @@ async def open_kernel_runtime(
             )
             resource_gc = ResourceVersionGCService(
                 uow_factory=shared.uow_factory,
-                object_storage=shared.object_storage,
                 policy_reader=shared.runtime_policy_reader,
             )
             patrol_retention = PatrolRetentionService(

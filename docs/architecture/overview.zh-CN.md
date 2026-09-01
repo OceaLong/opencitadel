@@ -62,7 +62,7 @@ Redis、对象存储、Provider 与连接池资源。
 每项行为都以某个 `Run` family 开始：
 
 - `agent`、`ask`：对话执行；
-- `kb_ingest`、`codebase_ingest`：不可变候选版本发布；
+- `kb_ingest`：不可变候选版本发布；
 - `automation`、`patrol`、`remediation`：调度或受治理工作。
 
 纯 family 决策器读取当前聚合与一个类型化命令，产出类型化事件和确定性 effect。所有非确定性工作都是 Activity。外部调用开始前，输入引用、摘要、调用身份、超时和认领代次都已持久化。心跳、重试、取消、审批、超时和未知结果均为显式协议状态。
@@ -80,7 +80,7 @@ Run、Activity、审批、资源构建和公开事件表都是可重建投影；
 
 ## 产品数据与资源绑定
 
-产品仓库存储内容、配置、文件、不可变资源版本和证据。知识库或代码库重建只创建一个带 `build_id`、`request_key` 的候选版本，源 Run 独占生命周期和进度。发布前验证完整闭包，再通过 CAS 切换资源的 `active_version_id`。
+产品仓库存储内容、配置、文件、不可变资源版本和证据。知识库重建只创建一个带 `build_id`、`request_key` 的候选版本，源 Run 独占生命周期和进度。发布前验证完整闭包，再通过 CAS 切换资源的 `active_version_id`。
 
 会话通过 `session_resource_bindings` 固定到具体已发布版本。后续发布不会改变已有会话的证据边界；缺失、跨租户、未发布或歧义绑定一律关闭执行。
 
@@ -116,5 +116,4 @@ Run、Activity、审批、资源构建和公开事件表都是可重建投影；
 - [执行内核](execution-kernel.zh-CN.md)
 - [安全模型](security-model.zh-CN.md)
 - [知识库摄取](knowledge-base-ingestion.zh-CN.md)
-- [代码库分析](codebase-reindex.zh-CN.md)
 - [自动化与调度器](automation-scheduler.zh-CN.md)

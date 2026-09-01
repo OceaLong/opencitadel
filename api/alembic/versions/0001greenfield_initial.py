@@ -82,6 +82,20 @@ def _assert_runtime_roles() -> None:
     )
 
 
+def _install_extensions() -> None:
+    _execute(
+        [
+            'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+            "CREATE EXTENSION IF NOT EXISTS vector",
+        ]
+    )
+
+
+def _create_product_schema() -> None:
+    model_metadata.create_all(bind=op.get_bind(), checkfirst=False)
+
+
 def _install_authorization_guard() -> None:
     _execute(
         [
@@ -369,14 +383,8 @@ def _grant_runtime_privileges() -> None:
 
 def upgrade() -> None:
     _assert_runtime_roles()
-    _execute(
-        [
-            'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
-            "CREATE EXTENSION IF NOT EXISTS vector",
-        ]
-    )
-    model_metadata.create_all(bind=op.get_bind(), checkfirst=False)
+    _install_extensions()
+    _create_product_schema()
     _install_authorization_guard()
     _apply_row_level_security()
     _install_append_only_guards()

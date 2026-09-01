@@ -85,8 +85,7 @@ All application routes are under `/api`.
 - `/sessions/*`: session CRUD, message command admission, public event replay,
   VNC and files
 - `/runs/*`, `/approval-batches/*`: formal execution and approval commands
-- `/knowledge-bases/*`, `/codebases/*`: immutable candidate builds and
-  published version bindings
+- `/knowledge-bases/*`: immutable candidate builds and published version bindings
 - `/scheduled-jobs/*`, `/patrol-*`: automation, patrol, evidence, remediation
 - `/inference/endpoints/*`, `/inference/models/*`, `/inference/bindings/*`,
   `/skills/*`, `/runtime-policies/*`: runtime resources, policy revisions, and inference bindings

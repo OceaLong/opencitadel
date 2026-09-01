@@ -37,7 +37,6 @@ htmlcov/
 .hypothesis/
 
 # 开发容器（生产镜像不需要）
-.devops/
 
 # 临时文件
 *.tmp

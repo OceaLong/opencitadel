@@ -75,7 +75,7 @@ cannot populate the new scope; anonymous state cannot read authenticated data.
 Every behavior starts as a `Run` in one family:
 
 - `agent` and `ask` for conversational execution;
-- `kb_ingest` and `codebase_ingest` for immutable candidate publication;
+- `kb_ingest` for immutable candidate publication;
 - `automation`, `patrol`, and `remediation` for scheduled or governed work.
 
 A pure family decision handler consumes the current aggregate and one typed
@@ -100,7 +100,7 @@ projections. They can answer queries but cannot decide workflow state.
 ## Product data and resource bindings
 
 Product repositories store content, configuration, files, immutable resource
-versions, and evidence. A knowledge or codebase rebuild creates one candidate
+versions, and evidence. A knowledge rebuild creates one candidate
 version carrying `build_id` and `request_key`; the source Run owns lifecycle and
 progress. Publication validates the complete closure and compare-and-swaps the
 resource's `active_version_id`.
@@ -149,5 +149,4 @@ cursor; private Activity inputs and provider payloads are never exposed.
 - [Execution kernel](execution-kernel.md)
 - [Security model](security-model.md)
 - [Knowledge-base ingestion](knowledge-base-ingestion.md)
-- [Codebase analysis](codebase-reindex.md)
 - [Automation and scheduler](automation-scheduler.md)

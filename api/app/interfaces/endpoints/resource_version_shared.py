@@ -1,20 +1,4 @@
-"""Shared response mappers and write-guard dependency for resource routers.
-
-`codebase_routes.py` and `knowledge_base_routes.py` each publish a version/
-build lifecycle for their own resource kind. Their per-resource `*Response`
-schemas are not field-identical (e.g. `CodebaseVersionResponse` carries
-`codebase_id`/`source_*` fields that `KnowledgeVersionResponse` does not have,
-and the id field is named `codebase_id` vs. `knowledge_base_id`), so the
-schemas themselves stay separate and un-merged.
-
-What *is* identical between the two files is the mapper body: both
-`_to_version_response`/`_to_build_response` implementations were already
-fully generic one-liners (`ResponseCls.model_validate(obj, from_attributes=True)`)
-with no field-level logic of their own — the field extraction is delegated
-entirely to pydantic based on the target response class. That means the two
-implementations can be merged without any "differing field" switch beyond the
-target response class itself, which becomes an explicit parameter here.
-"""
+"""Response mappers and write-guard dependency for resource routers."""
 
 from typing import Annotated, Any, TypeVar
 

@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 
-from app.domain.models.codebase import SessionMode
+from app.domain.models.session_mode import SessionMode
 from app.infrastructure.models.audit_log import AuditLogORM
 from app.infrastructure.models.inference_endpoint import InferenceEndpointORM
 from app.infrastructure.models.session import SessionModel

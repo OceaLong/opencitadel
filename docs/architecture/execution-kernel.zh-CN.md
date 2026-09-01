@@ -2,7 +2,7 @@
 
 [English](execution-kernel.md)
 
-OpenCitadel 使用一套执行运行时承载 Agent、Ask、知识库摄取、代码库分析、自动化、
+OpenCitadel 使用一套执行运行时承载 Agent、Ask、知识库摄取、自动化、
 Patrol 与 Remediation。PostgreSQL 执行事件是唯一生命周期事实来源；产品表只保存
 内容与查询投影，Redis 只承担可丢失的唤醒通知。
 
@@ -42,7 +42,7 @@ Execution Kernel 进程认领数据库工作，调用注册的 Activity Handler�
 
 ## Run 与 Activity 协议
 
-所有生产行为都属于七类 Run：`agent`、`ask`、`kb_ingest`、`codebase_ingest`、
+所有生产行为都属于六类 Run：`agent`、`ask`、`kb_ingest`、
 `automation`、`patrol`、`remediation`。Run 通过纯 Decision Handler 接受类型化 Command、
 产生类型化 Event，并且只能接受一个终态事件。
 
@@ -56,7 +56,7 @@ Claim generation 隔离过期 Worker。超时、重试、审批、取消和未�
 
 ## 资源候选版本
 
-知识库和代码库重建只有一个制品状态来源：不可变候选版本。候选版本保存 `build_id`、
+知识库重建只有一个制品状态来源：不可变候选版本。候选版本保存 `build_id`、
 请求幂等键、制品状态、能力结果、指标与发布时间；构建生命周期和进度只来自源 Run 投影。
 
 每个资源最多存在一个 `building` 候选。发布前验证完整闭包，并对 `active_version_id`

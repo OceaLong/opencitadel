@@ -18,8 +18,6 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia } from "@/co
 import type { Session } from "@/lib/api";
 import {
   getSessionContextKind,
-  IconAsk,
-  IconCodebase,
   IconDelete,
   IconKnowledge,
   IconLoading,
@@ -44,12 +42,8 @@ function SessionContextIcon({
   className?: string;
 }) {
   switch (kind) {
-    case "codebase":
-      return <IconCodebase className={className} />;
     case "knowledge":
       return <IconKnowledge className={className} />;
-    case "hybrid":
-      return <IconAsk className={className} />;
     default:
       return <IconTask className={className} />;
   }

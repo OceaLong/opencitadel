@@ -1,9 +1,9 @@
 import { Stethoscope } from "lucide-react";
 import type { ComponentType } from "react";
 
-import { IconAdmin, IconAgent, IconAutomation, IconCodebase, IconKnowledge } from "@/lib/icons";
+import { IconAdmin, IconAgent, IconAutomation, IconKnowledge } from "@/lib/icons";
 
-export type NavModuleKey = "chat" | "patrol" | "automation" | "knowledge" | "codebase" | "admin";
+export type NavModuleKey = "chat" | "patrol" | "automation" | "knowledge" | "admin";
 
 export type NavModule = {
   key: NavModuleKey;
@@ -48,12 +48,6 @@ export const NAV_MODULES: NavModule[] = [
     icon: IconKnowledge,
     match: prefixMatch("/knowledge"),
     mobilePrimary: true,
-  },
-  {
-    key: "codebase",
-    href: "/codebase",
-    icon: IconCodebase,
-    match: prefixMatch("/codebase"),
   },
 ];
 

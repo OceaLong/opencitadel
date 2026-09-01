@@ -31,11 +31,11 @@ Formal Error、Resource Reference 与 Terminal State。Delta 只合并到匹配�
 Approval Bar 通过专用 Approval API 操作持久 Batch。UI 展示冻结的 Subject Label 与 Policy，
 不能修改 Invocation Argument。VNC 让用户交互访问隔离沙箱，但不会自行把 Activity 标记成功。
 
-正式 Run 活跃时拒绝删除 Session。Resource Context 展示 Session 绑定的精确已发布知识/代码版本。
+正式 Run 活跃时拒绝删除 Session。Resource Context 展示 Session 绑定的精确已发布知识库版本。
 
 ## 资源构建
 
-知识库与代码库页面使用一个 Candidate Build Model：创建 Candidate、观察正式 Progress、在投影
+知识库页面使用 Candidate Build Model：创建 Candidate、观察正式 Progress、在投影
 允许时 Retry/Cancel，并原子 Publish。Candidate 失败或取消时，Active Published Version 仍可见。
 Document Read 必须指定 Version 与 Document Revision。
 

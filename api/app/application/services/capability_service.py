@@ -89,11 +89,7 @@ class CapabilityService:
         operations = operations_active.revision.policy
         chat = await self._inference_state(InferencePurpose.CHAT, scope)
         embedding = await self._inference_state(InferencePurpose.EMBEDDING, scope)
-        if not (
-            execution.memory.vector_enabled
-            or execution.knowledge_base.vector_enabled
-            or execution.codebase.vector_enabled
-        ):
+        if not (execution.memory.vector_enabled or execution.knowledge_base.vector_enabled):
             embedding = CapabilityState(
                 state=CapabilityStateValue.DISABLED,
                 reason_key="capabilities.reason.allVectorConsumersDisabled",

@@ -1,6 +1,5 @@
 export * from "./types/artifacts";
 export * from "./types/automation";
-export * from "./types/codebase";
 export * from "./types/common";
 export * from "./types/execution";
 export * from "./types/files";

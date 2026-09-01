@@ -88,7 +88,6 @@ class ResourceVersionGcPolicy(_OperationsPolicyModel):
 
 class ResourceGcPolicy(_OperationsPolicyModel):
     knowledge_base: ResourceVersionGcPolicy = Field(default_factory=ResourceVersionGcPolicy)
-    codebase: ResourceVersionGcPolicy = Field(default_factory=ResourceVersionGcPolicy)
 
 
 class PatrolRetentionPolicy(_OperationsPolicyModel):

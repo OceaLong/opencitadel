@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from app.application.services.resource_version_gc_service import (
     ResourceVersionGCService,
 )
-from app.domain.repositories.codebase_version_repository import CodebaseVersionGCResult
 from app.domain.repositories.knowledge_version_repository import (
     KnowledgeVersionGCResult,
 )
@@ -199,48 +198,6 @@ async def test_disabled_gc_policy_never_opens_a_unit_of_work() -> None:
 
     assert result == KnowledgeVersionGCResult()
     factory.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_codebase_gc_uses_only_its_current_typed_policy() -> None:
-    repository = SimpleNamespace(collect_garbage=AsyncMock(return_value=CodebaseVersionGCResult()))
-
-    class _CodebaseUow:
-        codebase_version = repository
-
-        async def __aenter__(self):
-            return self
-
-        async def commit(self):
-            return None
-
-        async def __aexit__(self, *_args):
-            return None
-
-    uow = _CodebaseUow()
-    codebase_policy = ResourceVersionGcPolicy(
-        enabled=True,
-        retention_count=4,
-        retention_min_days=9,
-        batch_size=17,
-    )
-    reader = MutablePolicyReader(
-        operations=OperationsPolicy(resource_gc=ResourceGcPolicy(codebase=codebase_policy))
-    )
-    service = ResourceVersionGCService(
-        uow_factory=lambda: uow,
-        policy_reader=reader,
-        clock=lambda: NOW,
-    )
-
-    await service.collect_codebase_versions()
-
-    repository.collect_garbage.assert_awaited_once_with(
-        retain_count=4,
-        older_than=NOW - timedelta(days=9),
-        batch_size=17,
-    )
-    assert reader.operations_calls == [(True, NOW)]
 
 
 @pytest.mark.asyncio

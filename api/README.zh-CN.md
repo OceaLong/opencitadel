@@ -77,7 +77,7 @@ post-commit 阶段作为提示发生。
 - `/auth/*`、`/teams/*`、`/service-keys/*`：身份与工作区
 - `/sessions/*`：会话 CRUD、消息 Command 准入、公开事件回放、VNC 与文件
 - `/runs/*`、`/approval-batches/*`：正式执行与审批 Command
-- `/knowledge-bases/*`、`/codebases/*`：不可变候选构建与已发布版本绑定
+- `/knowledge-bases/*`：不可变候选构建与已发布版本绑定
 - `/scheduled-jobs/*`、`/patrol-*`：自动化、巡检、证据、修复
 - `/inference/endpoints/*`、`/inference/models/*`、`/inference/bindings/*`、
   `/skills/*`、`/runtime-policies/*`：运行资源、策略版本与推理绑定

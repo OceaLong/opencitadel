@@ -7,8 +7,6 @@ from app.infrastructure.models.base import Base
 MODEL_MODULES = (
     "app.infrastructure.execution.models",
     "app.infrastructure.models.audit_log",
-    "app.infrastructure.models.codebase",
-    "app.infrastructure.models.codebase_version",
     "app.infrastructure.models.delivery_artifact",
     "app.infrastructure.models.file",
     "app.infrastructure.models.integration_server",

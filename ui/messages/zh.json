@@ -230,7 +230,6 @@
     },
     "createFailed": "创建会话失败",
     "loginRequired": "登录后即可创建新任务",
-    "manageCodebase": "管理代码知识库",
     "manageKnowledge": "管理文档知识库",
     "noModel": "请先配置模型",
     "secondaryNav": "知识管理入口",
@@ -257,7 +256,6 @@
     "patrol": "巡检",
     "automation": "自动化",
     "knowledge": "知识库",
-    "codebase": "代码库",
     "admin": "管理后台"
   },
   "account": {
@@ -295,9 +293,7 @@
     "empty": "暂无任务",
     "filter": {
       "all": "全部",
-      "codebase": "代码库",
       "general": "通用",
-      "hybrid": "混合",
       "knowledge": "知识库"
     },
     "filterEmpty": "没有符合筛选条件的任务",
@@ -504,8 +500,7 @@
         "model_resilience": "模型韧性",
         "activity": "工具活动",
         "memory": "记忆",
-        "knowledge_base": "知识库",
-        "codebase": "代码库"
+        "knowledge_base": "知识库"
       },
       "operations": {
         "traffic": "流量",
@@ -523,8 +518,7 @@
         "model_resilience": "降级、重试预算与熔断行为。",
         "activity": "工具调用与 MCP 连接超时。",
         "memory": "召回与向量记忆行为。",
-        "knowledge_base": "索引、检索、排序、OCR 与摄取限制。",
-        "codebase": "代码分析与检索限制。"
+        "knowledge_base": "索引、检索、排序、OCR 与摄取限制。"
       },
       "operations": {
         "traffic": "API 速率限制与会话流推送频率。",
@@ -598,20 +592,6 @@
           "max_pages": "文档最大页数"
         }
       },
-      "codebase": {
-        "vector_enabled": "启用向量索引",
-        "analysis": {
-          "max_file_size_bytes": "单文件最大字节数",
-          "max_files": "最大文件数",
-          "chunk_max_chars": "分块最大字符数",
-          "source_read_batch_size": "源码读取批次大小"
-        },
-        "retrieval": {
-          "fetch_multiplier": "候选获取倍数",
-          "rrf_k": "RRF 融合常数 K",
-          "final_top_k": "最终返回 Top-K"
-        }
-      },
       "traffic": {
         "rate_limit_enabled": "启用速率限制",
         "requests_per_minute": "每分钟请求上限",
@@ -654,12 +634,6 @@
           "retention_count": "知识库保留版本数",
           "retention_min_days": "知识库最短保留天数",
           "batch_size": "知识库清理批次大小"
-        },
-        "codebase": {
-          "enabled": "启用代码库版本回收",
-          "retention_count": "代码库保留版本数",
-          "retention_min_days": "代码库最短保留天数",
-          "batch_size": "代码库清理批次大小"
         }
       },
       "patrol_retention": {
@@ -1265,95 +1239,6 @@
     "statusDocCount": "{status} · {count} 篇文档",
     "title": "文档知识库"
   },
-  "codebase": {
-    "readFailed": "读取失败",
-    "downloadSuccess": "已打包: {key}",
-    "downloadFailed": "下载失败",
-    "reanalyze": "重新分析",
-    "deleteTitle": "删除代码库？",
-    "deleteDescription": "将永久删除该代码库及其索引，此操作不可恢复。",
-    "deleteSuccess": "已删除「{name}」",
-    "deleteFailed": "删除代码库失败",
-    "deleteBlockedIngesting": "索引进行中，无法删除",
-    "tabSource": "源码",
-    "tabSymbols": "符号",
-    "tabDiagrams": "图表",
-    "symbolSearchPlaceholder": "搜索符号...",
-    "symbolSearchHint": "输入关键词搜索已索引符号",
-    "noSymbolsFound": "未找到符号",
-    "sourceHint": "点击文件或回答中的路径定位源码",
-    "artifacts": {
-      "architecture": "架构",
-      "dataFlow": "数据流",
-      "moduleDir": "目录",
-      "callChain": "调用链",
-      "flowchart": "流程",
-      "overview": "概览"
-    },
-    "createDialog": {
-      "title": "新建代码知识库",
-      "description": "上传 zip、Git 仓库或多文件，系统将自动分析并建立专属代码知识库",
-      "namePlaceholder": "我的项目",
-      "tabFiles": "文件",
-      "tabZip": "Zip",
-      "tabGit": "Git",
-      "zipUploaded": "已上传，点击更换",
-      "selectZip": "选择 zip 压缩包",
-      "zipUploadSuccess": "压缩包上传成功",
-      "selectFiles": "选择文件 ({count} 已选)",
-      "gitUrlRequired": "请输入 Git 仓库 URL",
-      "zipRequired": "请先上传 zip 压缩包",
-      "filesRequired": "请先上传文件",
-      "defaultGitName": "Git 代码库",
-      "defaultZipName": "Zip 代码库",
-      "defaultFilesName": "文件代码库",
-      "createFailed": "创建失败",
-      "createAndAnalyze": "创建并分析",
-      "fileTooLarge200mb": "文件大小不能超过 200MB"
-    },
-    "activeVersion": "当前版本：{version}",
-    "cancelBuild": "取消",
-    "candidateBuild": "候选构建 {state} · {phase} · {progress}%",
-    "candidatePhasePending": "等待中",
-    "capabilityAvailable": "可用",
-    "capabilityUnavailable": "不可用",
-    "evidence": "证据",
-    "noActiveVersion": "暂无当前版本",
-    "noCapabilities": "无",
-    "previousVersions": "历史版本",
-    "retryBuild": "重试",
-    "unsupportedViews": "暂不支持视图：{views}",
-    "versionActionError": "更新代码库构建失败",
-    "versionCapabilities": "能力：{capabilities}",
-    "versionDegraded": "降级：{reasons}",
-    "versionStatusLoadError": "加载代码库版本失败",
-    "versionStatusLoading": "正在加载代码库版本",
-    "viewBuild": "查看构建",
-    "viewHistoricalVersion": "查看版本 {version}",
-    "viewingHistoricalVersion": "正在查看版本：{version}",
-    "create": "新建代码库",
-    "download": "下载",
-    "empty": "暂无代码库",
-    "indexFailed": "索引失败",
-    "indexFailedDetail": "索引失败: {error}",
-    "indexingShort": "索引中...",
-    "librarySubtitle": "管理代码知识库并启动任务",
-    "loadError": "加载代码库失败",
-    "startAgent": "Agent",
-    "startAsk": "Ask",
-    "startTaskFailed": "启动任务失败",
-    "status": {
-      "pending": "等待中",
-      "materializing": "物化中",
-      "analyzing": "分析中",
-      "indexing": "索引中",
-      "generating": "生成中",
-      "ready": "就绪",
-      "failed": "失败"
-    },
-    "statusFileCount": "{status} · {count} 个文件",
-    "title": "代码知识库"
-  },
   "mobileNav": {
     "label": "主导航",
     "more": "更多",
@@ -1683,7 +1568,6 @@
   },
   "redirect": {
     "noActiveVersion": "暂无可用的已发布知识库版本",
-    "openingCodebaseTask": "正在打开代码库任务...",
     "openingKnowledgeTask": "正在打开知识库任务...",
     "startTaskFailed": "启动任务失败"
   },
@@ -1697,10 +1581,7 @@
     "upgradeContextDescription": "升级仅用于后续消息；历史回答保持原始版本标签。",
     "upgradeFailed": "上下文升级失败",
     "upgradeSuccess": "已将后续消息上下文升级到 {version}",
-    "codebasePanelTitle": "代码库上下文",
-    "codebaseTab": "代码库",
     "knowledgePanelTitle": "知识库上下文",
-    "knowledgeTab": "知识库",
     "sourceHintKb": "点击回答中的文档引用查看原文",
     "tabOriginalText": "原文"
   },
@@ -1799,14 +1680,10 @@
   },
   "contextSelector": {
     "clear": "清除上下文",
-    "codebase": "代码库",
-    "codebaseMeta": "{count} 个文件",
-    "codebaseSection": "代码知识库",
     "knowledge": "知识库",
     "knowledgeMeta": "{count} 篇文档",
     "knowledgeSection": "文档知识库",
     "loading": "加载中…",
-    "noCodebase": "暂无可用代码库",
     "noKnowledge": "暂无可用知识库",
     "noSearchResults": "无匹配结果",
     "none": "无上下文",

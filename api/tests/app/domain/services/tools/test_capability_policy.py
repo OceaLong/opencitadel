@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.models.codebase import SessionMode
 from app.domain.models.integration_runtime import MCPServerRuntime
+from app.domain.models.session_mode import SessionMode
 from app.domain.models.tool_policy import (
     CONSERVATIVE_TOOL_POLICY,
     ApprovalMode,

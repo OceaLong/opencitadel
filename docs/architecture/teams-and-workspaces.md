@@ -2,7 +2,7 @@
 
 # Teams and Workspaces
 
-Multi-user collaboration via team workspaces. Resources (sessions, codebases, knowledge bases, artifacts) can be owned by a user or scoped to a team.
+Multi-user collaboration via team workspaces. Resources (sessions, knowledge bases, artifacts) can be owned by a user or scoped to a team.
 
 ## UI entry
 
@@ -110,7 +110,7 @@ Team creators default to `OWNER`. Platform admins can manage teams from `/admin/
 | POST | `/api/invitations/{token}/register` | Register and join (public; email-bound invites only) |
 | POST | `/api/invitations/{token}/accept` | Accept invitation (authenticated) |
 
-Write routes on sessions, codebases, knowledge bases, files, scheduling, and memories require `require_non_auditor` and respect `WorkspaceContext`.
+Write routes on sessions, knowledge bases, files, scheduling, and memories require `require_non_auditor` and respect `WorkspaceContext`.
 
 ## Related documentation
 

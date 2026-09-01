@@ -41,7 +41,6 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [config-source-governance.md](architecture/config-source-governance.md) | Deployment, policy, Integration authority boundaries | primary | paired | none | `core/config.py`, `runtime_policy_service.py` | medium |
 | [runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.md) | Runtime Policy revision, head, reader, consumer model | primary | paired | mermaid | `runtime_policy_service.py`, `runtime_policy_reader.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
-| [codebase-reindex.md](architecture/codebase-reindex.md) | Codebase ingest, vector recovery | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
 | [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md) | KB parse, OCR, GraphRAG, ingest failures | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.md) | Compose → K8s evolution | primary | paired | mermaid | `deploy/helm/` | low |
 | [inference-control-plane.md](architecture/inference-control-plane.md) | Inference endpoint/model/binding control plane | primary | paired | mermaid | `inference_routes.py`, `inference-settings.tsx` | low |

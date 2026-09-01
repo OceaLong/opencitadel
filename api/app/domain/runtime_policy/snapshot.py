@@ -14,8 +14,6 @@ from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from app.domain.runtime_policy.execution import (
     ActivityExecutionPolicy,
     AgentExecutionPolicy,
-    CodebaseExecutionPolicy,
-    CodebaseRetrievalPolicy,
     ExecutionPolicy,
     KnowledgeBaseExecutionPolicy,
     KnowledgeRerankPolicy,
@@ -42,17 +40,11 @@ class KnowledgeRetrievalRunPolicy(_SnapshotModel):
     rerank: KnowledgeRerankPolicy
 
 
-class CodebaseRetrievalRunPolicy(_SnapshotModel):
-    vector_enabled: bool
-    retrieval: CodebaseRetrievalPolicy
-
-
 class AgentRunPolicy(_SnapshotModel):
     kind: Literal["agent"] = "agent"
     agent: AgentExecutionPolicy
     memory: MemoryExecutionPolicy
     knowledge_retrieval: KnowledgeRetrievalRunPolicy
-    codebase_retrieval: CodebaseRetrievalRunPolicy
 
 
 class AskRunPolicy(_SnapshotModel):
@@ -60,17 +52,11 @@ class AskRunPolicy(_SnapshotModel):
     agent: AgentExecutionPolicy
     memory: MemoryExecutionPolicy
     knowledge_retrieval: KnowledgeRetrievalRunPolicy
-    codebase_retrieval: CodebaseRetrievalRunPolicy
 
 
 class KnowledgeIngestRunPolicy(_SnapshotModel):
     kind: Literal["kb_ingest"] = "kb_ingest"
     knowledge_base: KnowledgeBaseExecutionPolicy
-
-
-class CodebaseIngestRunPolicy(_SnapshotModel):
-    kind: Literal["codebase_ingest"] = "codebase_ingest"
-    codebase: CodebaseExecutionPolicy
 
 
 class AutomationRunPolicy(_SnapshotModel):
@@ -89,7 +75,6 @@ FamilyRunPolicy = Annotated[
     AgentRunPolicy
     | AskRunPolicy
     | KnowledgeIngestRunPolicy
-    | CodebaseIngestRunPolicy
     | AutomationRunPolicy
     | PatrolRunPolicy
     | RemediationRunPolicy,
@@ -122,32 +107,21 @@ def _knowledge_retrieval(policy: ExecutionPolicy) -> KnowledgeRetrievalRunPolicy
     )
 
 
-def _codebase_retrieval(policy: ExecutionPolicy) -> CodebaseRetrievalRunPolicy:
-    return CodebaseRetrievalRunPolicy(
-        vector_enabled=policy.codebase.vector_enabled,
-        retrieval=policy.codebase.retrieval,
-    )
-
-
 def _family_policy(policy: ExecutionPolicy, family: RunFamily) -> FamilyRunPolicy:
     if family is RunFamily.AGENT:
         return AgentRunPolicy(
             agent=policy.agent,
             memory=policy.memory,
             knowledge_retrieval=_knowledge_retrieval(policy),
-            codebase_retrieval=_codebase_retrieval(policy),
         )
     if family is RunFamily.ASK:
         return AskRunPolicy(
             agent=policy.agent,
             memory=policy.memory,
             knowledge_retrieval=_knowledge_retrieval(policy),
-            codebase_retrieval=_codebase_retrieval(policy),
         )
     if family is RunFamily.KB_INGEST:
         return KnowledgeIngestRunPolicy(knowledge_base=policy.knowledge_base)
-    if family is RunFamily.CODEBASE_INGEST:
-        return CodebaseIngestRunPolicy(codebase=policy.codebase)
     if family is RunFamily.AUTOMATION:
         return AutomationRunPolicy()
     if family is RunFamily.PATROL:
@@ -225,8 +199,6 @@ __all__ = [
     "AgentRunPolicy",
     "AskRunPolicy",
     "AutomationRunPolicy",
-    "CodebaseIngestRunPolicy",
-    "CodebaseRetrievalRunPolicy",
     "CommonRunPolicy",
     "FamilyRunPolicy",
     "KnowledgeIngestRunPolicy",

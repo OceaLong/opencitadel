@@ -34,10 +34,6 @@ REQUIRED_ACCEPTANCE_IDS = frozenset(
         "KB-PUBLISH",
         "KB-PIN",
         "KB-DEGRADED",
-        "CB-BUILD",
-        "CB-ARTIFACT",
-        "CB-PIN",
-        "CB-FAILSAFE",
         "RUN-AGENT",
         "RUN-ASK",
         "RUN-SSE",
@@ -154,7 +150,10 @@ def test_ci_runs_the_disposable_acceptance_plane_and_always_uploads_evidence() -
     assert any("docker/setup-buildx-action@" in step.get("uses", "") for step in steps)
 
     commands = [str(step.get("run", "")).strip() for step in steps if "run" in step]
-    assert any("pip install uv==0.11.19" in command for command in commands)
+    # uv is pinned once at the workflow level (env.UV_VERSION); the job must
+    # install through that single source instead of a hand-copied literal pin.
+    assert any('pip install "uv==${UV_VERSION}"' in command for command in commands)
+    assert workflow["env"]["UV_VERSION"]
     assert any("stat -c '%g' /var/run/docker.sock" in command for command in commands)
     assert any("npm ci" in command for command in commands)
     assert any("playwright install --with-deps chromium" in command for command in commands)

@@ -672,280 +672,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/codebases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Codebases */
-        get: operations["list_codebases_api_codebases_get"];
-        put?: never;
-        /** Create Codebase */
-        post: operations["create_codebase_api_codebases_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Codebase */
-        get: operations["get_codebase_api_codebases__codebase_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Codebase */
-        delete: operations["delete_codebase_api_codebases__codebase_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/artifacts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Artifacts */
-        get: operations["list_artifacts_api_codebases__codebase_id__artifacts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/builds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Codebase Build */
-        post: operations["create_codebase_build_api_codebases__codebase_id__builds_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/builds/{build_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Codebase Build */
-        post: operations["cancel_codebase_build_api_codebases__codebase_id__builds__build_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/builds/{build_id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Retry Codebase Build */
-        post: operations["retry_codebase_build_api_codebases__codebase_id__builds__build_id__retry_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/ingest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Ingest Stream */
-        get: operations["ingest_stream_api_codebases__codebase_id__ingest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Codebase Session */
-        post: operations["create_codebase_session_api_codebases__codebase_id__sessions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/snapshots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Codebase Snapshot */
-        post: operations["create_codebase_snapshot_api_codebases__codebase_id__snapshots_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/source": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Read Source */
-        post: operations["read_source_api_codebases__codebase_id__source_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/symbols": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Symbols */
-        get: operations["list_symbols_api_codebases__codebase_id__symbols_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/tree": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get File Tree */
-        get: operations["get_file_tree_api_codebases__codebase_id__tree_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Codebase Versions */
-        get: operations["list_codebase_versions_api_codebases__codebase_id__versions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/versions/{version_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Codebase Version */
-        get: operations["get_codebase_version_api_codebases__codebase_id__versions__version_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/versions/{version_id}/artifacts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Version Artifacts */
-        get: operations["list_version_artifacts_api_codebases__codebase_id__versions__version_id__artifacts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/codebases/{codebase_id}/versions/{version_id}/source": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Read Version Source */
-        post: operations["read_version_source_api_codebases__codebase_id__versions__version_id__source_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/files": {
         parameters: {
             query?: never;
@@ -2909,20 +2635,43 @@ export interface components {
              */
             incomplete: boolean;
         };
-        /**
-         * ArtifactFormat
-         * @enum {string}
-         */
-        ArtifactFormat: "mermaid" | "markdown";
-        /**
-         * ArtifactKind
-         * @enum {string}
-         */
-        ArtifactKind: "architecture" | "data_flow" | "module_dir" | "flowchart" | "call_chain" | "overview";
         /** ArtifactListResponse */
         ArtifactListResponse: {
             /** Artifacts */
-            artifacts: components["schemas"]["app__interfaces__schemas__artifact__ArtifactResponse"][];
+            artifacts: components["schemas"]["ArtifactResponse"][];
+        };
+        /** ArtifactResponse */
+        ArtifactResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "doc" | "web";
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "updated" | "final";
+            /** Storage Ref */
+            storage_ref: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Refs */
+            version_refs: string[];
         };
         /** ArtifactShareResponse */
         ArtifactShareResponse: {
@@ -3120,221 +2869,6 @@ export interface components {
             /** Timestamp */
             timestamp?: number | null;
         };
-        /** CodebaseAnalysisPolicy */
-        CodebaseAnalysisPolicy: {
-            /**
-             * Chunk Max Chars
-             * @default 2000
-             */
-            chunk_max_chars: number;
-            /**
-             * Max File Size Bytes
-             * @default 512000
-             */
-            max_file_size_bytes: number;
-            /**
-             * Max Files
-             * @default 5000
-             */
-            max_files: number;
-            /**
-             * Source Read Batch Size
-             * @default 50
-             */
-            source_read_batch_size: number;
-        };
-        /** CodebaseBuildResponse */
-        CodebaseBuildResponse: {
-            /**
-             * Can Cancel
-             * @default false
-             */
-            can_cancel: boolean;
-            /**
-             * Can Retry
-             * @default false
-             */
-            can_retry: boolean;
-            /** Codebase Id */
-            codebase_id: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Failure Code */
-            failure_code?: string | null;
-            /** Id */
-            id: string;
-            /** Phase */
-            phase?: string | null;
-            /**
-             * Progress
-             * @default 0
-             */
-            progress: number;
-            /** Run Id */
-            run_id?: string | null;
-            status: components["schemas"]["RunStatus"];
-            /** Terminal At */
-            terminal_at?: string | null;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version Id */
-            version_id: string;
-        };
-        /** CodebaseExecutionPolicy */
-        CodebaseExecutionPolicy: {
-            analysis?: components["schemas"]["CodebaseAnalysisPolicy"];
-            retrieval?: components["schemas"]["CodebaseRetrievalPolicy"];
-            /**
-             * Vector Enabled
-             * @default true
-             */
-            vector_enabled: boolean;
-        };
-        /** CodebaseResponse */
-        CodebaseResponse: {
-            /** Active Version Id */
-            active_version_id?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Error */
-            error?: string | null;
-            /**
-             * File Count
-             * @default 0
-             */
-            file_count: number;
-            /** Id */
-            id: string;
-            /** Language Stats */
-            language_stats?: {
-                [key: string]: number;
-            };
-            /** Name */
-            name: string;
-            /** Sandbox Id */
-            sandbox_id?: string | null;
-            /**
-             * Source Ref
-             * @default
-             */
-            source_ref: string;
-            source_type: components["schemas"]["CodebaseSourceType"];
-            status: components["schemas"]["CodebaseStatus"];
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * Vector Degraded
-             * @default false
-             */
-            vector_degraded: boolean;
-            /**
-             * Workspace Path
-             * @default
-             */
-            workspace_path: string;
-        };
-        /** CodebaseRetrievalPolicy */
-        CodebaseRetrievalPolicy: {
-            /**
-             * Fetch Multiplier
-             * @default 3
-             */
-            fetch_multiplier: number;
-            /**
-             * Final Top K
-             * @default 8
-             */
-            final_top_k: number;
-            /**
-             * Rrf K
-             * @default 60
-             */
-            rrf_k: number;
-        };
-        /**
-         * CodebaseSourceType
-         * @enum {string}
-         */
-        CodebaseSourceType: "zip" | "git" | "files";
-        /**
-         * CodebaseStatus
-         * @enum {string}
-         */
-        CodebaseStatus: "pending" | "materializing" | "analyzing" | "indexing" | "generating" | "ready" | "failed";
-        /** CodebaseVersionResponse */
-        CodebaseVersionResponse: {
-            build?: components["schemas"]["CodebaseBuildResponse"] | null;
-            /** Build Id */
-            build_id: string;
-            /** Capabilities */
-            capabilities?: {
-                [key: string]: unknown;
-            };
-            /** Codebase Id */
-            codebase_id: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Degraded Reasons */
-            degraded_reasons?: string[];
-            /** Id */
-            id: string;
-            /**
-             * Is Active
-             * @default false
-             */
-            is_active: boolean;
-            /**
-             * Is Candidate
-             * @default false
-             */
-            is_candidate: boolean;
-            /**
-             * Is Published
-             * @default false
-             */
-            is_published: boolean;
-            /** Metrics */
-            metrics?: {
-                [key: string]: unknown;
-            };
-            /** Parent Version Id */
-            parent_version_id?: string | null;
-            /** Published At */
-            published_at?: string | null;
-            /**
-             * Source Digest
-             * @default
-             */
-            source_digest: string;
-            /**
-             * Source Revision
-             * @default
-             */
-            source_revision: string;
-            /** Source Snapshot Key */
-            source_snapshot_key?: string | null;
-            state: components["schemas"]["CodebaseVersionState"];
-        };
-        /**
-         * CodebaseVersionState
-         * @enum {string}
-         */
-        CodebaseVersionState: "building" | "ready" | "degraded" | "failed";
         /**
          * ConsoleRecord
          * @description 控制台记录模型，包含ps1、command、output
@@ -3362,41 +2896,6 @@ export interface components {
             };
             /** @default private */
             visibility: components["schemas"]["ResourceVisibility"];
-        };
-        /** CreateCodebaseRequest */
-        CreateCodebaseRequest: {
-            /** File Id */
-            file_id?: string | null;
-            /** File Ids */
-            file_ids?: string[] | null;
-            /** Git Url */
-            git_url?: string | null;
-            /**
-             * Name
-             * @default 未命名代码库
-             */
-            name: string;
-            /** @default files */
-            source_type: components["schemas"]["CodebaseSourceType"];
-        };
-        /** CreateCodebaseSessionRequest */
-        CreateCodebaseSessionRequest: {
-            /** Codebase Version Id */
-            codebase_version_id?: string | null;
-            /** @default ask */
-            mode: components["schemas"]["SessionMode"];
-            /** Model Id */
-            model_id?: string | null;
-            /** Skill Id */
-            skill_id?: string | null;
-        };
-        /** CreateCodebaseSessionResponse */
-        CreateCodebaseSessionResponse: {
-            /** Codebase Id */
-            codebase_id: string;
-            mode: components["schemas"]["SessionMode"];
-            /** Session Id */
-            session_id: string;
         };
         /** CreateExecutionPolicyRevisionRequest */
         CreateExecutionPolicyRevisionRequest: {
@@ -3513,8 +3012,6 @@ export interface components {
         };
         /** CreateScheduledJobRequest */
         CreateScheduledJobRequest: {
-            /** Codebase Id */
-            codebase_id?: string | null;
             /**
              * Enabled
              * @default true
@@ -3569,10 +3066,6 @@ export interface components {
          * @description 创建会话请求
          */
         CreateSessionRequest: {
-            /** Codebase Id */
-            codebase_id?: string | null;
-            /** Codebase Version Id */
-            codebase_version_id?: string | null;
             /** Knowledge Base Id */
             knowledge_base_id?: string | null;
             /** Knowledge Base Version Id */
@@ -3708,16 +3201,6 @@ export interface components {
          * @enum {string}
          */
         DocStatus: "pending" | "parsing" | "ready" | "failed";
-        /** DownloadCodebaseResponse */
-        DownloadCodebaseResponse: {
-            /**
-             * Download Url
-             * @default
-             */
-            download_url: string;
-            /** Snapshot Key */
-            snapshot_key: string;
-        };
         /** EmbeddingModelSettings */
         EmbeddingModelSettings: {
             /**
@@ -3805,7 +3288,6 @@ export interface components {
         "ExecutionPolicy-Input": {
             activity?: components["schemas"]["ActivityExecutionPolicy"];
             agent?: components["schemas"]["AgentExecutionPolicy"];
-            codebase?: components["schemas"]["CodebaseExecutionPolicy"];
             knowledge_base?: components["schemas"]["KnowledgeBaseExecutionPolicy-Input"];
             memory?: components["schemas"]["MemoryExecutionPolicy"];
             model_resilience?: components["schemas"]["ModelResiliencePolicy"];
@@ -3814,7 +3296,6 @@ export interface components {
         "ExecutionPolicy-Output": {
             activity?: components["schemas"]["ActivityExecutionPolicy"];
             agent?: components["schemas"]["AgentExecutionPolicy"];
-            codebase?: components["schemas"]["CodebaseExecutionPolicy"];
             knowledge_base?: components["schemas"]["KnowledgeBaseExecutionPolicy-Output"];
             memory?: components["schemas"]["MemoryExecutionPolicy"];
             model_resilience?: components["schemas"]["ModelResiliencePolicy"];
@@ -3913,33 +3394,6 @@ export interface components {
             content: string;
             /** Filepath */
             filepath: string;
-        };
-        /** FileTreeNode */
-        FileTreeNode: {
-            /** Children */
-            children?: components["schemas"]["FileTreeNode"][];
-            /**
-             * Is Dir
-             * @default false
-             */
-            is_dir: boolean;
-            /**
-             * Language
-             * @default
-             */
-            language: string;
-            /** Name */
-            name: string;
-            /**
-             * Path
-             * @default
-             */
-            path: string;
-        };
-        /** FileTreeResponse */
-        FileTreeResponse: {
-            /** Tree */
-            tree: components["schemas"]["FileTreeNode"][];
         };
         /** FindingDecisionRequest */
         FindingDecisionRequest: {
@@ -4762,32 +4216,12 @@ export interface components {
             /** Users */
             users: components["schemas"]["AdminUserResponse"][];
         };
-        /** ListArtifactsResponse */
-        ListArtifactsResponse: {
-            /** Artifacts */
-            artifacts: components["schemas"]["app__interfaces__schemas__codebase__ArtifactResponse"][];
-        };
         /** ListAuditLogsResponse */
         ListAuditLogsResponse: {
             /** Logs */
             logs: components["schemas"]["AuditLogResponse"][];
             /** Total */
             total: number;
-        };
-        /** ListCodebaseVersionsResponse */
-        ListCodebaseVersionsResponse: {
-            active_build?: components["schemas"]["CodebaseBuildResponse"] | null;
-            /** Active Version Id */
-            active_version_id?: string | null;
-            /** Codebase Id */
-            codebase_id: string;
-            /** Versions */
-            versions?: components["schemas"]["CodebaseVersionResponse"][];
-        };
-        /** ListCodebasesResponse */
-        ListCodebasesResponse: {
-            /** Codebases */
-            codebases: components["schemas"]["CodebaseResponse"][];
         };
         /** ListKnowledgeBasesResponse */
         ListKnowledgeBasesResponse: {
@@ -4866,11 +4300,6 @@ export interface components {
         ListSessionResponse: {
             /** Sessions */
             sessions: components["schemas"]["ListSessionItem"][];
-        };
-        /** ListSymbolsResponse */
-        ListSymbolsResponse: {
-            /** Symbols */
-            symbols: components["schemas"]["SymbolResponse"][];
         };
         /** ListTeamMemberDetailsResponse */
         ListTeamMemberDetailsResponse: {
@@ -5807,26 +5236,6 @@ export interface components {
             /** Version Id */
             version_id: string;
         };
-        /** ReadSourceRequest */
-        ReadSourceRequest: {
-            /** End Line */
-            end_line?: number | null;
-            /** Path */
-            path: string;
-            /** Start Line */
-            start_line?: number | null;
-        };
-        /** ReadSourceResponse */
-        ReadSourceResponse: {
-            /** Content */
-            content: string;
-            /** End Line */
-            end_line?: number | null;
-            /** Path */
-            path: string;
-            /** Start Line */
-            start_line?: number | null;
-        };
         /** RegisterRequest */
         RegisterRequest: {
             /** Email */
@@ -5907,14 +5316,13 @@ export interface components {
         };
         /** ResourceGcPolicy */
         ResourceGcPolicy: {
-            codebase?: components["schemas"]["ResourceVersionGcPolicy"];
             knowledge_base?: components["schemas"]["ResourceVersionGcPolicy"];
         };
         /**
          * ResourceKind
          * @enum {string}
          */
-        ResourceKind: "knowledge_base" | "codebase";
+        ResourceKind: "knowledge_base";
         /** ResourceVersionGcPolicy */
         ResourceVersionGcPolicy: {
             /**
@@ -6158,7 +5566,7 @@ export interface components {
              * @default 200
              */
             code: number;
-            data?: components["schemas"]["app__interfaces__schemas__artifact__ArtifactResponse"] | null;
+            data?: components["schemas"]["ArtifactResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -6307,110 +5715,6 @@ export interface components {
              */
             msg: string;
         };
-        /** Response[CodebaseBuildResponse] */
-        Response_CodebaseBuildResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["CodebaseBuildResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[CodebaseResponse] */
-        Response_CodebaseResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["CodebaseResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[CodebaseVersionResponse] */
-        Response_CodebaseVersionResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["CodebaseVersionResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[CreateCodebaseSessionResponse] */
-        Response_CreateCodebaseSessionResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["CreateCodebaseSessionResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
         /** Response[CreateKnowledgeBaseSessionResponse] */
         Response_CreateKnowledgeBaseSessionResponse_: {
             /**
@@ -6541,32 +5845,6 @@ export interface components {
              */
             msg: string;
         };
-        /** Response[DownloadCodebaseResponse] */
-        Response_DownloadCodebaseResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["DownloadCodebaseResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
         /** Response[EvidenceSessionListResponse] */
         Response_EvidenceSessionListResponse_: {
             /**
@@ -6627,32 +5905,6 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["FileReadResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[FileTreeResponse] */
-        Response_FileTreeResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["FileTreeResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -7217,32 +6469,6 @@ export interface components {
              */
             msg: string;
         };
-        /** Response[ListArtifactsResponse] */
-        Response_ListArtifactsResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["ListArtifactsResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
         /** Response[ListAuditLogsResponse] */
         Response_ListAuditLogsResponse_: {
             /**
@@ -7251,58 +6477,6 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["ListAuditLogsResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[ListCodebaseVersionsResponse] */
-        Response_ListCodebaseVersionsResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["ListCodebaseVersionsResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[ListCodebasesResponse] */
-        Response_ListCodebasesResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["ListCodebasesResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -7459,32 +6633,6 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["ListSessionResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[ListSymbolsResponse] */
-        Response_ListSymbolsResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["ListSymbolsResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -8006,32 +7154,6 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["ReadKnowledgeDocumentResponse"] | null;
-            /** Error Key */
-            error_key?: string | null;
-            /** Error Params */
-            error_params?: {
-                [key: string]: string;
-            } | null;
-            /** I18N Key */
-            i18n_key?: string | null;
-            /** I18N Params */
-            i18n_params?: {
-                [key: string]: string;
-            } | null;
-            /**
-             * Msg
-             * @default success
-             */
-            msg: string;
-        };
-        /** Response[ReadSourceResponse] */
-        Response_ReadSourceResponse_: {
-            /**
-             * Code
-             * @default 200
-             */
-            code: number;
-            data?: components["schemas"]["ReadSourceResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -8694,8 +7816,6 @@ export interface components {
         };
         /** ScheduledJobResponse */
         ScheduledJobResponse: {
-            /** Codebase Id */
-            codebase_id?: string | null;
             /** Enabled */
             enabled: boolean;
             /** Id */
@@ -9073,43 +8193,6 @@ export interface components {
              */
             url_denylist: string[];
         };
-        /**
-         * SymbolKind
-         * @enum {string}
-         */
-        SymbolKind: "function" | "class" | "method" | "module" | "interface" | "variable";
-        /** SymbolResponse */
-        SymbolResponse: {
-            /**
-             * End Line
-             * @default 0
-             */
-            end_line: number;
-            /** File Id */
-            file_id: string;
-            /** Id */
-            id: string;
-            kind: components["schemas"]["SymbolKind"];
-            /** Name */
-            name: string;
-            /** Parent Id */
-            parent_id?: string | null;
-            /**
-             * Path
-             * @default
-             */
-            path: string;
-            /**
-             * Signature
-             * @default
-             */
-            signature: string;
-            /**
-             * Start Line
-             * @default 0
-             */
-            start_line: number;
-        };
         /** TeamInvitationPreview */
         TeamInvitationPreview: {
             /** Email Hint */
@@ -9389,8 +8472,6 @@ export interface components {
         };
         /** UpdateScheduledJobRequest */
         UpdateScheduledJobRequest: {
-            /** Codebase Id */
-            codebase_id?: string | null;
             /** Enabled */
             enabled?: boolean | null;
             /** Knowledge Base Id */
@@ -9546,61 +8627,6 @@ export interface components {
             webhook_secret: string;
             /** Webhook Token */
             webhook_token: string;
-        };
-        /** ArtifactResponse */
-        app__interfaces__schemas__artifact__ArtifactResponse: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "doc" | "web";
-            /** Session Id */
-            session_id: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "draft" | "updated" | "final";
-            /** Storage Ref */
-            storage_ref: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version Refs */
-            version_refs: string[];
-        };
-        /** ArtifactResponse */
-        app__interfaces__schemas__codebase__ArtifactResponse: {
-            /** Content */
-            content: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            format: components["schemas"]["ArtifactFormat"];
-            /** Id */
-            id: string;
-            kind: components["schemas"]["ArtifactKind"];
-            /** Meta */
-            meta?: {
-                [key: string]: unknown;
-            };
-            /** Title */
-            title: string;
-            /** Version Id */
-            version_id?: string | null;
         };
     };
     responses: never;
@@ -10970,628 +9996,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_CapabilityResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_codebases_api_codebases_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ListCodebasesResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_codebase_api_codebases_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCodebaseRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_codebase_api_codebases__codebase_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_codebase_api_codebases__codebase_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_artifacts_api_codebases__codebase_id__artifacts_get: {
-        parameters: {
-            query?: {
-                kind?: components["schemas"]["ArtifactKind"] | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ListArtifactsResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_codebase_build_api_codebases__codebase_id__builds_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseVersionResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_codebase_build_api_codebases__codebase_id__builds__build_id__cancel_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-                build_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseBuildResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    retry_codebase_build_api_codebases__codebase_id__builds__build_id__retry_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-                build_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseVersionResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    ingest_stream_api_codebases__codebase_id__ingest_get: {
-        parameters: {
-            query?: {
-                event_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_codebase_session_api_codebases__codebase_id__sessions_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCodebaseSessionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CreateCodebaseSessionResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_codebase_snapshot_api_codebases__codebase_id__snapshots_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_DownloadCodebaseResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    read_source_api_codebases__codebase_id__source_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReadSourceRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ReadSourceResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_symbols_api_codebases__codebase_id__symbols_get: {
-        parameters: {
-            query?: {
-                name?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ListSymbolsResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_file_tree_api_codebases__codebase_id__tree_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_FileTreeResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_codebase_versions_api_codebases__codebase_id__versions_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ListCodebaseVersionsResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_codebase_version_api_codebases__codebase_id__versions__version_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_CodebaseVersionResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_version_artifacts_api_codebases__codebase_id__versions__version_id__artifacts_get: {
-        parameters: {
-            query?: {
-                kind?: components["schemas"]["ArtifactKind"] | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ListArtifactsResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    read_version_source_api_codebases__codebase_id__versions__version_id__source_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-Id"?: string | null;
-            };
-            path: {
-                codebase_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReadSourceRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Response_ReadSourceResponse_"];
                 };
             };
             /** @description Validation Error */

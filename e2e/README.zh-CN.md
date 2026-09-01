@@ -31,7 +31,7 @@ Runner 会分配唯一 Compose Project、回环端口、产品资源命名空间
 | --- | --- |
 | `identity` | 登录/退出、团队、邀请、工作区隔离、匿名拒绝 |
 | `control-plane` | 推理 Endpoint/Model/Probe/Binding/Capability 与 Runtime Policy CAS/历史/恢复 |
-| `resources` | 知识库与代码库构建、发布、版本固定及降级关闭失败 |
+| `resources` | 知识库构建、发布、版本固定及降级关闭失败 |
 | `execution` | Agent/Ask、SSE、审批、拒绝、取消与 Sandbox 排空 |
 | `patrol-admin` | 正式 Patrol 验证/执行/证据/准入、管理、合规、移动端与键盘可访问性 |
 
@@ -85,5 +85,4 @@ npm run test:meta
 
 - [仓库脚本](../scripts/README.zh-CN.md)
 - [生产部署](../docs/operations/deployment.zh-CN.md)
-- [执行内核切换证据](../docs/architecture/execution-kernel-cutover-evidence.zh-CN.md)
 - [Ops Patrol 运维](../docs/operations/ops-patrol.zh-CN.md)

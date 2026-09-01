@@ -212,9 +212,10 @@ class PostgresRunProjection:
         *,
         source_entity_type: str,
         source_entity_id: str,
-        owner_scope: OwnerScope,
+        owner_scope: OwnerScope | None,
     ) -> dict[str, Any]:
         """Read and cryptographically verify formal execution facts."""
+        scope_filters = [self._scope_filter(owner_scope)] if owner_scope is not None else []
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
             runs = (
@@ -223,7 +224,7 @@ class PostgresRunProjection:
                     .where(
                         ExecutionRunProjectionORM.source_entity_type == source_entity_type,
                         ExecutionRunProjectionORM.source_entity_id == source_entity_id,
-                        self._scope_filter(owner_scope),
+                        *scope_filters,
                     )
                     .order_by(
                         ExecutionRunProjectionORM.created_at,

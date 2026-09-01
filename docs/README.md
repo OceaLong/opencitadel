@@ -38,7 +38,6 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Inference control plane](architecture/inference-control-plane.md) | Endpoint/model/binding ownership, capabilities, encryption, UI flow |
 | [Frontend UI](architecture/frontend-ui.md) | Next.js shell, public SSE projection, approval surfaces |
 | [Execution kernel](architecture/execution-kernel.md) | Commands, Event Store, Activities, recovery, projections, SSE, and privilege boundaries |
-| [Execution kernel cutover evidence](architecture/execution-kernel-cutover-evidence.md) | Greenfield schema boundary and reproducible acceptance results |
 | [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
 | [Web Operator](architecture/web-operator.md) | Exact-host boundary, per-invocation approval, evidence |
 | [Teams & workspaces](architecture/teams-and-workspaces.md) | Team roles, `X-Workspace-Id`, invitations |
@@ -50,7 +49,6 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Config source governance](architecture/config-source-governance.md) | Deployment Settings, Runtime Policy, Integration boundaries |
 | [Runtime Policy control plane](architecture/runtime-policy-control-plane.md) | Immutable revisions, atomic head, CAS, fail-closed consumers |
 | [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
-| [Codebase reindex](architecture/codebase-reindex.md) | Vector degradation and recovery |
 | [Knowledge base ingestion](architecture/knowledge-base-ingestion.md) | Parse, OCR, GraphRAG, ingest failures |
 | [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
 
@@ -68,6 +66,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [E2E acceptance](../e2e/README.md) | Deterministic isolated full-stack gate, evidence, and cleanup |
 | [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh`, acceptance runner |
 | [Deploy scripts](../deploy/scripts/README.md) | Production host tuning utilities |
+| [Ops Patrol fault lab](../deploy/patrol-demo/README.md) | Disposable kind cluster with reproducible Patrol fixtures |
 
 ### Open-source governance
 
@@ -76,6 +75,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [CONTRIBUTING.md](../.github/CONTRIBUTING.md) | Contribution guide |
 | [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting |
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards |
+| [Pull request template](../.github/pull_request_template.md) | PR checklist including bilingual doc sync |
 
 ## Maintenance rules
 

@@ -4,7 +4,7 @@ from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
-from app.domain.models.codebase import SessionMode
+from app.domain.models.session_mode import SessionMode
 from app.domain.services import vision_service
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool, PolicyBoundTool

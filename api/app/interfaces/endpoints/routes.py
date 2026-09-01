@@ -8,7 +8,6 @@ from . import (
     artifact_routes,
     auth_routes,
     capability_routes,
-    codebase_routes,
     compliance_routes,
     file_routes,
     inference_routes,
@@ -56,7 +55,6 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(capability_routes.router)
     authenticated_router.include_router(skill_routes.router)
     authenticated_router.include_router(memory_routes.memory_router)
-    authenticated_router.include_router(codebase_routes.router)
     authenticated_router.include_router(knowledge_base_routes.router)
     authenticated_router.include_router(artifact_routes.router)
     authenticated_router.include_router(scheduling_routes.scheduled_router)

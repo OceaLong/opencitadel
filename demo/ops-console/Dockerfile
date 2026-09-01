@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_TRUSTED_HOST=
+ARG PIP_DEFAULT_TIMEOUT=300
+ARG PIP_RETRIES=5
+
 WORKDIR /app
 
 COPY requirements.txt .

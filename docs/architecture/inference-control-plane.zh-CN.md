@@ -37,7 +37,7 @@ Ring 支持计划内轮换。
 Patrol Remediation 可用性。UI 与服务端 Admission 使用相同状态：`available`、`degraded`、
 `not_configured`、`disabled` 或 `denied`，并共享稳定 Reason Key。
 
-Chat 执行、Codebase/Knowledge/Memory 向量化与 Rerank 均在调用时解析控制面。活动 Execution Policy
+Chat 执行、Knowledge/Memory 向量化与 Rerank 均在调用时解析控制面。活动 Execution Policy
 可以分别禁用向量消费者，但已启用的消费者不会读取独立 API Key 或 Base URL。能力缺失时，
 UI 引导用户前往 **设置 → 推理**。
 

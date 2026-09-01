@@ -25,7 +25,6 @@ from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.domain.execution.run import RunFamily, RunStatus
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.web_document import WebDocument, WebDocumentGateway
-from app.domain.models.codebase import SessionMode
 from app.domain.models.inference import (
     PLATFORM_EMBEDDING_DIMENSIONS,
     EmbeddingModelSettings,
@@ -52,6 +51,7 @@ from app.domain.models.resource_bindings import (
 )
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session
+from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.knowledge_base_repository import DocumentPage
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.runtime_policy import ExecutionPolicy
@@ -852,9 +852,6 @@ class KnowledgeBaseService:
         result: CandidateBuildResult,
         scope: OwnerScope,
     ) -> KnowledgeVersionProjection:
-        # Not hoisted: the signature diverges from the codebase variant
-        # (resource read from ``result.resource`` vs an explicit arg) and the
-        # projected DTO omits the codebase-only ``source_*`` fields.
         version = result.version
         return KnowledgeVersionProjection(
             id=version.id,
@@ -913,8 +910,6 @@ class KnowledgeBaseService:
         if self._resource_guard and scope:
             validated = await self._resource_guard.validate_session_request(
                 mode=mode,
-                codebase_id=None,
-                codebase_version_id=None,
                 knowledge_base_id=kb_id,
                 knowledge_base_version_id=knowledge_base_version_id,
                 scope=scope,

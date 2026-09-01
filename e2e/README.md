@@ -35,7 +35,7 @@ the manifest and do not satisfy the release gate:
 | --- | --- |
 | `identity` | Login/logout, teams, invitations, workspace isolation, anonymous denial |
 | `control-plane` | Inference endpoint/model/probe/bindings/capabilities and Runtime Policy CAS/history/restore |
-| `resources` | Knowledge and codebase build, publication, pinning, and fail-closed degradation |
+| `resources` | Knowledge-base build, publication, pinning, and fail-closed degradation |
 | `execution` | Agent/Ask, SSE, approvals, rejection, cancellation, and Sandbox drain |
 | `patrol-admin` | Formal Patrol validation/execution/evidence/admission, administration, compliance, mobile and keyboard access |
 
@@ -98,5 +98,4 @@ npm run test:meta
 
 - [Repository scripts](../scripts/README.md)
 - [Production deployment](../docs/operations/deployment.md)
-- [Execution-kernel cutover evidence](../docs/architecture/execution-kernel-cutover-evidence.md)
 - [Ops Patrol operations](../docs/operations/ops-patrol.md)

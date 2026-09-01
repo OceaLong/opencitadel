@@ -16,22 +16,23 @@ dependencies = [
     "cryptography>=44.0.0",
     "docker>=7.1.0",
     "fastapi>=0.130.0",
-    "filelock>=3.20.0",
     "httpx>=0.28.1",
+    # itsdangerous has no direct import; it is a runtime requirement of
+    # starlette.middleware.sessions.SessionMiddleware used in app/main.py
     "itsdangerous>=2.2.0",
     "json-repair>=0.53.0",
     "openai>=1.107.2",
     "pillow>=11.0.0",
     "pypdf>=5.0.0",
     "psycopg2-binary>=2.9.10",
-    "pydantic>=2.11.9",
-    "pydantic-settings>=2.10.1",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
     "pyjwt>=2.10.1",
     "python-multipart>=0.0.32",
     "redis>=6.4.0",
     "sse-starlette>=3.0.3",
     "sqlalchemy>=2.0.43",
-    "uvicorn[standard]>=0.35.0",
+    "uvicorn[standard]>=0.38.0",
     "prometheus-client>=0.21.0",
     "opentelemetry-api>=1.29.0",
     "opentelemetry-sdk>=1.29.0",
@@ -55,18 +56,22 @@ dev = [
     "hypothesis>=6.165.10",
     "import-linter>=2.13",
     "pytest>=8.4.2",
-    "pytest-asyncio>=0.25.0",
+    "pytest-asyncio>=1.0.0",
     "ruff>=0.16.3",
 ]
 execution-kernel = [
-    "tree-sitter-language-pack>=1.13.7",
     "playwright>=1.56.0",
     "jieba>=0.42.1",
     "python-pptx>=1.0.2",
     "openpyxl>=3.1.5",
     "markdownify>=1.2.2",
-    "mcp>=1.22.0",
+    "mcp>=1.22.0,<2",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
 
 [tool.importlinter]
 root_package = "app"

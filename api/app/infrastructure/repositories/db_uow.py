@@ -22,8 +22,6 @@ from app.infrastructure.security.db_authorization import configure_session_autho
 
 from .db_artifact_repository import DBArtifactRepository
 from .db_audit_repository import DBAuditRepository
-from .db_codebase_repository import DBCodebaseRepository
-from .db_codebase_version_repository import DBCodebaseVersionRepository
 from .db_file_repository import DBFileRepository
 from .db_inference_binding_repository import DBInferenceBindingRepository
 from .db_inference_endpoint_repository import DBInferenceEndpointRepository
@@ -121,8 +119,6 @@ class DBUnitOfWork(IUnitOfWork):
             signing_key=self._audit_signing_key,
             signing_key_id=self._audit_signing_key_id,
         )
-        self.codebase = DBCodebaseRepository(db_session=self.db_session)
-        self.codebase_version = DBCodebaseVersionRepository(db_session=self.db_session)
         self.knowledge_base = DBKnowledgeBaseRepository(db_session=self.db_session)
         self.knowledge_version = DBKnowledgeVersionRepository(db_session=self.db_session)
         self.file = DBFileRepository(db_session=self.db_session)

@@ -101,25 +101,6 @@ class KnowledgeBaseExecutionPolicy(_ExecutionPolicyModel):
     document: KnowledgeDocumentPolicy = Field(default_factory=KnowledgeDocumentPolicy)
 
 
-class CodebaseAnalysisPolicy(_ExecutionPolicyModel):
-    max_file_size_bytes: int = Field(default=512_000, ge=1, le=50_000_000)
-    max_files: int = Field(default=5_000, ge=1, le=100_000)
-    chunk_max_chars: int = Field(default=2_000, ge=100, le=100_000)
-    source_read_batch_size: int = Field(default=50, ge=1, le=1_000)
-
-
-class CodebaseRetrievalPolicy(_ExecutionPolicyModel):
-    fetch_multiplier: int = Field(default=3, ge=1, le=20)
-    rrf_k: int = Field(default=60, ge=1, le=1_000)
-    final_top_k: int = Field(default=8, ge=1, le=30)
-
-
-class CodebaseExecutionPolicy(_ExecutionPolicyModel):
-    vector_enabled: bool = True
-    analysis: CodebaseAnalysisPolicy = Field(default_factory=CodebaseAnalysisPolicy)
-    retrieval: CodebaseRetrievalPolicy = Field(default_factory=CodebaseRetrievalPolicy)
-
-
 class ExecutionPolicy(_ExecutionPolicyModel):
     agent: AgentExecutionPolicy = Field(default_factory=AgentExecutionPolicy)
     model_resilience: ModelResiliencePolicy = Field(default_factory=ModelResiliencePolicy)
@@ -128,15 +109,11 @@ class ExecutionPolicy(_ExecutionPolicyModel):
     knowledge_base: KnowledgeBaseExecutionPolicy = Field(
         default_factory=KnowledgeBaseExecutionPolicy
     )
-    codebase: CodebaseExecutionPolicy = Field(default_factory=CodebaseExecutionPolicy)
 
 
 __all__ = [
     "ActivityExecutionPolicy",
     "AgentExecutionPolicy",
-    "CodebaseAnalysisPolicy",
-    "CodebaseExecutionPolicy",
-    "CodebaseRetrievalPolicy",
     "ExecutionPolicy",
     "KnowledgeBaseExecutionPolicy",
     "KnowledgeChunkPolicy",

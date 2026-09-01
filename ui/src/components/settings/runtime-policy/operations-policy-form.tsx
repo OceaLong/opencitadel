@@ -108,7 +108,7 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
   },
   {
     key: "resource_gc",
-    fields: [...GC_FIELDS("resource_gc.knowledge_base"), ...GC_FIELDS("resource_gc.codebase")],
+    fields: GC_FIELDS("resource_gc.knowledge_base"),
   },
   {
     key: "patrol_retention",

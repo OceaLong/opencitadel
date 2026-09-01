@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from app.domain.models.codebase import SessionMode
+from app.domain.models.session_mode import SessionMode
 from app.domain.models.tool_policy import (
     ApprovalMode,
     ToolCapability,

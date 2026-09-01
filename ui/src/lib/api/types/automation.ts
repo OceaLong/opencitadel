@@ -19,7 +19,6 @@ export type ScheduledJob = {
   prompt_template: string;
   skill_id?: string | null;
   model_id?: string | null;
-  codebase_id?: string | null;
   knowledge_base_id?: string | null;
   operator_scope?: "owned" | "third_party_saas" | null;
   operator_domains?: string[];
@@ -47,7 +46,6 @@ export type CreateScheduledJobParams = {
   prompt_template: string;
   skill_id?: string | null;
   model_id?: string | null;
-  codebase_id?: string | null;
   knowledge_base_id?: string | null;
   notify_channels?: NotifyChannel[];
   operator_scope?: "owned" | "third_party_saas" | null;

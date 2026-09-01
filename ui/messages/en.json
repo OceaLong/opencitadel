@@ -230,7 +230,6 @@
     },
     "createFailed": "Failed to create session",
     "loginRequired": "Sign in to create a new task",
-    "manageCodebase": "Manage code knowledge base",
     "manageKnowledge": "Manage document knowledge base",
     "noModel": "Please configure a model first",
     "secondaryNav": "Knowledge management",
@@ -257,7 +256,6 @@
     "patrol": "Ops Patrol",
     "automation": "Automation",
     "knowledge": "Knowledge",
-    "codebase": "Codebase",
     "admin": "Admin"
   },
   "account": {
@@ -295,9 +293,7 @@
     "empty": "No tasks yet",
     "filter": {
       "all": "All",
-      "codebase": "Codebase",
       "general": "General",
-      "hybrid": "Hybrid",
       "knowledge": "Knowledge"
     },
     "filterEmpty": "No tasks match this filter",
@@ -504,8 +500,7 @@
         "model_resilience": "Model resilience",
         "activity": "Tool activity",
         "memory": "Memory",
-        "knowledge_base": "Knowledge base",
-        "codebase": "Codebase"
+        "knowledge_base": "Knowledge base"
       },
       "operations": {
         "traffic": "Traffic",
@@ -523,8 +518,7 @@
         "model_resilience": "Fallback, retry budget, and circuit-breaker behavior.",
         "activity": "Timeouts for tools and MCP connections.",
         "memory": "Recall and vector-memory behavior.",
-        "knowledge_base": "Indexing, retrieval, ranking, OCR, and ingestion limits.",
-        "codebase": "Code analysis and retrieval limits."
+        "knowledge_base": "Indexing, retrieval, ranking, OCR, and ingestion limits."
       },
       "operations": {
         "traffic": "API rate limiting and session streaming cadence.",
@@ -598,20 +592,6 @@
           "max_pages": "Document maximum pages"
         }
       },
-      "codebase": {
-        "vector_enabled": "Vector indexing enabled",
-        "analysis": {
-          "max_file_size_bytes": "Maximum file size (bytes)",
-          "max_files": "Maximum files",
-          "chunk_max_chars": "Maximum chunk characters",
-          "source_read_batch_size": "Source read batch size"
-        },
-        "retrieval": {
-          "fetch_multiplier": "Fetch multiplier",
-          "rrf_k": "RRF constant K",
-          "final_top_k": "Final top-K"
-        }
-      },
       "traffic": {
         "rate_limit_enabled": "Rate limiting enabled",
         "requests_per_minute": "Requests per minute",
@@ -654,12 +634,6 @@
           "retention_count": "Knowledge-base retained versions",
           "retention_min_days": "Knowledge-base minimum retention days",
           "batch_size": "Knowledge-base cleanup batch size"
-        },
-        "codebase": {
-          "enabled": "Codebase GC enabled",
-          "retention_count": "Codebase retained versions",
-          "retention_min_days": "Codebase minimum retention days",
-          "batch_size": "Codebase cleanup batch size"
         }
       },
       "patrol_retention": {
@@ -1265,95 +1239,6 @@
     "statusDocCount": "{status} · {count} documents",
     "title": "Document knowledge base"
   },
-  "codebase": {
-    "readFailed": "Read failed",
-    "downloadSuccess": "Packaged: {key}",
-    "downloadFailed": "Download failed",
-    "reanalyze": "Re-analyze",
-    "deleteTitle": "Delete codebase?",
-    "deleteDescription": "This will permanently delete the codebase and its index. This cannot be undone.",
-    "deleteSuccess": "Deleted \"{name}\"",
-    "deleteFailed": "Failed to delete codebase",
-    "deleteBlockedIngesting": "Cannot delete while indexing is in progress",
-    "tabSource": "Source",
-    "tabSymbols": "Symbols",
-    "tabDiagrams": "Diagrams",
-    "symbolSearchPlaceholder": "Search symbols...",
-    "symbolSearchHint": "Enter a query to search indexed symbols",
-    "noSymbolsFound": "No symbols found",
-    "sourceHint": "Click a file or path in an answer to view source",
-    "artifacts": {
-      "architecture": "Architecture",
-      "dataFlow": "Data flow",
-      "moduleDir": "Directory",
-      "callChain": "Call chain",
-      "flowchart": "Flow",
-      "overview": "Overview"
-    },
-    "createDialog": {
-      "title": "New code knowledge base",
-      "description": "Upload a zip, Git repository, or multiple files — the system will analyze and build a dedicated code knowledge base",
-      "namePlaceholder": "My project",
-      "tabFiles": "Files",
-      "tabZip": "Zip",
-      "tabGit": "Git",
-      "zipUploaded": "Uploaded — click to replace",
-      "selectZip": "Select zip archive",
-      "zipUploadSuccess": "Archive uploaded successfully",
-      "selectFiles": "Select files ({count} selected)",
-      "gitUrlRequired": "Please enter a Git repository URL",
-      "zipRequired": "Please upload a zip archive first",
-      "filesRequired": "Please upload files first",
-      "defaultGitName": "Git codebase",
-      "defaultZipName": "Zip codebase",
-      "defaultFilesName": "Files codebase",
-      "createFailed": "Failed to create codebase",
-      "createAndAnalyze": "Create & analyze",
-      "fileTooLarge200mb": "File must not exceed 200MB"
-    },
-    "activeVersion": "Active version: {version}",
-    "cancelBuild": "Cancel",
-    "candidateBuild": "Candidate build {state} · {phase} · {progress}%",
-    "candidatePhasePending": "pending",
-    "capabilityAvailable": "available",
-    "capabilityUnavailable": "unavailable",
-    "evidence": "Evidence",
-    "noActiveVersion": "No active version",
-    "noCapabilities": "none",
-    "previousVersions": "Previous versions",
-    "retryBuild": "Retry",
-    "unsupportedViews": "Unsupported views: {views}",
-    "versionActionError": "Failed to update codebase build",
-    "versionCapabilities": "Capabilities: {capabilities}",
-    "versionDegraded": "Degraded: {reasons}",
-    "versionStatusLoadError": "Failed to load codebase versions",
-    "versionStatusLoading": "Loading codebase versions",
-    "viewBuild": "View build",
-    "viewHistoricalVersion": "View version {version}",
-    "viewingHistoricalVersion": "Viewing version: {version}",
-    "create": "New codebase",
-    "download": "Download",
-    "empty": "No codebases yet",
-    "indexFailed": "Indexing failed",
-    "indexFailedDetail": "Indexing failed: {error}",
-    "indexingShort": "Indexing...",
-    "librarySubtitle": "Manage code knowledge bases and start tasks",
-    "loadError": "Failed to load codebases",
-    "startAgent": "Agent",
-    "startAsk": "Ask",
-    "startTaskFailed": "Failed to start task",
-    "status": {
-      "pending": "Pending",
-      "materializing": "Materializing",
-      "analyzing": "Analyzing",
-      "indexing": "Indexing",
-      "generating": "Generating",
-      "ready": "Ready",
-      "failed": "Failed"
-    },
-    "statusFileCount": "{status} · {count} files",
-    "title": "Code knowledge base"
-  },
   "mobileNav": {
     "label": "Main navigation",
     "more": "More",
@@ -1683,7 +1568,6 @@
   },
   "redirect": {
     "noActiveVersion": "No published knowledge-base version is available",
-    "openingCodebaseTask": "Opening codebase task...",
     "openingKnowledgeTask": "Opening knowledge task...",
     "startTaskFailed": "Failed to start task"
   },
@@ -1697,10 +1581,7 @@
     "upgradeContextDescription": "The upgrade applies only to future messages; historical answers keep their original version labels.",
     "upgradeFailed": "Context upgrade failed",
     "upgradeSuccess": "Future-message context upgraded to {version}",
-    "codebasePanelTitle": "Codebase context",
-    "codebaseTab": "Codebase",
     "knowledgePanelTitle": "Knowledge context",
-    "knowledgeTab": "Knowledge",
     "sourceHintKb": "Click a document citation in an answer to view the source",
     "tabOriginalText": "Source"
   },
@@ -1799,14 +1680,10 @@
   },
   "contextSelector": {
     "clear": "Clear context",
-    "codebase": "Codebase",
-    "codebaseMeta": "{count} files",
-    "codebaseSection": "Code knowledge base",
     "knowledge": "Knowledge base",
     "knowledgeMeta": "{count} documents",
     "knowledgeSection": "Document knowledge base",
     "loading": "Loading…",
-    "noCodebase": "No ready codebases",
     "noKnowledge": "No ready knowledge bases",
     "noSearchResults": "No matching results",
     "none": "No context",

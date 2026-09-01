@@ -46,7 +46,7 @@ to the authoritative Run projection. Reconciliation copies terminal Run state
 to the summary and sends durable inbox notifications plus optional MCP IM.
 Process death cannot manufacture a terminal state.
 
-The same leased loop runs bounded knowledge/codebase version GC and patrol
+The same leased loop runs bounded knowledge-base version GC and patrol
 retention. These operations use their own database leases and never delete
 active/bound versions or audit rows.
 

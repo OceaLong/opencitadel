@@ -229,7 +229,7 @@ class RunProjectionPort(Protocol):
         *,
         source_entity_type: str,
         source_entity_id: str,
-        owner_scope: OwnerScope,
+        owner_scope: OwnerScope | None,
     ) -> dict[str, Any]: ...
 
     async def resource_build(

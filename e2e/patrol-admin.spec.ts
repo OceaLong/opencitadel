@@ -599,7 +599,6 @@ test("mobile routes fit 390px and critical actions are keyboard operable", async
     "/",
     `/sessions/${encodeURIComponent(patrolSessionId)}`,
     "/knowledge",
-    "/codebase",
     "/patrols",
     "/admin",
   ];

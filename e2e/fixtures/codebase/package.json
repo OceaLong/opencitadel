@@ -1,8 +1,0 @@
-{
-  "name": "opencitadel-acceptance-fixture",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "unsupported-view": "request:flowchart"
-  }
-}

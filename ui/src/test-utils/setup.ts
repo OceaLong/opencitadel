@@ -5,8 +5,7 @@
  * itself, either as a bare top-level assignment or via a
  * `beforeAll`/`afterAll` pair that saved and restored the previous value
  * (see e.g. the pre-migration versions of
- * `src/components/knowledge/knowledge-library.test.tsx` and
- * `src/components/codebase/codebase-library.test.tsx`). Vitest runs
+ * `src/components/knowledge/knowledge-library.test.tsx`). Vitest runs
  * `setupFiles` once per test file in that file's own isolated module
  * context, so setting the flag here has the same per-file scope as the
  * duplicated `beforeAll`/`afterAll` boilerplate did — there is nothing to

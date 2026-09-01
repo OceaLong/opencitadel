@@ -4,10 +4,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.domain.models.codebase import SessionMode
 from app.domain.models.file import File
 from app.domain.models.resource_bindings import ResourceBindingProjection
 from app.domain.models.session import SessionStatus
+from app.domain.models.session_mode import SessionMode
 from app.domain.utils.time_utils import utc_now
 from app.interfaces.schemas.inference import InferenceModelResponse
 from app.interfaces.schemas.skill import SkillSummaryResponse
@@ -20,8 +20,6 @@ class CreateSessionRequest(BaseModel):
     model_id: str | None = None
     skill_id: str | None = None
     thinking_enabled: bool | None = None
-    codebase_id: str | None = None
-    codebase_version_id: str | None = None
     knowledge_base_id: str | None = None
     knowledge_base_version_id: str | None = None
     mode: SessionMode | None = None

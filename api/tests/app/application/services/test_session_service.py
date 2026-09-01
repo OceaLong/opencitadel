@@ -5,7 +5,7 @@ import pytest
 
 from app.application.services.session_service import SessionService
 from app.domain.errors import NotFoundError
-from app.domain.models.codebase import SessionMode
+from app.domain.models.session_mode import SessionMode
 
 
 async def _create_kb_agent_session():

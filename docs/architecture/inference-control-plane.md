@@ -49,7 +49,7 @@ embeddings, rerank, A2A, Patrol, and Patrol remediation. UI and server admission
 consume the same states (`available`, `degraded`, `not_configured`, `disabled`,
 or `denied`) and stable reason keys.
 
-Chat execution, codebase/knowledge/memory vectorization, and reranking resolve
+Chat execution, knowledge/memory vectorization, and reranking resolve
 the control plane at call time. Vector consumers can be individually disabled
 through the active Execution Policy, but enabled consumers never read a standalone API key or
 base URL. The UI guides missing capabilities to **Settings → Inference**.

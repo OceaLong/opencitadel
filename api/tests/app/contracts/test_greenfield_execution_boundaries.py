@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from app.application.services.codebase_service import CodebaseService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.patrol_remediation_service import (
     PatrolRemediationService,
@@ -47,7 +46,6 @@ LEGACY_EXECUTION_MODULES = (
     "app/application/services/task_runner_factory.py",
     "app/domain/services/agent_task_runner.py",
     "app/domain/services/knowledge_base/ingestion_task_runner.py",
-    "app/domain/services/codebase/ingestion_task_runner.py",
     "app/infrastructure/external/task/redis_stream_task.py",
     "app/infrastructure/models/session_event.py",
     "app/infrastructure/execution/fact_models.py",
@@ -130,7 +128,6 @@ def test_production_source_contains_no_legacy_execution_vocabulary() -> None:
 @pytest.mark.parametrize(
     "construct_without_execution_dependencies",
     [
-        lambda: CodebaseService(lambda: None, object, object),
         lambda: KnowledgeBaseService(lambda: None, object),
         lambda: PatrolRunService(lambda: None),
         lambda: PatrolRemediationService(lambda: None),

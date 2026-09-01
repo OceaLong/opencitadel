@@ -79,14 +79,13 @@ export default function Page() {
     setSending(true);
 
     try {
-      const hasContext = Boolean(context.codebaseId || context.knowledgeBaseId);
+      const hasContext = Boolean(context.knowledgeBaseId);
       const session = await sessionApi.createSession({
         model_id: resolvedModelId,
         skill_id: skillId,
         thinking_enabled: thinkingEnabled,
         operator_scope: operatorConfig?.scope,
         operator_domains: operatorConfig?.operatorDomains,
-        codebase_id: context.codebaseId,
         knowledge_base_id: context.knowledgeBaseId,
         mode: hasContext ? "ask" : undefined,
       });
@@ -170,12 +169,6 @@ export default function Page() {
           />
           <div className="space-y-3">
             <nav aria-label={t("secondaryNav")} className="flex flex-wrap gap-4">
-              <Link
-                href="/codebase"
-                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 rounded-sm text-xs underline-offset-4 hover:underline focus-visible:ring-2"
-              >
-                {t("manageCodebase")}
-              </Link>
               <Link
                 href="/knowledge"
                 className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 rounded-sm text-xs underline-offset-4 hover:underline focus-visible:ring-2"
