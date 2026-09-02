@@ -52,7 +52,7 @@ dev = [
 execution-kernel = [
     "playwright>=1.56.0",
     "markdownify>=1.2.2",
-    "mcp>=1.22.0,<2",
+    "mcp>=1.22.0,<3",
 ]
 
 [tool.pytest.ini_options]
