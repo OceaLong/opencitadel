@@ -82,12 +82,6 @@ class DeploymentSettings(BaseSettings):
     # injected into the untrusted sandbox container (only the derived token is).
     # Required and >=32 chars in production.
     sandbox_token_seed: str = ""
-    # Bearer tokens the Ops Actuator / Ops Collector MCP servers require on their
-    # streamable-http endpoints. Callers must present `Authorization: Bearer
-    # <token>`; empty means no header is injected (only valid when talking to a
-    # stdio server or an unauthenticated legacy deployment).
-    ops_actuator_token: str = ""
-    ops_collector_token: str = ""
     sandbox_driver: str = "auto"
     sandbox_address: str = ""
     sandbox_image: str = ""
@@ -109,9 +103,7 @@ class DeploymentSettings(BaseSettings):
             "shutdown_timeout_seconds",
         ),
     )
-    # 8090/8091: bundled Ops Patrol Collector/Actuator (docker-compose.yml), the
-    # only registered-MCP-server ports outside the plain HTTP/HTTPS defaults.
-    outbound_allowed_ports: str = "80,443,8080,8443,8090,8091,11434"
+    outbound_allowed_ports: str = "80,443,8080,8443,11434"
     outbound_private_host_allowlist: str = ""
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
     access_token_ttl_seconds: int = 900
@@ -129,10 +121,6 @@ class DeploymentSettings(BaseSettings):
     # valid without silently assuming an identity whose password is unknown.
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
-    # Fixture replay is a process-local test/demo mechanism, never a runtime
-    # product capability and never allowed when ENV=production.
-    patrol_fixture_replay_enabled: bool = False
-
     # 出站邮件（SMTP）：smtp_host 留空则邮件通知渠道不可用（优雅降级）
     smtp_host: str = ""
     smtp_port: int = 587
@@ -155,16 +143,11 @@ class DeploymentSettings(BaseSettings):
     postgres_max_overflow: int = 5
     postgres_pool_recycle_seconds: int = 1800
 
-    # 执行内核批量/背压/轮询（P1-3）。
+    # 执行内核批量、背压与轮询配置。
     # execution_activity_max_concurrency 是 ActivityWorker 每进程并发执行 claim
     # 的上限（Semaphore）。每个 claim 内含多次数据库连接 checkout，因此并发上限
     # 必须 <= 连接池有效容量（postgres_pool_size + postgres_max_overflow），否则
     # 高并发下会出现连接排队 / 死锁向量。保持默认 8 <= 10（5+5）。
-    # TODO(P1-3 wiring): execution_activity_batch_size / execution_idle_poll_seconds
-    # 目前仍由 execution_kernel_main.ExecutionKernelProcess 的默认值（batch_size=100,
-    # idle_poll_seconds=1.0）承载；把它们接到这些 settings 需改 execution_kernel_main.py
-    # 与 execution_ports.py（本次改动范围之外）。execution_activity_max_concurrency
-    # 同理需在 build_execution_kernel_runtime 处传入 ActivityWorker(max_concurrency=...)。
     execution_activity_batch_size: int = 100
     execution_activity_max_concurrency: int = 8
     execution_idle_poll_seconds: float = 1.0

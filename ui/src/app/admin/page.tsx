@@ -1,300 +1,59 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
-import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
-import { AdminStatCard } from "@/components/admin/stat-card";
-import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
-import {
-  AuditActivityChart,
-  UsageBreakdownChart,
-  UsageCallsChart,
-  UsageTimeseriesChart,
-} from "@/components/admin/usage-charts";
-import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/page-header";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { useAuth } from "@/components/auth-provider";
 
-import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
-import {
-  adminApi,
-  type AdminOverview,
-  type AuditLog,
-  type PlatformInvitation,
-  type UsageSummary,
-  type UsageTimeseriesPoint,
-} from "@/lib/api/admin";
-import { IconInvitation, IconLayers, IconModel, IconPhoneCall, IconUsers } from "@/lib/icons";
+import { api, errorMessage } from "@/lib/api-client";
 
-export default function AdminOverviewPage() {
-  const t = useTranslations("admin");
-  const locale = useLocale();
-  const [range, setRange] = useState<AdminTimeRange>("30d");
-  const [loading, setLoading] = useState(true);
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
-  const [usage, setUsage] = useState<UsageSummary | null>(null);
-  const [timeseries, setTimeseries] = useState<UsageTimeseriesPoint[]>([]);
-  const [modelBreakdown, setModelBreakdown] = useState<
-    Array<{ key: string; total_tokens: number; call_count: number }>
-  >([]);
-  const [userBreakdown, setUserBreakdown] = useState<
-    Array<{ key: string; total_tokens: number; call_count: number }>
-  >([]);
-  const [teamBreakdown, setTeamBreakdown] = useState<
-    Array<{ key: string; total_tokens: number; call_count: number }>
-  >([]);
-  const [recentAudit, setRecentAudit] = useState<AuditLog[]>([]);
-  const [auditByDay, setAuditByDay] = useState<Array<{ date: string; count: number }>>([]);
-  const [recentInvitations, setRecentInvitations] = useState<PlatformInvitation[]>([]);
+type User = { id: string; email: string; username: string; globalRole: string; status: string };
+type Team = { id: string; name: string; archivedAt?: string | null };
+type Audit = { id: string; action: string; resourceType: string; resourceId: string; actorUserId?: string; createdAt: string };
+type Policy = { generation: number; digest: string; policy: Record<string, unknown>; note: string };
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      const dateParams = getAdminDateRange(range);
-      try {
-        const [
-          overviewData,
-          usageData,
-          timeseriesData,
-          modelData,
-          userData,
-          teamData,
-          auditData,
-          auditSummary,
-          invitationData,
-        ] = await Promise.all([
-          adminApi.overview(),
-          adminApi.usageSummary(dateParams),
-          adminApi.usageTimeseries(dateParams),
-          adminApi.usageBreakdown("model", { ...dateParams, limit: 8 }),
-          adminApi.usageBreakdown("user", { ...dateParams, limit: 8 }),
-          adminApi.usageBreakdown("team", { ...dateParams, limit: 8 }),
-          adminApi.audit({ limit: 8 }),
-          adminApi.auditSummary(dateParams),
-          adminApi.invitations({ limit: 6 }),
-        ]);
-        if (cancelled) return;
-        setOverview(overviewData);
-        setUsage(usageData);
-        setTimeseries(timeseriesData.points);
-        setModelBreakdown(modelData.items);
-        setUserBreakdown(userData.items);
-        setTeamBreakdown(teamData.items);
-        setRecentAudit(auditData.logs);
-        setAuditByDay(auditSummary.by_day);
-        setRecentInvitations(invitationData.invitations);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [range]);
+export default function AdminPage() {
+  const { user } = useAuth();
+  const [users, setUsers] = useState<User[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [audit, setAudit] = useState<Audit[]>([]);
+  const [policy, setPolicy] = useState<Policy | null>(null);
+  const [policyText, setPolicyText] = useState("");
+  const [error, setError] = useState("");
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-8 w-40" />
-          <Skeleton className="h-9 w-72" />
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-28 rounded-xl" />
-          ))}
-        </div>
-        <Skeleton className="h-72 rounded-xl" />
-      </div>
-    );
+  const load = useCallback(async () => {
+    try {
+      const values = await Promise.all([
+        api<User[]>("/admin/users"), api<Team[]>("/admin/teams"),
+        api<Audit[]>("/admin/audit"), api<Policy>("/governance-policy"),
+      ]);
+      setUsers(values[0]); setTeams(values[1]); setAudit(values[2]);
+      setPolicy(values[3]); setPolicyText(JSON.stringify(values[3].policy, null, 2)); setError("");
+    } catch (caught) { setError(errorMessage(caught)); }
+  }, []);
+  useEffect(() => { if (user?.globalRole === "admin") void load(); }, [load, user]);
+
+  async function updateUser(item: User, patch: object) {
+    try { await api(`/admin/users/${item.id}`, { method: "PATCH", json: patch }); await load(); }
+    catch (caught) { setError(errorMessage(caught)); }
   }
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title={t("overviewTitle")}
-        description={t("overviewSubtitle")}
-        actions={<AdminTimeRangePicker value={range} onChange={setRange} />}
-      />
+  async function savePolicy(event: FormEvent) {
+    event.preventDefault();
+    if (!policy) return;
+    try {
+      await api("/governance-policy", { method: "PUT", json: {
+        expectedGeneration: policy.generation, note: "Updated from governance console", policy: JSON.parse(policyText),
+      } });
+      await load();
+    } catch (caught) { setError(errorMessage(caught)); }
+  }
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <AdminStatCard
-          label={t("statTotalUsers")}
-          value={overview?.total_users ?? 0}
-          hint={t("statActiveHint", { count: overview?.active_users ?? 0 })}
-          icon={IconUsers}
-        />
-        <AdminStatCard
-          label={t("statTotalTeams")}
-          value={overview?.total_teams ?? 0}
-          hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })}
-          icon={IconLayers}
-        />
-        <AdminStatCard
-          label={t("statTotalTokens")}
-          value={usage?.total_tokens ?? 0}
-          hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })}
-          icon={IconModel}
-        />
-        <AdminStatCard
-          label={t("statLlmCalls")}
-          value={usage?.call_count ?? 0}
-          hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })}
-          icon={IconPhoneCall}
-        />
-        <AdminStatCard
-          label={t("statPendingInvites")}
-          value={overview?.pending_invitations ?? 0}
-          hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })}
-          icon={IconInvitation}
-        />
-        <AdminStatCard
-          label={t("statTotalSessions")}
-          value={overview?.total_sessions ?? 0}
-          hint={t("statTotalSessionsDesc")}
-          icon={IconLayers}
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <UsageTimeseriesChart points={timeseries} />
-        <UsageCallsChart points={timeseries} />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <UsageBreakdownChart
-          title={t("modelUsageTitle")}
-          description={t("modelUsageDesc")}
-          items={modelBreakdown}
-        />
-        <UsageBreakdownChart
-          title={t("userUsageTitle")}
-          description={t("userUsageDesc")}
-          items={userBreakdown}
-        />
-        <UsageBreakdownChart
-          title={t("teamUsageTitle")}
-          description={t("teamUsageDesc")}
-          items={teamBreakdown}
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AuditActivityChart byDay={auditByDay} />
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("platformOverviewTitle")}</CardTitle>
-            <CardDescription>{t("platformOverviewDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            <MetricRow label={t("metricAdminUsers")} value={overview?.admin_users ?? 0} />
-            <MetricRow label={t("metricDisabledUsers")} value={overview?.disabled_users ?? 0} />
-            <MetricRow
-              label={t("metricAcceptedInvitations")}
-              value={overview?.accepted_invitations ?? 0}
-            />
-            <MetricRow
-              label={t("metricExpiredInvitations")}
-              value={overview?.expired_invitations ?? 0}
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("recentAuditTitle")}</CardTitle>
-            <CardDescription>{t("recentAuditDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {recentAudit.length === 0 ? (
-              <EmptyState title={t("noAuditRecords")} className="py-8" />
-            ) : (
-              <Table className="text-dense">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("columnAction")}</TableHead>
-                    <TableHead>{t("columnResource")}</TableHead>
-                    <TableHead className="text-right">{t("columnTime")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentAudit.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.action}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {item.resource_type}:{item.resource_id}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-right">
-                        {formatDateTime(item.created_at, locale)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("recentInvitesTitle")}</CardTitle>
-            <CardDescription>{t("recentInvitesDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {recentInvitations.length === 0 ? (
-              <EmptyState title={t("noInvitationRecords")} className="py-8" />
-            ) : (
-              <Table className="text-dense">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("columnEmail")}</TableHead>
-                    <TableHead>{t("status")}</TableHead>
-                    <TableHead className="text-right">{t("columnTime")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentInvitations.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="max-w-40 truncate font-medium">
-                        {item.email || t("noEmailSpecified")}
-                      </TableCell>
-                      <TableCell>
-                        <InvitationStatusBadge status={item.status} />
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-right">
-                        {formatDateTime(item.created_at, locale)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function MetricRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="bg-muted/30 rounded-lg border px-3 py-3">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-    </div>
-  );
+  if (user?.globalRole !== "admin") return <p className="error">仅管理员可访问治理后台。</p>;
+  return <div className="stack">
+    <header className="page-header"><div><h1>治理后台</h1><p className="muted">身份、团队、配额、策略和审计共用一套明确的管理边界。</p></div><button className="secondary" onClick={() => void load()}>刷新</button></header>
+    {error ? <p className="error">{error}</p> : null}
+    <section className="card stack"><h2>用户</h2><table><thead><tr><th>用户</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{users.map((item) => <tr key={item.id}><td>{item.username}<br /><small className="muted">{item.email}</small></td><td>{item.globalRole}</td><td>{item.status}</td><td><div className="actions"><button className="secondary" onClick={() => void updateUser(item, { enabled: item.status !== "active" })}>{item.status === "active" ? "停用" : "启用"}</button><select value={item.globalRole} onChange={(event) => void updateUser(item, { globalRole: event.target.value })}><option value="user">user</option><option value="auditor">auditor</option><option value="admin">admin</option></select></div></td></tr>)}</tbody></table></section>
+    <section className="card stack"><h2>治理策略</h2>{policy ? <p className="muted">Generation {policy.generation} · {policy.digest}</p> : null}<form className="stack" onSubmit={savePolicy}><textarea value={policyText} onChange={(event) => setPolicyText(event.target.value)} /><button>CAS 更新策略</button></form></section>
+    <section className="grid"><article className="card"><h2>团队</h2>{teams.map((item) => <p key={item.id}>{item.name} <small className="muted">{item.id}</small></p>)}</article><article className="card"><h2>审计链</h2>{audit.map((item) => <p key={item.id}><strong>{item.action}</strong><br /><small className="muted">{item.resourceType}/{item.resourceId} · {new Date(item.createdAt).toLocaleString()}</small></p>)}</article></section>
+  </div>;
 }

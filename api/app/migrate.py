@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -12,7 +11,6 @@ from sqlalchemy import create_engine, text
 
 from alembic import command
 from app.infrastructure.logging import setup_logging
-from app.migrate_runtime_policy_seed import seed_runtime_policy_heads
 from core.config import (
     DeploymentSettings,
     load_deployment_settings,
@@ -50,11 +48,6 @@ def migration_lock(settings: DeploymentSettings) -> Iterator[None]:
         engine.dispose()
 
 
-async def run_data_migrations(settings: DeploymentSettings) -> None:
-    seeded = await seed_runtime_policy_heads(settings)
-    print(f"Runtime Policy seed complete: seeded={seeded}")
-
-
 def main() -> None:
     settings = load_deployment_settings()
     setup_logging(settings)
@@ -63,7 +56,6 @@ def main() -> None:
         alembic_cfg.attributes["deployment_settings"] = settings
         command.upgrade(alembic_cfg, "head")
         print("Database schema migrations applied successfully.")
-        asyncio.run(run_data_migrations(settings))
 
 
 if __name__ == "__main__":

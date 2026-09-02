@@ -1,37 +1,14 @@
-"""Explicit full model registry used only by Alembic metadata discovery."""
+"""Exact model catalog for the four greenfield bounded contexts."""
 
 from importlib import import_module
 
-from app.infrastructure.models.base import Base
+from app.contexts.database import GreenfieldBase as Base
 
 MODEL_MODULES = (
-    "app.infrastructure.execution.models",
-    "app.infrastructure.models.audit_log",
-    "app.infrastructure.models.delivery_artifact",
-    "app.infrastructure.models.file",
-    "app.infrastructure.models.integration_server",
-    "app.infrastructure.models.invitation",
-    "app.infrastructure.models.knowledge_base",
-    "app.infrastructure.models.knowledge_version",
-    "app.infrastructure.models.inference_binding",
-    "app.infrastructure.models.inference_endpoint",
-    "app.infrastructure.models.inference_model",
-    "app.infrastructure.models.llm_token_usage",
-    "app.infrastructure.models.memory_entry",
-    "app.infrastructure.models.notification",
-    "app.infrastructure.models.oauth_identity",
-    "app.infrastructure.models.patrol",
-    "app.infrastructure.models.refresh_token",
-    "app.infrastructure.models.runtime_policy",
-    "app.infrastructure.models.scheduled_job",
-    "app.infrastructure.models.service_api_key",
-    "app.infrastructure.models.session",
-    "app.infrastructure.models.session_file_attachment",
-    "app.infrastructure.models.session_resource_binding",
-    "app.infrastructure.models.skill",
-    "app.infrastructure.models.team",
-    "app.infrastructure.models.user",
-    "app.infrastructure.models.user_quota",
+    "app.contexts.identity.models",
+    "app.contexts.inference.models",
+    "app.contexts.knowledge.models",
+    "app.kernel.infrastructure.postgres.models",
 )
 
 for module_name in MODEL_MODULES:

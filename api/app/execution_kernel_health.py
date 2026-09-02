@@ -53,19 +53,6 @@ def check_liveness(
         raise HealthCheckError(f"kernel heartbeat is stale ({age:.1f}s)")
 
 
-def check_runtime_policy_readiness(marker_path: Path) -> None:
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-        ready = marker["runtime_policy_ready"]
-        error_key = marker.get("runtime_policy_error_key")
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HealthCheckError("runtime policy readiness marker is invalid") from exc
-    if ready is not True:
-        raise HealthCheckError(
-            f"runtime policy is not ready: {error_key or 'runtimePolicy.unavailable'}"
-        )
-
-
 def check_database_readiness(
     *,
     dsn: str,
@@ -81,26 +68,22 @@ def check_database_readiness(
                 """
                 SELECT
                     current_user,
-                    to_regclass('public.execution_command_inbox') IS NOT NULL
-                        AND to_regclass('public.execution_events') IS NOT NULL,
+                    to_regclass('public.kernel_commands') IS NOT NULL
+                        AND to_regclass('public.kernel_events') IS NOT NULL,
                     has_table_privilege(
                         current_user,
-                        'public.execution_command_inbox',
+                        'public.kernel_commands',
                         'SELECT,INSERT'
                     ),
                     has_table_privilege(
                         current_user,
-                        'public.execution_events',
+                        'public.kernel_events',
                         'SELECT,INSERT'
                     ),
                     has_table_privilege(
                         current_user,
-                        'public.execution_events',
+                        'public.kernel_events',
                         'UPDATE'
-                    ) OR has_table_privilege(
-                        current_user,
-                        'public.execution_events',
-                        'DELETE'
                     )
                 """
             )
@@ -109,14 +92,16 @@ def check_database_readiness(
         raise HealthCheckError(f"PostgreSQL is unavailable: {exc}") from exc
     if row is None:
         raise HealthCheckError("PostgreSQL readiness query returned no row")
-    current_user, schema_ready, inbox_append, events_append, events_mutable = row
+    current_user, schema_ready, inbox_append, events_append, events_updatable = row
     if current_user != expected_user:
         raise HealthCheckError(
             f"unexpected database role: expected {expected_user}, got {current_user}"
         )
     if not schema_ready:
-        raise HealthCheckError("execution schema is not migrated")
-    if not inbox_append or not events_append or events_mutable:
+        raise HealthCheckError("kernel v2 schema is not migrated")
+    # DELETE is intentionally granted for the signed `kernel-purge` path and is
+    # still rejected by the immutable-event trigger for every other actor.
+    if not inbox_append or not events_append or events_updatable:
         raise HealthCheckError("execution-kernel database privileges are invalid")
 
 
@@ -143,7 +128,6 @@ def main(
             max_age_seconds=float(os.environ.get("EXECUTION_KERNEL_HEALTH_MAX_AGE_SECONDS", "30")),
         )
         if args.probe == "readiness":
-            check_runtime_policy_readiness(_marker_path())
             resolved = settings or load_deployment_settings()
             check_database_readiness(
                 dsn=sqlalchemy_sync_database_uri(resolved).replace(
@@ -166,6 +150,5 @@ __all__ = [
     "HealthCheckError",
     "check_database_readiness",
     "check_liveness",
-    "check_runtime_policy_readiness",
     "main",
 ]

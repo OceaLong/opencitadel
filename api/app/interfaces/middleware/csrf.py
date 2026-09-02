@@ -22,7 +22,7 @@ class CsrfMiddleware(BaseHTTPMiddleware):
             "/api/auth/refresh",
         }
     )
-    _EXEMPT_PREFIXES = ("/api/a2a",)
+    _EXEMPT_PREFIXES: tuple[str, ...] = ()
 
     def _is_exempt(self, path: str) -> bool:
         return path in self._EXEMPT_PATHS or any(
@@ -37,7 +37,7 @@ class CsrfMiddleware(BaseHTTPMiddleware):
             )
             if has_auth_cookie:
                 try:
-                    require_api_runtime(request).csrf_service.verify_request(request)
+                    require_api_runtime(request).identity.csrf.verify_request(request)
                 except ForbiddenError as exc:
                     record_csrf_failure()
                     return JSONResponse(

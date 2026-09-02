@@ -37,15 +37,17 @@ spec:
               app.kubernetes.io/component: redis
       ports:
         - {protocol: TCP, port: 6379}
-    {{- if .Values.opsCollector.enabled }}
-    # 只读巡检 Collector 的推送端口。
+    # Per-Run sandbox data plane.
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: ops-collector
+              opencitadel.io/sandbox: "true"
       ports:
-        - {protocol: TCP, port: 8090}
-    {{- end }}
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 9222}
+    # Kubernetes API used by the narrowly scoped sandbox ServiceAccount.
+    - ports:
+        - {protocol: TCP, port: 443}
     # 外部出站（LLM 推理 / webhook 等）。仅公网，排除集群与私有网段，
     # 防止经 80/443 横向访问集群内私有服务（纵深防御）。生产建议改为经
     # 出站代理（如 squid）并把此处收敛到该代理的 podSelector。

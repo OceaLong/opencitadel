@@ -1,31 +1,23 @@
-from fastapi import Depends, Header, Request
+"""Authentication and workspace authorization dependencies."""
 
-from app.application.ports.crypto import CsrfPort, ServiceKeyPort
+from fastapi import Header, Request
+
 from app.application.request_context import get_request_id
 from app.application.security.authorization_context import (
-    authorization_scope,
     get_authorization_context,
     set_authorization_context,
 )
 from app.domain.errors import ForbiddenError, UnauthorizedError
 from app.domain.models.authorization import AuthorizationContext, AuthorizationMode
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
-from app.domain.repositories.uow import UnitOfWorkFactory
-from app.domain.utils.time_utils import utc_now
-from app.interfaces.auth_context import get_principal, set_principal
-from app.interfaces.observability.security_metrics import record_service_key_auth_failure
-from app.interfaces.service_dependencies import (
-    get_csrf_service,
-    get_service_key_hasher,
-    get_uow_factory,
-)
+from app.interfaces.auth_context import get_principal
 
 
 async def get_current_principal() -> Principal:
     principal = get_principal()
     if principal is None:
         raise UnauthorizedError()
-    if get_authorization_context().mode == AuthorizationMode.ANONYMOUS:
+    if get_authorization_context().mode is AuthorizationMode.ANONYMOUS:
         set_authorization_context(
             AuthorizationContext.for_principal(
                 principal,
@@ -52,22 +44,16 @@ async def require_auditor_or_admin() -> Principal:
 async def require_non_auditor() -> Principal:
     principal = await get_current_principal()
     if principal.is_auditor:
-        raise ForbiddenError("审计员为只读角色，无法执行此操作")
+        raise ForbiddenError("审计员为只读角色")
     return principal
 
 
 async def enforce_auditor_read_only(
     request: Request,
-    principal: Principal = Depends(get_current_principal),
-) -> Principal:
-    """Default-deny all authenticated mutations for the read-only auditor role."""
-    if principal.is_auditor and request.method.upper() not in {
-        "GET",
-        "HEAD",
-        "OPTIONS",
-    }:
-        raise ForbiddenError("审计员为只读角色，无法执行此操作")
-    return principal
+) -> None:
+    principal = await get_current_principal()
+    if principal.is_auditor and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        raise ForbiddenError("审计员为只读角色")
 
 
 async def get_workspace_context(
@@ -76,84 +62,30 @@ async def get_workspace_context(
 ) -> WorkspaceContext:
     principal = await get_current_principal()
     request.state.user_id = principal.user_id
-    workspace_id = (x_workspace_id or "").strip()
-    if not workspace_id:
-        context = WorkspaceContext(
-            principal=principal,
-            scope=OwnerScope.personal(principal.user_id),
-        )
-        set_authorization_context(
-            AuthorizationContext.for_principal(
-                principal,
-                scope=context.scope,
-                request_id=get_request_id() or "",
-            )
-        )
-        return context
-    if workspace_id not in principal.team_roles:
-        raise ForbiddenError("无权访问该工作区", error_key="errors.workspaceAccessDenied")
-    request.state.workspace_id = workspace_id
-    context = WorkspaceContext(
-        principal=principal,
-        scope=OwnerScope.team(principal.user_id, workspace_id),
-    )
+    team_id = (x_workspace_id or "").strip()
+    if team_id:
+        if team_id not in principal.team_roles:
+            raise ForbiddenError("无权访问该工作区", error_key="errors.workspaceAccessDenied")
+        scope = OwnerScope.team(principal.user_id, team_id)
+        request.state.workspace_id = team_id
+    else:
+        scope = OwnerScope.personal(principal.user_id)
+    context = WorkspaceContext(principal=principal, scope=scope)
     set_authorization_context(
         AuthorizationContext.for_principal(
             principal,
-            scope=context.scope,
+            scope=scope,
             request_id=get_request_id() or "",
         )
     )
     return context
 
 
-async def verify_csrf(
-    request: Request,
-    csrf: CsrfPort = Depends(get_csrf_service),
-) -> None:
-    csrf.verify_request(request)
-
-
-async def require_service_api_key(
-    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
-    hasher: ServiceKeyPort = Depends(get_service_key_hasher),
-    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
-) -> Principal:
-    if not x_api_key:
-        record_service_key_auth_failure()
-        raise UnauthorizedError("缺少服务 API Key")
-    key_hash = hasher.hash(x_api_key)
-    # The service key is validated before any principal exists, so the lookup of
-    # the key and its owning user runs under a trusted system scope; RLS on
-    # service_api_keys / users would otherwise deny this pre-identity read.
-    with authorization_scope(AuthorizationContext.system("service-api-key")):
-        async with uow_factory() as uow:
-            key = await uow.service_api_key.get_by_hash(key_hash)
-            if not key:
-                record_service_key_auth_failure()
-                raise UnauthorizedError("服务 API Key 无效")
-            user = await uow.user.get_by_id(key.owner_user_id)
-            if not user or not user.is_active:
-                record_service_key_auth_failure()
-                raise UnauthorizedError("服务 API Key 所属账号不可用")
-            principal = Principal(
-                user_id=user.id,
-                global_role=user.global_role,
-                token_version=user.token_version,
-                team_roles={},
-            )
-            if principal.is_auditor:
-                record_service_key_auth_failure()
-                raise ForbiddenError("审计员为只读角色，无法使用服务 API Key 执行操作")
-            # Record last use so admins can see which keys are live / stale. The
-            # column existed but was never written.
-            await uow.service_api_key.save(key.model_copy(update={"last_used_at": utc_now()}))
-            await uow.commit()
-    set_principal(principal)
-    set_authorization_context(
-        AuthorizationContext.for_principal(
-            principal,
-            request_id=get_request_id() or "",
-        )
-    )
-    return principal
+__all__ = [
+    "enforce_auditor_read_only",
+    "get_current_principal",
+    "get_workspace_context",
+    "require_admin",
+    "require_auditor_or_admin",
+    "require_non_auditor",
+]

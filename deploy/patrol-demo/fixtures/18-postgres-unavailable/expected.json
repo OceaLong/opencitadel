@@ -1,1 +1,0 @@
-{"case_id":"18-postgres-unavailable","fault":"PostgreSQL unavailable","injected_fault":true,"expected_results":[{"check_id":"dependency-health","status":"fail","severity":"critical","assertion_id":"all-dependencies-healthy"}],"required_evidence":["summary"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

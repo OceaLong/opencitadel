@@ -266,10 +266,6 @@
     "secondaryNav": "知识管理入口",
     "title": "OpenCitadel"
   },
-  "sessionMode": {
-    "ask": "Ask",
-    "agent": "Agent"
-  },
   "chatHeader": {
     "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}"
   },
@@ -701,9 +697,6 @@
     }
   },
   "settingsInference": {
-    "embeddingCapabilityUnavailable": "向量行为已启用，但当前工作区的 Embedding 绑定缺失或不可用。",
-    "rerankCapabilityUnavailable": "重排序已启用，但当前工作区的 Rerank 绑定缺失或不可用。",
-    "configureInference": "配置推理能力",
     "addEndpoint": "新增端点",
     "editEndpoint": "编辑端点",
     "endpointDisplayName": "端点名称",
@@ -1630,11 +1623,6 @@
       "threshold": "阈值",
       "timezone": "IANA 时区"
     }
-  },
-  "redirect": {
-    "noActiveVersion": "暂无可用的已发布知识库版本",
-    "openingKnowledgeTask": "正在打开知识库任务...",
-    "startTaskFailed": "启动任务失败"
   },
   "workspaceContext": {
     "cancelUpgrade": "取消",

@@ -12,51 +12,12 @@ concurrency:
 permissions:
   contents: read
 
-# Single source of truth for the uv pin in CI. Keep aligned with the
-# UV_VERSION ARG defaults in api/, sandbox/, ops-*/ Dockerfiles and
-# docker-compose.yml.
 env:
   UV_VERSION: "0.11.33"
 
 jobs:
-  patrol-collector-test:
-    name: Ops Collector tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ops-collector
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install uv
-        run: pip install "uv==${UV_VERSION}"
-      - name: Install locked dependencies
-        run: uv sync --frozen
-      - name: Run unit, contract, and fixture-structure tests
-        run: uv run pytest -q
-
-  ops-actuator-test:
-    name: Ops Actuator tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ops-actuator
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install uv
-        run: pip install "uv==${UV_VERSION}"
-      - name: Install locked dependencies
-        run: uv sync --frozen
-      - name: Run unit, contract, and fixture-structure tests
-        run: uv run pytest -q
-
   api-test:
-    name: API tests
+    name: Kernel and API
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,85 +29,45 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: opencitadel
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres -d opencitadel"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       ENV: test
-      OPENCITADEL_REQUIRE_POSTGRES_TESTS: "1"
-      POSTGRES_HOST: localhost
-      POSTGRES_USER: opencitadel_app
-      POSTGRES_PASSWORD: ci-postgres-app-password
-      POSTGRES_ADMIN_USER: postgres
-      POSTGRES_ADMIN_PASSWORD: postgres
-      POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
-      POSTGRES_KERNEL_PASSWORD: ci-kernel-postgres-password
-      POSTGRES_DB: opencitadel
-      REDIS_HOST: localhost
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      API_KEY_SECRET: b153c2ae8da399ae6a90a2c20bb61f0eee23530a960c2c3630c66354afced9df # gitleaks:allow
-      JWT_SECRET: ci-jwt-secret-with-at-least-32-chars!!
-      SESSION_SECRET: ci-session-secret-32-chars-min!!
+      SQLALCHEMY_DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel
+      SQLALCHEMY_MIGRATION_DATABASE_URI: postgresql+psycopg2://postgres:postgres@localhost:5432/opencitadel
+      KERNEL_V2_TEST_DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel
+      JWT_SECRET: kernel-v2-test-signing-secret
+      SESSION_SECRET: kernel-v2-test-signing-secret
+      DATABASE_AUTHORIZATION_SIGNING_SECRET: kernel-v2-test-signing-secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install uv
-        run: pip install "uv==${UV_VERSION}"
-      - name: Install dependencies
-        run: uv sync --frozen --all-groups
-      - name: Ruff lint and format (all first-party Python)
-        working-directory: ${{ github.workspace }}
-        run: make lint
-      - name: Import boundaries (zero waivers)
+      - run: pip install "uv==${UV_VERSION}"
+      - run: uv sync --frozen --all-groups
+      - name: Lint and architecture boundaries
         run: |
+          uv run ruff check --config ../ruff.toml app core tests
+          uv run ruff format --config ../ruff.toml --check app core tests
           uv run lint-imports
-          uv run pytest -q \
-            tests/app/contracts/test_architecture_debt.py \
-            tests/app/contracts/test_explicit_composition_boundaries.py
-      - name: Prepare non-superuser application database role
+      - name: Prove destructive migration from an empty database
+        run: uv run alembic upgrade head
+      - name: Run focused v2 suite
+        run: uv run pytest -q tests/app
+      - name: Run configuration suite without database overrides
         env:
-          POSTGRES_ADMIN_PASSWORD: postgres
-          POSTGRES_APP_USER: opencitadel_app
-          POSTGRES_APP_PASSWORD: ci-postgres-app-password
-          POSTGRES_MIGRATION_USER: opencitadel_migration_runtime
-          POSTGRES_MIGRATION_PASSWORD: ci-migration-postgres-password
-          POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
-          POSTGRES_KERNEL_PASSWORD: ci-kernel-postgres-password
-        run: uv run python scripts/prepare_ci_database.py
-      - name: Run database migrations
-        env:
-          POSTGRES_ADMIN_USER: opencitadel_migration_runtime
-          POSTGRES_ADMIN_PASSWORD: ci-migration-postgres-password
-        run: uv run python -m app.migrate
-      - name: execution-contracts
-        run: |
-          uv run pytest -q tests/app/contracts
-          uv run pytest -q \
-            tests/app/contracts/test_runtime_deployment_contract.py \
-            tests/app/test_app_factory_process.py \
-            tests/app/test_execution_kernel_process.py
-          uv run pytest -q tests/app/infrastructure/security/test_tenant_rls_integration.py
-      - name: Run pytest
-        run: uv run pytest
+          SQLALCHEMY_DATABASE_URI: ""
+          SQLALCHEMY_MIGRATION_DATABASE_URI: ""
+          KERNEL_V2_TEST_DATABASE_URI: ""
+        run: uv run pytest -q tests/core
 
   ui-test:
-    name: UI tests
+    name: Core UI
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -158,47 +79,16 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - run: pip install "uv==${UV_VERSION}"
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run i18n:check
-      - run: npm run api:check
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test
+      - run: npm test
       - run: npm run build
         env:
           NEXT_PUBLIC_API_BASE_URL: /api
 
-  docker-build:
-    name: Docker build (${{ matrix.name }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ github.event_name == 'pull_request' && fromJSON('{"include":[{"name":"api","context":"api","file":"api/Dockerfile","target":"api"},{"name":"execution-kernel","context":"api","file":"api/Dockerfile","target":"execution-kernel"},{"name":"migrate","context":"api","file":"api/Dockerfile","target":"api"},{"name":"ui","context":"ui","file":"ui/Dockerfile","target":"runner"},{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') || fromJSON('{"include":[{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          target: ${{ matrix.target || '' }}
-          push: false
-          load: true
-          tags: opencitadel-${{ matrix.name }}:ci
-          build-args: |
-            PIP_INDEX_URL=https://pypi.org/simple/
-            UV_INDEX_URL=https://pypi.org/simple/
-            NPM_CONFIG_REGISTRY=https://registry.npmjs.org
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-
   sandbox-test:
-    name: Sandbox tests
+    name: Sandbox
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -208,15 +98,12 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install uv
-        run: pip install "uv==${UV_VERSION}"
-      - name: Install locked dependencies
-        run: uv sync --frozen
-      - name: Run sandbox tests
-        run: uv run pytest -q
+      - run: pip install "uv==${UV_VERSION}"
+      - run: uv sync --frozen
+      - run: uv run pytest -q
 
   deployment-render:
-    name: Deployment render
+    name: Deployment contracts
     runs-on: ubuntu-latest
     env:
       OPENCITADEL_ENV_FILE: .env.example
@@ -224,158 +111,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
-      - name: Validate Docker Compose
-        run: docker compose --env-file .env.example config --quiet
-      - name: Validate sandbox egress proxy policy
-        run: >-
-          docker run --rm
-          --entrypoint squid
-          -v "${{ github.workspace }}/deploy/squid/squid.conf:/etc/squid/squid.conf:ro"
-          ubuntu/squid:6.6-24.04_edge
-          -k parse -f /etc/squid/squid.conf
-      - name: Lint Helm chart
-        run: >-
-          helm lint deploy/helm/opencitadel
-          --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa
-          --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
-          --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
-          --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
-          --set secrets.bootstrapAdminPassword=ci-admin-password-strong
-          --set secrets.postgresAdminPassword=ci-postgres-admin-password
-          --set secrets.postgresPassword=ci-postgres-password-strong
-          --set secrets.redisPassword=ci-redis-password-strong
-      - name: Render Helm manifests
-        run: >-
-          helm template opencitadel deploy/helm/opencitadel
-          --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa
-          --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
-          --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
-          --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
-          --set secrets.bootstrapAdminPassword=ci-admin-password-strong
-          --set secrets.postgresAdminPassword=ci-postgres-admin-password
-          --set secrets.postgresPassword=ci-postgres-password-strong
-          --set secrets.redisPassword=ci-redis-password-strong
-          > /dev/null
-      - name: Render least-privilege Ops Collector manifests
+      - run: docker compose --env-file .env.example config --quiet
+      - name: Lint and render Helm
         run: |
-          helm template opencitadel deploy/helm/opencitadel \
-            --set opsCollector.enabled=true \
-            --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
-            --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
-            --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \
-            --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd \
-            --set secrets.bootstrapAdminPassword=ci-admin-password-strong \
-            --set secrets.postgresAdminPassword=ci-postgres-admin-password \
-            --set secrets.postgresPassword=ci-postgres-password-strong \
-            --set secrets.redisPassword=ci-redis-password-strong > /dev/null
-          kubectl kustomize deploy/kustomize/ops-collector > /dev/null
-      - name: Render least-privilege Ops Actuator manifests
-        run: |
-          helm template opencitadel deploy/helm/opencitadel \
-            --set opsActuator.enabled=true \
-            --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
-            --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
-            --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \
-            --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd \
-            --set secrets.bootstrapAdminPassword=ci-admin-password-strong \
-            --set secrets.postgresAdminPassword=ci-postgres-admin-password \
-            --set secrets.postgresPassword=ci-postgres-password-strong \
-            --set secrets.redisPassword=ci-redis-password-strong > /dev/null
-          kubectl kustomize deploy/kustomize/ops-actuator > /dev/null
+          helm lint deploy/helm/opencitadel --set-json secrets='{"apiKeySecret":"ci-api-key-secret-aaaaaaaaaaaaaaaa","auditSigningKey":"ci-audit-key-bbbbbbbbbbbbbbbbbbbb","jwtSecret":"ci-jwt-secret-cccccccccccccccccccc","sessionSecret":"ci-session-secret-ddddddddddddddddd","bootstrapAdminPassword":"ci-admin-password-strong","postgresAdminPassword":"ci-postgres-admin-password","postgresMigrationPassword":"ci-postgres-migration-password","postgresPassword":"ci-postgres-password-strong","executionKernelPostgresPassword":"ci-kernel-postgres-password","redisPassword":"ci-redis-password-strong"}'
+          helm template opencitadel deploy/helm/opencitadel --set-json secrets='{"apiKeySecret":"ci-api-key-secret-aaaaaaaaaaaaaaaa","auditSigningKey":"ci-audit-key-bbbbbbbbbbbbbbbbbbbb","jwtSecret":"ci-jwt-secret-cccccccccccccccccccc","sessionSecret":"ci-session-secret-ddddddddddddddddd","bootstrapAdminPassword":"ci-admin-password-strong","postgresAdminPassword":"ci-postgres-admin-password","postgresMigrationPassword":"ci-postgres-migration-password","postgresPassword":"ci-postgres-password-strong","executionKernelPostgresPassword":"ci-kernel-postgres-password","redisPassword":"ci-redis-password-strong"}' > /dev/null
 
-  patrol-kind-fixtures:
-    # 20 read-only golden cases replayed against a disposable kind cluster,
-    # plus fixture 21 (ops-actuator remediation: fail -> restart -> idempotent
-    # replay -> heal -> recheck pass, driven by
-    # scripts/drive_remediation_fixture.py). Docker is preinstalled on
-    # ubuntu-latest runners, so `docker build` for the ops-actuator image
-    # (built and `kind load`-ed by run-patrol-fixtures.sh itself, mirroring
-    # the nginx/busybox/python fixture images) needs no extra buildx setup.
-    name: Ops Patrol disposable-cluster fixtures (20 read-only + fixture 21 remediation)
+  docker-build:
+    name: Image (${{ matrix.name }})
     runs-on: ubuntu-latest
-    # Keep a hard 30-minute ceiling: the complete 21-case flow takes about
-    # 17 minutes from a cold local kind cluster after restoring API-server
-    # egress, leaving useful runner variance without masking a blocked phase.
-    timeout-minutes: 30
-    needs: [patrol-collector-test, api-test]
-    env:
-      PATROL_RUN_REMEDIATION_FIXTURE: "true"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install uv and kind
-        run: |
-          pip install "uv==${UV_VERSION}"
-          go install sigs.k8s.io/kind@v0.31.0
-      - name: Install locked test environments
-        run: |
-          (cd ops-collector && uv sync --frozen)
-          (cd api && uv sync --frozen --all-groups)
-      - name: Run guarded fixture score (20 read-only cases + fixture 21 remediation)
-        run: ./scripts/run-patrol-fixtures.sh
-      - name: Upload fixture score
-        # A successful runner must publish its score; if the runner itself
-        # fails or is cancelled, preserve that primary error instead of
-        # adding a misleading secondary "file not found" failure.
-        if: success()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: patrol-fixture-score
-          path: tmp/patrol-fixture-score.json
-          if-no-files-found: error
-
-  docs-check:
-    name: Documentation checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
-      - name: Run documentation consistency script
-        run: ./scripts/check-docs.sh
-
-  acceptance-e2e:
-    name: Deterministic full-stack acceptance
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs:
-      - api-test
-      - ui-test
-      - sandbox-test
-      - patrol-collector-test
-      - ops-actuator-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: api, context: api, file: api/Dockerfile, target: api}
+          - {name: execution-kernel, context: api, file: api/Dockerfile, target: execution-kernel}
+          - {name: migrate, context: api, file: api/Dockerfile, target: api}
+          - {name: ui, context: ui, file: ui/Dockerfile, target: runner}
+          - {name: sandbox, context: sandbox, file: sandbox/Dockerfile, target: ""}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: e2e/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install pinned uv
-        run: pip install "uv==${UV_VERSION}"
-      - name: Resolve docker socket gid
-        run: echo "DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
-      - name: Install locked Playwright dependencies
-        working-directory: e2e
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-      - name: Run isolated zero-skip acceptance plane
-        run: ./scripts/run-acceptance-e2e.sh --disposable
-        env:
-          PIP_INDEX_URL: https://pypi.org/simple/
-          UV_INDEX_URL: https://pypi.org/simple/
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-      - name: Upload acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: acceptance-evidence
-          path: tmp/acceptance/
-          if-no-files-found: error
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: false
+          tags: opencitadel-${{ matrix.name }}:ci

@@ -20,20 +20,9 @@ ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 # 2.配置容器工作空间
 WORKDIR /app
 
-# 2.1 weasyprint PDF 依赖（合规证据 PDF）
-# libexpat1 升级到 trixie-security 修复版(CVE-2025-59375/CVE-2026-25210/45186/56131/56408)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    libcairo2 \
-    fonts-noto-cjk \
-    && apt-get install -y --only-upgrade libexpat1 \
+# 3.安装健康检查所需的 curl。浏览器运行在隔离沙箱中。
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
-
-# 3.安装curl(docker-compose.yml 中 opencitadel-api 的 healthcheck 依赖容器内 curl 探活 /api/health/ready,
-#   而非 Playwright——playwright-python wheel 自带 driver,本项目仅用 connect_over_cdp 连远端浏览器,无需系统 node)
-RUN apt-get update && apt-get install -y --no-install-recommends curl
 
 # 4.安装uv, 使用uv来同步依赖环境（pip 走国内镜像，避免 files.pythonhosted.org 超时）
 RUN pip install --no-cache-dir \

@@ -1,30 +1,21 @@
-import logging
+"""Liveness, readiness, and dependency status for the focused runtime."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
-from app.application.services.status_service import StatusService
 from app.composition.types import ApiRuntime
-from app.domain.models.health_status import HealthStatus
-from app.interfaces.schemas import Response
-from app.interfaces.service_dependencies import get_status_service
 
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/status", tags=["状态模块"])
-health_router = APIRouter(prefix="/health", tags=["状态模块"])
+router = APIRouter(prefix="/status", tags=["status"])
+health_router = APIRouter(prefix="/health", tags=["status"])
 
 
-@health_router.get("/live", summary="进程存活探针")
+@health_router.get("/live")
 async def get_liveness() -> dict[str, str]:
-    """Serving the event loop is sufficient for process liveness."""
-
     return {"status": "live"}
 
 
-@health_router.get("/ready", summary="运行时就绪探针")
+@health_router.get("/ready")
 async def get_readiness(request: Request) -> JSONResponse:
-    """Report whether the complete lifespan-owned runtime accepts traffic."""
-
     runtime = getattr(request.app.state, "runtime", None)
     ready = isinstance(runtime, ApiRuntime) and runtime.readiness.ready
     return JSONResponse(
@@ -34,19 +25,18 @@ async def get_readiness(request: Request) -> JSONResponse:
     )
 
 
-@router.get(
-    path="",
-    response_model=Response[list[HealthStatus]],
-    summary="系统健康检查",
-    description="检查系统的postgres、redis、fastapi等组件的状态信息。",
-)
-async def get_status(
-    status_service: StatusService = Depends(get_status_service),
-) -> Response:
-    """系统健康检查，检查postgres/redis/fastapi等服务"""
-    statues = await status_service.check_all()
-
-    if any(item.status == "error" for item in statues):
-        return Response.fail(503, "系统存在服务异常", statues)
-
-    return Response.success(data=statues)
+@router.get("")
+async def get_status(request: Request) -> JSONResponse:
+    runtime = getattr(request.app.state, "runtime", None)
+    ready = isinstance(runtime, ApiRuntime) and runtime.readiness.ready
+    redis_ready = ready and runtime.resources.redis_connectivity.available
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "data": {
+                "status": "ok" if ready else "degraded",
+                "postgres": "ready" if ready else "unavailable",
+                "redis": "ready" if redis_ready else "optional-unavailable",
+            }
+        },
+    )

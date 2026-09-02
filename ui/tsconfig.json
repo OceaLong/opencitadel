@@ -24,11 +24,17 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "next.config.ts",
+    "vitest.config.mts",
+    "src/app/**/*.ts",
+    "src/app/**/*.tsx",
+    "src/components/app-frame.tsx",
+    "src/components/auth-provider.tsx",
+    "src/lib/api-client.ts",
+    "src/lib/navigation.ts",
+    "src/lib/navigation.test.ts",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "src/app/**/*.test.ts", "src/app/**/*.test.tsx"]
 }

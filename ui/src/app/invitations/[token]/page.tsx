@@ -1,10 +1,6 @@
-import { AcceptInvitationPageClient } from "./accept-invitation-page-client";
+import { redirect } from "next/navigation";
 
-export default async function AcceptInvitationPage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+export default async function InvitationPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  return <AcceptInvitationPageClient token={token} />;
+  redirect(`/register?token=${encodeURIComponent(token)}`);
 }

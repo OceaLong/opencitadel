@@ -1,141 +1,66 @@
-"""Execution-kernel composition root and deterministic lifecycle."""
+"""Greenfield worker composition for Effects, timers, and retention only."""
 
 from __future__ import annotations
 
+import json
 import os
 import socket
-import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from functools import partial
+from uuid import uuid4
 
-from app.application.execution.activities.child_run import ChildRunActivityHandler
-from app.application.execution.activities.model_call import ModelCallActivityHandler
-from app.application.execution.activities.patrol import (
-    PatrolExecutionActivityHandler,
-    PatrolValidationActivityHandler,
-)
-from app.application.execution.activities.remediation import RemediationActivityHandler
-from app.application.execution.activities.resource_build import KnowledgeBuildActivityHandler
-from app.application.execution.activities.retrieval import RetrievalActivityHandler
-from app.application.execution.activities.tool_call import ToolCallActivityHandler
-from app.application.execution.activity_registry import (
-    ActivityRegistry,
-    create_activity_registry,
-)
-from app.application.execution.agent_tool_catalog import AgentToolCatalog
-from app.application.services.patrol_collector_validator import (
-    MCPPatrolCollectorValidator,
-)
-from app.application.services.patrol_retention_service import PatrolRetentionService
-from app.application.services.resource_version_gc_service import ResourceVersionGCService
 from app.composition.resources import (
     DEFAULT_RESOURCE_FACTORIES,
     ResourceFactories,
     open_process_resources,
 )
-from app.composition.shared import (
-    RuntimePolicyRepositoryFactory,
-    SharedServices,
-    _default_runtime_policy_repository,
-    build_shared_services,
-)
-from app.composition.tasks import RestartPolicy, TaskFailure, TaskKind, TaskSupervisor
+from app.composition.tasks import TaskFailure, TaskSupervisor
 from app.composition.types import KernelRuntime, RuntimeReadiness
-from app.domain.models.authorization import AuthorizationContext
-from app.domain.services.knowledge_base.ingestion_runner import KBIngestionRunner
-from app.infrastructure.adapters.execution_ports import build_execution_kernel_runtime
-from app.infrastructure.adapters.query_ports import SqlAlchemyPatrolRetentionStore
-from app.infrastructure.adapters.redis_capabilities import (
-    RedisLeaseManager,
-    RedisRuntimePolicyHintStreamFactory,
-    RedisSandboxActivityStore,
-    RedisWakeupAdapter,
+from app.contexts.identity.operations import PostgresIdentityOperations
+from app.contexts.identity.runtime import IdentityRuntime
+from app.contexts.identity.services import PostgresGovernanceService, PostgresQuotaService
+from app.contexts.inference.quota import PostgresQuotaGate
+from app.contexts.inference.runtime import InferenceRuntime
+from app.contexts.inference.services import OpenAIInferenceGateway, PostgresInferenceService
+from app.contexts.inference.tooling import (
+    PostgresToolGateway,
+    SandboxFileGateway,
+    SandboxRuntime,
 )
-from app.infrastructure.external.knowledge.web_connector import HttpWebDocumentGateway
-from app.infrastructure.external.runtime_policy_notifier import RuntimePolicyHintListener
-from app.infrastructure.external.sandbox.reclaim_coordinator import ReclaimCoordinator
-from app.infrastructure.external.sandbox.sandbox_maintenance import SandboxMaintenance
-from app.infrastructure.external.scheduler.job_scheduler import run_scheduler_loop
+from app.contexts.kernel.runtime import KernelWorkerRuntime
+from app.contexts.knowledge.runtime import KnowledgeRuntime
+from app.contexts.knowledge.services import PostgresKnowledgeService
+from app.domain.runtime_policy.governance import GovernancePolicy
+from app.infrastructure.security.api_key_cipher import ApiKeyCipher
+from app.kernel.application.command_service import CommandService
+from app.kernel.application.effect_worker import EffectWorker
+from app.kernel.application.retained_effects import (
+    FileEffect,
+    GovernedToolEffect,
+    KnowledgeBuildEffect,
+    ModelCallEffect,
+    RetrievalEffect,
+    build_retained_effect_registry,
+)
+from app.kernel.application.retention_worker import RetentionWorker
+from app.kernel.application.timer_worker import TimerWorker
+from app.kernel.domain.reducer import ReducerRegistry
+from app.kernel.domain.types import Workflow
+from app.kernel.domain.workflows.agent import agent_reducer
+from app.kernel.domain.workflows.knowledge_ingest import knowledge_ingest_reducer
+from app.kernel.infrastructure.postgres.claims import (
+    PostgresEffectClaimStore,
+    PostgresTimerClaimStore,
+)
+from app.kernel.infrastructure.postgres.facts import PostgresDecisionFactsFactory
+from app.kernel.infrastructure.postgres.retention import PostgresRetentionStore
+from app.kernel.infrastructure.postgres.store import PostgresKernelStore
 from app.runtime_role import ProcessRole
 from core.config import DeploymentSettings
 
 
 def _worker_id(kind: str) -> str:
-    return f"{socket.gethostname()}:{os.getpid()}:{kind}:{uuid.uuid4().hex[:8]}"
-
-
-def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
-    tools = AgentToolCatalog(
-        uow_factory=shared.uow_factory,
-        sandbox_factory=shared.sandbox_factory,
-        search_engine=shared.search_engine,
-        mcp_connection_pool=shared.mcp_connection_pool,
-        a2a_connection_pool=shared.a2a_connection_pool,
-        mcp_servers=shared.mcp_integration_service,
-        a2a_servers=shared.a2a_integration_service,
-        file_storage=shared.file_storage,
-        models=shared.inference_model_service,
-        image_generator=shared.image_generator,
-        artifacts=shared.artifact_service,
-        memories=shared.memory_service,
-        embeddings=shared.embedding_service,
-        llm_factory=shared.resilient_llm_factory,
-    )
-    knowledge_pipeline = KBIngestionRunner(
-        uow_factory=shared.uow_factory,
-        file_storage=shared.file_storage,
-        web_documents=HttpWebDocumentGateway(policy_reader=shared.runtime_policy_reader),
-        json_parser=shared.json_parser,
-        embeddings=shared.embedding_service,
-    )
-    collector = MCPPatrolCollectorValidator(shared.mcp_connection_pool)
-    return create_activity_registry(
-        ModelCallActivityHandler(
-            objects=shared.activity_objects,
-            models=shared.inference_model_service,
-            tools=tools,
-            skills=shared.skill_service,
-            token_usage=shared.llm_token_usage_service,
-            files=shared.file_service,
-            client_factory=shared.resilient_llm_factory,
-            quota=shared.quota_service,
-        ),
-        RetrievalActivityHandler(
-            objects=shared.activity_objects,
-            tools=tools,
-            memories=shared.memory_service,
-        ),
-        ToolCallActivityHandler(objects=shared.activity_objects, tools=tools),
-        ChildRunActivityHandler(
-            objects=shared.activity_objects,
-            admission=shared.run_admission_service,
-            runs=shared.run_projection,
-        ),
-        RemediationActivityHandler(
-            objects=shared.activity_objects,
-            executor=shared.patrol_remediation_service,
-            policy_reader=shared.runtime_policy_reader,
-        ),
-        KnowledgeBuildActivityHandler(
-            objects=shared.activity_objects,
-            pipeline=knowledge_pipeline,
-            models=shared.inference_model_service,
-            client_factory=shared.resilient_llm_factory,
-        ),
-        PatrolExecutionActivityHandler(
-            objects=shared.activity_objects,
-            uow_factory=shared.uow_factory,
-            collector=collector,
-            runs=shared.patrol_run_service,
-        ),
-        PatrolValidationActivityHandler(
-            objects=shared.activity_objects,
-            uow_factory=shared.uow_factory,
-            collector=collector,
-            packs=shared.patrol_pack_service,
-        ),
-    )
+    return f"{socket.gethostname()}:{os.getpid()}:{kind}:{uuid4().hex[:8]}"
 
 
 @asynccontextmanager
@@ -143,12 +68,9 @@ async def open_kernel_runtime(
     settings: DeploymentSettings,
     *,
     factories: ResourceFactories = DEFAULT_RESOURCE_FACTORIES,
-    runtime_policy_repository_factory: RuntimePolicyRepositoryFactory = (
-        _default_runtime_policy_repository
-    ),
     on_critical_failure: Callable[[TaskFailure], None] | None = None,
 ) -> AsyncIterator[KernelRuntime]:
-    """Open the complete kernel graph without constructing HTTP presentation services."""
+    """Own the complete worker graph with no HTTP or retired feature services."""
 
     readiness = RuntimeReadiness()
     supervisor = TaskSupervisor(
@@ -160,105 +82,122 @@ async def open_kernel_runtime(
         ProcessRole.EXECUTION_KERNEL,
         factories=factories,
     ) as resources:
-        try:
-            shared = build_shared_services(
-                resources,
-                supervisor=supervisor,
-                runtime_policy_repository_factory=runtime_policy_repository_factory,
-            )
-            await shared.runtime_policy_reader.initialize()
+        session_factory = resources.postgres.session_factory
+        cipher = ApiKeyCipher(
+            settings.api_key_secret,
+            key_id=settings.api_key_secret_id,
+            previous_secrets=settings.api_key_previous_secrets,
+        )
 
-            redis = resources.general_redis
-            leases = RedisLeaseManager(redis)
-            activity_registry = _build_activity_registry(shared)
-            execution = build_execution_kernel_runtime(
-                session_factory=resources.postgres.session_factory,
-                redis=redis,
-                authorization=AuthorizationContext.system("execution-kernel"),
-                activity_registry=activity_registry,
-                worker_id=_worker_id("activities"),
-                activity_max_concurrency=settings.execution_activity_max_concurrency,
-            )
-            resource_gc = ResourceVersionGCService(
-                uow_factory=shared.uow_factory,
-                policy_reader=shared.runtime_policy_reader,
-            )
-            patrol_retention = PatrolRetentionService(
-                SqlAlchemyPatrolRetentionStore(resources.postgres.session_factory),
-                policy_reader=shared.runtime_policy_reader,
-            )
-            sandbox_maintenance = SandboxMaintenance(
-                factory=shared.sandbox_factory,
-                reclaim=ReclaimCoordinator(
-                    leases=leases,
-                    worker_id=_worker_id("sandbox-reclaim"),
-                ),
-                activity_store=RedisSandboxActivityStore(redis),
+        def encrypt_private(value: dict[str, object]) -> str:
+            return cipher.encrypt_versioned(
+                json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
             )
 
-            if resources.redis_connectivity.available:
-                policy_listener = RuntimePolicyHintListener(
-                    streams=RedisRuntimePolicyHintStreamFactory(redis),
-                    reader=shared.runtime_policy_reader,
-                )
-                await supervisor.start(
-                    "runtime-policy-hints",
-                    policy_listener.run,
-                    kind=TaskKind.AUXILIARY,
-                    restart=RestartPolicy(),
-                )
+        def decrypt_private(value: str) -> dict[str, object]:
+            return json.loads(cipher.decrypt_versioned(value))
 
-            runtime = KernelRuntime(
-                settings=settings,
-                resources=resources,
-                readiness=readiness,
-                supervisor=supervisor,
-                execution=execution,
-                policy_reader=shared.runtime_policy_reader,
-                wakeup=RedisWakeupAdapter(redis),
-                scheduler_leases=leases,
-                uow_factory=shared.uow_factory,
-                scheduler_service=shared.scheduled_job_service,
-                resource_gc=resource_gc,
-                patrol_retention=patrol_retention,
-                sandbox_factory=shared.sandbox_factory,
-                sandbox_maintenance=sandbox_maintenance,
-            )
-            await supervisor.start(
-                "scheduler",
-                partial(
-                    run_scheduler_loop,
-                    shared.uow_factory,
-                    shared.scheduled_job_service,
-                    leases=leases,
-                    worker_id=_worker_id("scheduler"),
-                    policy_reader=shared.runtime_policy_reader,
-                    stop_event=supervisor.stop_event,
-                    resource_version_gc_service=resource_gc,
-                    patrol_retention_service=patrol_retention,
-                    mcp_pool=shared.mcp_connection_pool,
-                    a2a_pool=shared.a2a_connection_pool,
-                ),
-                kind=TaskKind.CRITICAL,
-            )
-            if shared.sandbox_factory.deployment.address is None:
-                await supervisor.start(
-                    "sandbox-pool",
-                    partial(
-                        shared.sandbox_factory.pool.run,
-                        supervisor.stop_event,
+        quota = PostgresQuotaGate(session_factory)
+        commands = CommandService(
+            store=PostgresKernelStore(
+                session_factory,
+                encrypt_private=encrypt_private,
+                decrypt_private=decrypt_private,
+                command_validator=quota.validate_command,
+            ),
+            reducers=ReducerRegistry(
+                {
+                    Workflow.AGENT: agent_reducer,
+                    Workflow.KNOWLEDGE_INGEST: knowledge_ingest_reducer,
+                }
+            ),
+            facts_factory=PostgresDecisionFactsFactory(session_factory),
+        )
+        inference_service = PostgresInferenceService(session_factory, cipher=cipher)
+        inference_gateway = OpenAIInferenceGateway(session_factory, cipher=cipher)
+        knowledge_service = PostgresKnowledgeService(
+            session_factory,
+            storage=resources.object_storage_client,
+            commands=commands,
+            retention_days=GovernancePolicy().retention_days,
+            quota=quota,
+        )
+        sandbox = SandboxRuntime(settings)
+        tool_gateway = PostgresToolGateway(
+            session_factory,
+            cipher=cipher,
+            settings=settings,
+            sandbox=sandbox,
+        )
+        handlers = build_retained_effect_registry(
+            model=ModelCallEffect(quota=quota, inference=inference_gateway),
+            retrieval=RetrievalEffect(knowledge=knowledge_service),
+            tool=GovernedToolEffect(tools=tool_gateway),
+            file=FileEffect(files=SandboxFileGateway(sandbox)),
+            knowledge_build=KnowledgeBuildEffect(knowledge=knowledge_service),
+        )
+        identity_operations = PostgresIdentityOperations(
+            session_factory,
+            retention_days=GovernancePolicy().retention_days,
+            storage=resources.object_storage_client,
+        )
+        runtime = KernelRuntime(
+            settings=settings,
+            resources=resources,
+            readiness=readiness,
+            supervisor=supervisor,
+            identity=IdentityRuntime(
+                commands=identity_operations,
+                queries=identity_operations,
+                transactions=session_factory,
+                quotas=PostgresQuotaService(session_factory),
+                governance=PostgresGovernanceService(session_factory),
+            ),
+            inference=InferenceRuntime(
+                commands=inference_service,
+                queries=inference_service,
+                gateway=inference_gateway,
+                transactions=session_factory,
+            ),
+            knowledge=KnowledgeRuntime(
+                commands=knowledge_service,
+                queries=knowledge_service,
+                gateway=knowledge_service,
+                transactions=session_factory,
+                dispositions=knowledge_service,
+            ),
+            kernel=KernelWorkerRuntime(
+                commands=commands,
+                effects=EffectWorker(
+                    store=PostgresEffectClaimStore(
+                        session_factory,
+                        decrypt_request=decrypt_private,
                     ),
-                    kind=TaskKind.CRITICAL,
-                )
-                await supervisor.start(
-                    "sandbox-maintenance",
-                    partial(sandbox_maintenance.run, supervisor.stop_event),
-                    kind=TaskKind.CRITICAL,
-                )
+                    handlers=handlers,
+                    command_sink=commands,
+                    worker_id=_worker_id("effects"),
+                    batch_size=settings.execution_activity_batch_size,
+                ),
+                timers=TimerWorker(
+                    store=PostgresTimerClaimStore(session_factory),
+                    command_sink=commands,
+                    worker_id=_worker_id("timers"),
+                    batch_size=settings.execution_activity_batch_size,
+                ),
+                retention=RetentionWorker(
+                    store=PostgresRetentionStore(session_factory),
+                    command_sink=commands,
+                    worker_id=_worker_id("retention"),
+                    batch_size=min(settings.execution_activity_batch_size, 100),
+                ),
+            ),
+        )
+        try:
             readiness.mark_ready()
             yield runtime
         finally:
             readiness.mark_not_ready()
+            await sandbox.close()
             await supervisor.stop()
 
 

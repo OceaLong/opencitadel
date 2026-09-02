@@ -74,7 +74,7 @@ spec:
             - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
               value: {{ .Values.shutdown.timeoutSeconds | quote }}
             {{- range $key, $value := .Values.env }}
-            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") (ne $key "SANDBOX_K8S_NAMESPACE") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -87,6 +87,8 @@ spec:
               value: {{ include "opencitadel.sandboxHttpsProxy" . | quote }}
             - name: SANDBOX_CHROME_ARGS
               value: {{ include "opencitadel.sandboxChromeArgs" . | quote }}
+            - name: SANDBOX_K8S_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
             - name: POSTGRES_USER
               value: {{ .Values.executionKernel.databaseUser | quote }}
             - name: POSTGRES_PASSWORD

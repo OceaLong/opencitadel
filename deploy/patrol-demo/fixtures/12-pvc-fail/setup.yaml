@@ -1,5 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: patrol-fixture-state, namespace: opencitadel-patrol-demo}
-data:
-  state.json: '{"case":"12-pvc-fail","app_5xx_ratio":0,"pvc_percent":92,"backup_age_hours":1,"tls_days_remaining":90,"dependency_healthy":true,"endpoint_healthy":true}'

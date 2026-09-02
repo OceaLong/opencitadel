@@ -1,337 +1,174 @@
-from datetime import UTC, datetime
+"""Local and OAuth authentication for the greenfield identity context."""
+
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi import Response as StarletteResponse
+from fastapi import Response as HttpResponse
+from pydantic import BaseModel, Field
 from starlette.responses import RedirectResponse
 
-from app.application.ports.crypto import (
-    REFRESH_COOKIE,
-    ApplicationUrls,
-    CookieManagerPort,
-    OAuthRegistryPort,
-    read_host_cookie,
-)
-from app.application.services.auth_service import AuthService
+from app.application.ports.crypto import REFRESH_COOKIE, read_host_cookie
+from app.contexts.identity.runtime import IdentityRuntime
 from app.domain.errors import BadRequestError, UnauthorizedError
-from app.domain.models.authorization import AuthorizationContext
-from app.domain.models.invitation import InvitationType
-from app.domain.models.oauth_identity import OAuthIdentity
-from app.domain.models.team import TeamMember, TeamRole
-from app.domain.models.user import User
-from app.domain.repositories.uow import UnitOfWorkFactory
-from app.domain.utils.safe_redirect import resolve_safe_redirect_path
-from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
-from app.interfaces.client_ip import get_client_ip
-from app.interfaces.schemas import Response as ApiResponse
-from app.interfaces.schemas.auth import LoginRequest, RegisterRequest, UserResponse
-from app.interfaces.service_dependencies import (
-    get_application_urls,
-    get_auth_service,
-    get_cookie_manager,
-    get_oauth_registry,
-    get_uow_factory,
-)
+from app.domain.models.scope import Principal
+from app.interfaces.auth_dependencies import get_current_principal
+from app.interfaces.schemas import Response
+from app.interfaces.service_dependencies import get_identity_runtime
 
-router = APIRouter(prefix="/auth", tags=["认证模块"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=ApiResponse[UserResponse])
+class LoginRequest(BaseModel):
+    email_or_username: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class RegisterRequest(BaseModel):
+    invitation_token: str = Field(min_length=32, max_length=512)
+    email: str = Field(min_length=3, max_length=320)
+    username: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=12, max_length=256)
+    display_name: str = Field(default="", max_length=255)
+
+
+def _set_cookies(response: HttpResponse, runtime: IdentityRuntime, tokens) -> None:
+    runtime.cookies.set_auth_cookies(
+        response,
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+    )
+
+
+@router.post("/login")
+async def login(
+    body: LoginRequest,
+    response: HttpResponse,
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    user, tokens = await runtime.auth.login(body.email_or_username, body.password)
+    _set_cookies(response, runtime, tokens)
+    return Response.success(user)
+
+
+@router.post("/register", status_code=201)
 async def register(
-    response: StarletteResponse,
-    request: Request,
     body: RegisterRequest,
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-) -> ApiResponse[UserResponse]:
-    user = await auth_service.register_with_invitation(
-        invite_token=body.invite_token,
+    response: HttpResponse,
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    user, tokens = await runtime.auth.register(
+        invitation_token=body.invitation_token,
         email=body.email,
         username=body.username,
         password=body.password,
+        display_name=body.display_name,
     )
-    user, tokens = await auth_service.login(
-        email_or_username=user.email,
-        password=body.password,
-        user_agent=request.headers.get("user-agent", ""),
-        ip_address=get_client_ip(request),
-    )
-    cookie_manager.set_auth_cookies(
-        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
-    )
-    return ApiResponse.success(UserResponse.from_domain(user))
+    _set_cookies(response, runtime, tokens)
+    return Response.success(user)
 
 
-@router.post("/login", response_model=ApiResponse[UserResponse])
-async def login(
-    response: StarletteResponse,
-    request: Request,
-    body: LoginRequest,
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-) -> ApiResponse[UserResponse]:
-    user, tokens = await auth_service.login(
-        email_or_username=body.email_or_username,
-        password=body.password,
-        user_agent=request.headers.get("user-agent", ""),
-        ip_address=get_client_ip(request),
-    )
-    cookie_manager.set_auth_cookies(
-        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
-    )
-    return ApiResponse.success(UserResponse.from_domain(user))
-
-
-@router.post("/refresh", response_model=ApiResponse[UserResponse])
+@router.post("/refresh")
 async def refresh(
-    response: StarletteResponse,
     request: Request,
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-) -> ApiResponse[UserResponse]:
-    refresh_token = read_host_cookie(request.cookies, REFRESH_COOKIE)
-    if not refresh_token:
+    response: HttpResponse,
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    token = read_host_cookie(request.cookies, REFRESH_COOKIE)
+    if not token:
         raise UnauthorizedError("缺少刷新令牌")
-    user, tokens = await auth_service.refresh(
-        refresh_token,
-        user_agent=request.headers.get("user-agent", ""),
-        ip_address=get_client_ip(request),
-    )
-    cookie_manager.set_auth_cookies(
-        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
-    )
-    return ApiResponse.success(UserResponse.from_domain(user))
+    user, tokens = await runtime.auth.refresh(token)
+    _set_cookies(response, runtime, tokens)
+    return Response.success(user)
 
 
-@router.post("/logout", response_model=ApiResponse[dict], dependencies=[Depends(verify_csrf)])
+@router.post("/logout")
 async def logout(
-    response: StarletteResponse,
     request: Request,
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-) -> ApiResponse[dict]:
-    await auth_service.logout(read_host_cookie(request.cookies, REFRESH_COOKIE))
-    cookie_manager.clear_auth_cookies(response)
-    return ApiResponse.success()
+    response: HttpResponse,
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    await runtime.auth.logout(read_host_cookie(request.cookies, REFRESH_COOKIE))
+    runtime.cookies.clear_auth_cookies(response)
+    return Response.success({"loggedOut": True})
 
 
-@router.get("/me", response_model=ApiResponse[UserResponse])
+@router.get("/me")
 async def me(
-    principal=Depends(get_current_principal),
-    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
-) -> ApiResponse[UserResponse]:
-    async with uow_factory() as uow:
-        user = await uow.user.get_by_id(principal.user_id)
-    if not user:
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    user = await runtime.auth.get_user(principal.user_id)
+    if user is None:
         raise UnauthorizedError()
-    return ApiResponse.success(UserResponse.from_domain(user))
+    return Response.success(user)
 
 
-@router.get("/oauth/providers", response_model=ApiResponse[list[str]])
-async def oauth_providers(
-    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
-) -> ApiResponse[list[str]]:
-    return ApiResponse.success(data=oauth_registry.enabled_providers())
+@router.get("/oauth/providers")
+async def oauth_providers(runtime: IdentityRuntime = Depends(get_identity_runtime)):
+    return Response.success(runtime.oauth.enabled_providers())
 
 
 @router.get("/oauth/{provider}/login")
 async def oauth_login(
     provider: str,
     request: Request,
-    redirect: str = Query(default=""),
-    team_invite_token: str = Query(default=""),
-    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
-    application_urls: ApplicationUrls = Depends(get_application_urls),
+    redirect: str = Query(default="/"),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
 ):
-    client = oauth_registry.get(provider)
+    client = runtime.oauth.get(provider)
     if client is None:
-        raise BadRequestError("OAuth 提供商未启用")
-    request.session["oauth_redirect"] = resolve_safe_redirect_path(redirect)
-    request.session["oauth_team_invite_token"] = (team_invite_token or "").strip()
-    redirect_uri = f"{application_urls.oauth_redirect_base}/{provider}/callback"
-    return await client.authorize_redirect(request, redirect_uri)
+        raise BadRequestError("OAuth provider is not enabled")
+    request.session["oauth_redirect"] = redirect if redirect.startswith("/") else "/"
+    uri = f"{runtime.application_urls.oauth_redirect_base}/{provider}/callback"
+    return await client.authorize_redirect(request, uri)
 
 
 @router.get("/oauth/{provider}/callback")
 async def oauth_callback(
     provider: str,
     request: Request,
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
-    application_urls: ApplicationUrls = Depends(get_application_urls),
-    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
 ):
-    client = oauth_registry.get(provider)
+    client = runtime.oauth.get(provider)
     if client is None:
-        raise BadRequestError("OAuth 提供商未启用")
+        raise BadRequestError("OAuth provider is not enabled")
     token = await client.authorize_access_token(request)
-    profile = await _load_oauth_profile(provider, client, token)
-    email = (profile.get("email") or "").strip().lower()
-    # Account-takeover guard: an OAuth flow may only proceed with an email the
-    # provider has proven verified. This gate is what makes the implicit
-    # `get_by_email` account link below safe — without it an attacker could set
-    # a victim's address as an unverified email on their OAuth account and bind
-    # their identity onto the victim's existing (password) account.
-    if not email or not profile.get("email_verified", False):
-        raise BadRequestError("OAuth 邮箱未验证，无法登录")
-    provider_user_id = str(profile.get("sub") or profile.get("id") or "")
-    if not provider_user_id:
-        raise BadRequestError("OAuth 用户标识缺失")
-
-    # OAuth login/registration reads and writes users, oauth_identities,
-    # invitations, and team_members for a caller who has no bound identity yet;
-    # the service layer here is the authorization boundary, so the transaction
-    # runs under a trusted system scope instead of the anonymous request context.
-    async with uow_factory(authorization_context=AuthorizationContext.system("oauth")) as uow:
-        identity = await uow.oauth_identity.get_by_provider_identity(provider, provider_user_id)
-        user = (
-            await uow.user.get_by_id(identity.user_id)
-            if identity
-            else await uow.user.get_by_email(email)
-        )
-        team_invite_token = (request.session.pop("oauth_team_invite_token", "") or "").strip()
-        oauth_redirect = resolve_safe_redirect_path(request.session.pop("oauth_redirect", ""))
-
-        if not user:
-            invitation = await _resolve_oauth_registration_invitation(
-                uow,
-                email=email,
-                team_invite_token=team_invite_token,
-            )
-            if not invitation:
-                raise BadRequestError("该邮箱尚未收到平台邀请")
-            username = email.split("@", 1)[0] or "user"
-            if await uow.user.get_by_username(username):
-                username = f"{username}-{provider_user_id[-6:]}"
-            user = User(
-                email=email,
-                username=username,
-                display_name=profile.get("name") or username,
-                avatar_url=profile.get("picture") or profile.get("avatar_url") or "",
-            )
-            await uow.user.save(user)
-            invitation.accepted_at = datetime.now(UTC)
-            invitation.accepted_user_id = user.id
-            await uow.invitation.save(invitation)
-            if invitation.type == InvitationType.TEAM and invitation.team_id:
-                existing_member = await uow.team.get_member(invitation.team_id, user.id)
-                if not existing_member:
-                    await uow.team.add_member(
-                        TeamMember(
-                            team_id=invitation.team_id,
-                            user_id=user.id,
-                            role=invitation.team_role or TeamRole.MEMBER,
-                        )
-                    )
-        elif team_invite_token:
-            team_invitation = await uow.invitation.get_by_token(team_invite_token)
-            if (
-                team_invitation
-                and team_invitation.type == InvitationType.TEAM
-                and team_invitation.team_id
-                and not team_invitation.accepted
-                and team_invitation.expires_at >= datetime.now(UTC)
-            ):
-                if team_invitation.email and team_invitation.email.strip().lower() != email:
-                    raise BadRequestError("邀请邮箱与 OAuth 账号不匹配")
-                existing_member = await uow.team.get_member(team_invitation.team_id, user.id)
-                if not existing_member:
-                    await uow.team.add_member(
-                        TeamMember(
-                            team_id=team_invitation.team_id,
-                            user_id=user.id,
-                            role=team_invitation.team_role or TeamRole.MEMBER,
-                        )
-                    )
-                team_invitation.accepted_at = datetime.now(UTC)
-                team_invitation.accepted_user_id = user.id
-                await uow.invitation.save(team_invitation)
-        if not identity:
-            await uow.oauth_identity.save(
-                OAuthIdentity(
-                    user_id=user.id,
-                    provider=provider,
-                    provider_user_id=provider_user_id,
-                    email=email,
-                    email_verified=True,
-                )
-            )
-        await uow.commit()
-
-    tokens = await auth_service.issue_tokens_for_user(
-        user,
-        user_agent=request.headers.get("user-agent", ""),
-        ip_address=get_client_ip(request),
-        audit_action="oauth_login",
+    profile = await _oauth_profile(provider, client, token)
+    if not profile["verified"]:
+        raise BadRequestError("OAuth email must be verified")
+    user, tokens = await runtime.auth.oauth_authenticate(
+        provider=provider,
+        subject=profile["subject"],
+        email=profile["email"],
+        display_name=profile["name"],
     )
-    response = RedirectResponse(f"{application_urls.frontend_base_url.rstrip('/')}{oauth_redirect}")
-    cookie_manager.set_auth_cookies(
-        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
-    )
+    del user
+    target = request.session.pop("oauth_redirect", "/")
+    response = RedirectResponse(f"{runtime.application_urls.frontend_base_url.rstrip('/')}{target}")
+    _set_cookies(response, runtime, tokens)
     return response
 
 
-async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite_token: str):
-    if team_invite_token:
-        invitation = await uow.invitation.get_by_token(team_invite_token)
-        if (
-            invitation
-            and invitation.type == InvitationType.TEAM
-            and invitation.team_id
-            and not invitation.accepted
-            and invitation.expires_at >= datetime.now(UTC)
-            and invitation.email
-            and invitation.email.strip().lower() == email
-        ):
-            return invitation
-    # Resolve the pending PLATFORM invitation by an email-indexed repository
-    # query (mirrors get_pending_team_invitation); avoids the previous
-    # list(limit=500) scan that could hide invitations on platforms with >500
-    # pending PLATFORM invitations.
-    return await uow.invitation.get_pending_platform_invitation(email)
-
-
-async def _load_oauth_profile(provider: str, client, token: dict) -> dict:
+async def _oauth_profile(provider: str, client, token: dict) -> dict[str, object]:
     if provider == "google":
-        userinfo = token.get("userinfo")
-        if not userinfo:
-            # authorize_access_token normally verifies and populates the OIDC
-            # userinfo. If it is absent the flow lost its nonce/session; return a
-            # readable error instead of calling parse_id_token() without the
-            # now-required nonce positional argument (which raises TypeError).
-            raise BadRequestError(
-                "Google 身份令牌缺失或未通过验证，请重试登录",
-                error_key="apiErrors.auth.oauthProfileUnavailable",
-            )
+        value = dict(token.get("userinfo") or {})
         return {
-            "sub": userinfo.get("sub"),
-            "email": userinfo.get("email"),
-            "email_verified": bool(userinfo.get("email_verified")),
-            "name": userinfo.get("name"),
-            "picture": userinfo.get("picture"),
+            "subject": str(value.get("sub") or ""),
+            "email": str(value.get("email") or ""),
+            "verified": bool(value.get("email_verified")),
+            "name": str(value.get("name") or ""),
         }
     if provider == "github":
-        # Account-takeover guard: the public `email` on the /user profile is
-        # self-asserted and may be unverified, so it must never be trusted as a
-        # verified identity. Always resolve the address from /user/emails and
-        # accept it only when GitHub reports it as the primary AND verified
-        # email. Without such an address the caller has no proven email and the
-        # OAuth flow is rejected downstream (see oauth_callback's email guard).
-        email = None
-        verified = False
-        emails_resp = await client.get("user/emails", token=token)
-        for item in emails_resp.json():
-            if item.get("primary") and item.get("verified"):
-                email = item.get("email")
-                verified = True
-                break
-        user_resp = await client.get("user", token=token)
-        user = user_resp.json()
+        emails = (await client.get("user/emails", token=token)).json()
+        verified = next(
+            (item for item in emails if item.get("primary") and item.get("verified")),
+            {},
+        )
+        value = (await client.get("user", token=token)).json()
         return {
-            "id": user.get("id"),
-            "email": email,
-            "email_verified": verified,
-            "name": user.get("name") or user.get("login"),
-            "avatar_url": user.get("avatar_url"),
+            "subject": str(value.get("id") or ""),
+            "email": str(verified.get("email") or ""),
+            "verified": bool(verified),
+            "name": str(value.get("name") or value.get("login") or ""),
         }
-    raise BadRequestError("不支持的 OAuth 提供商")
+    raise BadRequestError("Unsupported OAuth provider")

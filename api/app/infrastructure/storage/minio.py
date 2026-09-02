@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 from datetime import timedelta
+from typing import BinaryIO
 from urllib.parse import urlparse
 
 from minio import Minio as MinioClient
@@ -146,6 +147,32 @@ class Minio:
     async def delete_bytes(self, key: str) -> None:
         await run_in_threadpool(
             self.client.remove_object,
+            self.bucket,
+            key,
+        )
+
+    async def put_stream(
+        self,
+        key: str,
+        stream: BinaryIO,
+        *,
+        length: int,
+        content_type: str | None = None,
+    ) -> None:
+        put_kwargs = {
+            "bucket_name": self.bucket,
+            "object_name": key,
+            "data": stream,
+            "length": length,
+            "content_type": content_type or "application/octet-stream",
+        }
+        if length == -1:
+            put_kwargs["part_size"] = 10 * 1024 * 1024
+        await run_in_threadpool(self.client.put_object, **put_kwargs)
+
+    async def get_stream(self, key: str) -> BinaryIO:
+        return await run_in_threadpool(
+            self.client.get_object,
             self.bucket,
             key,
         )

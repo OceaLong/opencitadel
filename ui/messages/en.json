@@ -266,10 +266,6 @@
     "secondaryNav": "Knowledge management",
     "title": "OpenCitadel"
   },
-  "sessionMode": {
-    "ask": "Ask",
-    "agent": "Agent"
-  },
   "chatHeader": {
     "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}"
   },
@@ -701,9 +697,6 @@
     }
   },
   "settingsInference": {
-    "embeddingCapabilityUnavailable": "Vector behavior is enabled, but the workspace Embedding binding is missing or unavailable.",
-    "rerankCapabilityUnavailable": "Reranking is enabled, but the workspace Rerank binding is missing or unavailable.",
-    "configureInference": "Configure inference",
     "addEndpoint": "Add endpoint",
     "editEndpoint": "Edit endpoint",
     "endpointDisplayName": "Endpoint name",
@@ -1630,11 +1623,6 @@
       "threshold": "Threshold",
       "timezone": "IANA timezone"
     }
-  },
-  "redirect": {
-    "noActiveVersion": "No published knowledge-base version is available",
-    "openingKnowledgeTask": "Opening knowledge task...",
-    "startTaskFailed": "Failed to start task"
   },
   "workspaceContext": {
     "cancelUpgrade": "Cancel",

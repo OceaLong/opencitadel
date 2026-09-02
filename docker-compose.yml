@@ -10,15 +10,14 @@ x-pip-build-args: &pip-build-args
   PYPI_FILES_MIRROR: ${PYPI_FILES_MIRROR-https://mirrors.aliyun.com/pypi/packages/}
   NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
 
-x-ownership-labels: &ownership-labels
-  com.opencitadel.acceptance.project: ${ACCEPTANCE_PROJECT_ID:-none}
-  com.opencitadel.acceptance.run: ${ACCEPTANCE_RUN_ID:-none}
+x-service-labels: &service-labels
+  com.opencitadel.managed: "true"
 
 services:
   # ==================== 基础设施 ====================
 
   opencitadel-redis:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     image: redis:7-alpine
@@ -51,7 +50,7 @@ services:
       retries: 5
 
   opencitadel-postgres:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     image: pgvector/pgvector:pg16
@@ -93,7 +92,7 @@ services:
       retries: 5
 
   opencitadel-minio:
-    labels: *ownership-labels
+    labels: *service-labels
     profiles:
       - local
     image: minio/minio:latest
@@ -120,7 +119,7 @@ services:
   # ==================== 沙箱服务 ====================
 
   opencitadel-sandbox-egress:
-    labels: *ownership-labels
+    labels: *service-labels
     image: ubuntu/squid:6.6-24.04_edge
     restart: unless-stopped
     mem_limit: 256m
@@ -155,7 +154,7 @@ services:
       retries: 5
 
   opencitadel-sandbox:
-    labels: *ownership-labels
+    labels: *service-labels
     profiles:
       - fixed-sandbox
     build:
@@ -211,7 +210,7 @@ services:
   # provider, OAuth, or application secrets and exposes a narrow token-
   # authenticated sandbox lifecycle API on the internal network.
   opencitadel-sandbox-broker:
-    labels: *ownership-labels
+    labels: *service-labels
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -273,7 +272,7 @@ services:
   # ==================== 数据库迁移 (一次性) ====================
 
   opencitadel-migrate:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     build:
@@ -302,7 +301,7 @@ services:
   # ==================== 后端 API ====================
 
   opencitadel-api:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     build:
@@ -349,8 +348,6 @@ services:
         condition: service_healthy
     networks:
       - opencitadel-network
-      - opencitadel-sandbox-network
-      - opencitadel-ops-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health/ready"]
       interval: 15s
@@ -361,7 +358,7 @@ services:
   # ==================== Universal Execution Kernel ====================
 
   opencitadel-execution-kernel:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     build:
@@ -410,7 +407,6 @@ services:
     networks:
       - opencitadel-network
       - opencitadel-sandbox-network
-      - opencitadel-ops-network
     command: ["python", "-m", "app.execution_kernel_main"]
     healthcheck:
       test: ["CMD", "python", "-m", "app.execution_kernel_health", "readiness"]
@@ -422,7 +418,7 @@ services:
   # ==================== 前端 UI ====================
 
   opencitadel-ui:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     build:
@@ -448,167 +444,10 @@ services:
       retries: 5
       start_period: 30s
 
-  # Fixed, read-only MCP surface for Ops Patrol. Kubernetes deployments
-  # should use the Helm/Kustomize ServiceAccount instead of this local profile.
-  opencitadel-ops-collector:
-    labels: *ownership-labels
-    profiles:
-      - patrol
-    build:
-      context: ./ops-collector
-      dockerfile: Dockerfile
-      args:
-        <<: *pip-build-args
-    image: opencitadel-ops-collector
-    restart: unless-stopped
-    user: "10001:10001"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: 256m
-    mem_reservation: 128m
-    cpus: "0.50"
-    pids_limit: 128
-    environment:
-      OPS_COLLECTOR_TARGET_REF: ${OPS_COLLECTOR_TARGET_REF:-opencitadel-local}
-      OPS_COLLECTOR_ALLOWED_NAMESPACES: '${OPS_COLLECTOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
-      OPS_COLLECTOR_TRANSPORT: streamable-http
-      OPS_COLLECTOR_ALLOW_STDIO: "false"
-      OPS_COLLECTOR_TOKEN: ${OPS_COLLECTOR_TOKEN:?set a strong OPS_COLLECTOR_TOKEN}
-      OPS_COLLECTOR_HTTP_PROBES: >-
-        ${OPS_COLLECTOR_HTTP_PROBES:-{"primary-endpoint":{"url":"http://opencitadel-api:8000/api/status","expected_statuses":[200]},"demo-console":{"url":"http://ops-console:9099/health","expected_statuses":[200]}}}
-      OPS_COLLECTOR_DEPENDENCIES: >-
-        ${OPS_COLLECTOR_DEPENDENCIES:-{"primary-dependencies":{"kind":"postgres","host":"opencitadel-postgres","port":5432},"demo-console-tcp":{"kind":"tcp","host":"ops-console","port":9099}}}
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
-    # Callers (api + execution-kernel) reach the Collector over the dedicated
-    # ops network. It stays on opencitadel-network as well because its probes
-    # dial other compose services (api, postgres, ops-console); bearer-token
-    # auth is the primary boundary for the read-only surface.
-    networks:
-      - opencitadel-ops-network
-      - opencitadel-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8090), 2).close()"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  # Narrow, write-scoped MCP surface for Ops Patrol Remediation. Kubernetes
-  # deployments should use the Helm/Kustomize ServiceAccount instead of this
-  # local profile. Disabled by default (opt-in "actuator" profile).
-  opencitadel-ops-actuator:
-    labels: *ownership-labels
-    profiles:
-      - actuator
-    build:
-      context: ./ops-actuator
-      dockerfile: Dockerfile
-      args:
-        <<: *pip-build-args
-    image: opencitadel-ops-actuator
-    restart: unless-stopped
-    user: "10001:10001"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: 256m
-    mem_reservation: 128m
-    cpus: "0.50"
-    pids_limit: 128
-    environment:
-      OPS_ACTUATOR_TARGET_REF: ${OPS_ACTUATOR_TARGET_REF:-opencitadel-local}
-      OPS_ACTUATOR_ALLOWED_NAMESPACES: '${OPS_ACTUATOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
-      OPS_ACTUATOR_TRANSPORT: streamable-http
-      OPS_ACTUATOR_ALLOW_STDIO: "false"
-      OPS_ACTUATOR_TOKEN: ${OPS_ACTUATOR_TOKEN:?set a strong OPS_ACTUATOR_TOKEN}
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
-    # Reachable only over the dedicated ops network (api + execution-kernel).
-    # The Actuator has no other compose-service dependency, so keeping it off
-    # opencitadel-network removes it from the reach of every unrelated container.
-    networks:
-      - opencitadel-ops-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8091), 2).close()"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  # ==================== Demo: OpsConsole 样板工单后台 ====================
-
-  ops-console:
-    labels: *ownership-labels
-    security_opt:
-      - no-new-privileges:true
-    profiles:
-      - demo
-    build:
-      context: ./demo/ops-console
-      dockerfile: Dockerfile
-      args:
-        <<: *pip-build-args
-    image: opencitadel-ops-console
-    restart: unless-stopped
-    mem_limit: 256m
-    cpus: "0.50"
-    networks:
-      - opencitadel-network
-      - opencitadel-sandbox-network
-    ports:
-      - "${OPS_CONSOLE_PORT:-9099}:9099"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9099/health')"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # Deterministic OpenAI-compatible fixture for the acceptance profile only.
-  # It is registered through the public inference control plane and is never
-  # part of the production image or deployment surface.
-  acceptance-inference:
-    labels: *ownership-labels
-    profiles:
-      - acceptance
-    build:
-      context: ./e2e/fixtures/inference-provider
-      dockerfile: Dockerfile
-      args:
-        <<: *pip-build-args
-    image: opencitadel-acceptance-inference
-    restart: "no"
-    read_only: true
-    user: "1000:1000"
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    mem_limit: 128m
-    cpus: "0.25"
-    environment:
-      ACCEPTANCE_PROVIDER_TOKEN: ${ACCEPTANCE_PROVIDER_TOKEN:-}
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
-    networks:
-      - opencitadel-network
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
   # ==================== Nginx 网关 ====================
 
   opencitadel-nginx:
-    labels: *ownership-labels
+    labels: *service-labels
     security_opt:
       - no-new-privileges:true
     image: nginx:alpine
@@ -652,33 +491,27 @@ services:
 # ==================== 数据卷 ====================
 volumes:
   redis_data:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: local
   postgres_data:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: local
   minio_data:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: local
   nginx_conf:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: local
 
 # ==================== 网络 ====================
 networks:
   opencitadel-network:
-    labels: *ownership-labels
-    driver: bridge
-  # Dedicated segment for the write-scoped Ops Actuator / read-only Ops
-  # Collector MCP surfaces. Only api and execution-kernel join it, so no
-  # unrelated container can dial these servers over the shared network.
-  opencitadel-ops-network:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: bridge
   opencitadel-sandbox-network:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: bridge
     internal: true
   opencitadel-egress-network:
-    labels: *ownership-labels
+    labels: *service-labels
     driver: bridge

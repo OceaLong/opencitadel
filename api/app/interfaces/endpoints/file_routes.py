@@ -1,104 +1,68 @@
-import logging
+"""Owner-scoped file upload and retrieval."""
+
+from __future__ import annotations
+
 import urllib.parse
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from starlette.responses import StreamingResponse
+from starlette.responses import Response as BinaryResponse
 
-from app.application.services.file_service import FileService
-from app.application.services.quota_service import QuotaService
-from app.domain.models.file import File as FileInfo
+from app.contexts.knowledge.runtime import KnowledgeRuntime
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
-from app.interfaces.schemas import Response
-from app.interfaces.service_dependencies import get_file_service, get_quota_service
+from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.service_dependencies import get_knowledge_runtime
 
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/files", tags=["文件模块"])
+router = APIRouter(prefix="/files", tags=["files"])
 
 
-@router.post(
-    path="",
-    response_model=Response[FileInfo],
-    summary="对话文件上传接口",
-    description="在对话接口中，将文件上传到对象存储和沙箱中",
-)
+@router.get("")
+async def list_files(runtime: KnowledgeRuntime = Depends(get_knowledge_runtime)):
+    return {"data": await runtime.queries.list_files()}
+
+
+@router.post("")
 async def upload_file(
     file: UploadFile = File(...),
-    ctx: WorkspaceContext = Depends(get_workspace_context),
-    _write_guard=Depends(require_non_auditor),
-    file_service: FileService = Depends(get_file_service),
-    quota_service: QuotaService = Depends(get_quota_service),
-) -> Response[FileInfo]:
-    """文件上传接口，传递文件返回文件的File信息"""
-    await quota_service.check_storage_quota(
-        ctx.principal.user_id, incoming_bytes=file.size or 0, scope=ctx.scope
+    workspace: WorkspaceContext = Depends(get_workspace_context),
+    runtime: KnowledgeRuntime = Depends(get_knowledge_runtime),
+):
+    content = await file.read()
+    value = await runtime.commands.upload_file(
+        filename=file.filename or "upload.bin",
+        mime_type=file.content_type or "application/octet-stream",
+        content=content,
+        scope=workspace.scope,
     )
-    fileinfo = await file_service.upload_file(upload_file=file, scope=ctx.scope)
-    return Response.success(
-        data=fileinfo,
-    )
+    return {"data": value}
 
 
-@router.get(
-    path="/{file_id}",
-    response_model=Response[FileInfo],
-    summary="获取文件信息接口",
-    description="获取指定会话中对应文件的基础信息",
-)
-async def get_file_info(
-    file_id: str,
-    ctx: WorkspaceContext = Depends(get_workspace_context),
-    file_service: FileService = Depends(get_file_service),
-) -> Response[FileInfo]:
-    """获取指定会话中对应文件的基础信息"""
-    fileinfo = await file_service.get_file_info(file_id, scope=ctx.scope)
-    return Response.success(
-        data=fileinfo,
-    )
+@router.get("/{file_id}")
+async def get_file(
+    file_id: UUID,
+    runtime: KnowledgeRuntime = Depends(get_knowledge_runtime),
+):
+    return {"data": await runtime.queries.get_file(file_id)}
 
 
-@router.delete(
-    path="/{file_id}",
-    response_model=Response[dict],
-    summary="删除文件接口",
-    description="删除指定文件的对象存储数据与记录（仅限文件归属者/团队）",
-)
-async def delete_file(
-    file_id: str,
-    ctx: WorkspaceContext = Depends(get_workspace_context),
-    _write_guard=Depends(require_non_auditor),
-    file_service: FileService = Depends(get_file_service),
-) -> Response[dict]:
-    """删除指定文件"""
-    await file_service.delete_file(file_id, scope=ctx.scope)
-    return Response.success(data={"deleted": True})
-
-
-@router.get(
-    path="/{file_id}/download",
-    summary="文件下载接口",
-    description="从沙箱or对象存储中下载指定的文件到本地",
-)
+@router.get("/{file_id}/download")
 async def download_file(
-    file_id: str,
-    ctx: WorkspaceContext = Depends(get_workspace_context),
-    file_service: FileService = Depends(get_file_service),
-) -> StreamingResponse:
-    """下载指定会话中的指定文件"""
-    # 1.调用服务获取文件源数据
-    file_data, fileinfo = await file_service.download_file(file_id, scope=ctx.scope)
-
-    # 2.对文件中的中文名字进行url编码
-    encoded_filename = urllib.parse.quote(fileinfo.filename)
-
-    # 3.返回文件流数据
-    headers = {
-        "Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}",
-    }
-    if fileinfo.size is not None:
-        headers["Content-Length"] = str(fileinfo.size)
-    return StreamingResponse(
-        content=file_data,
-        media_type=fileinfo.mime_type,
-        headers=headers,
+    file_id: UUID,
+    runtime: KnowledgeRuntime = Depends(get_knowledge_runtime),
+):
+    content, metadata = await runtime.queries.download_file(file_id)
+    filename = urllib.parse.quote(str(metadata["filename"]))
+    return BinaryResponse(
+        content,
+        media_type=str(metadata["mimeType"]),
+        headers={"Content-Disposition": f"attachment; filename*=utf-8''{filename}"},
     )
+
+
+@router.delete("/{file_id}")
+async def delete_file(
+    file_id: UUID,
+    runtime: KnowledgeRuntime = Depends(get_knowledge_runtime),
+):
+    await runtime.commands.delete_file(file_id)
+    return {"data": {"deleted": True}}

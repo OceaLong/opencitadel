@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import Any
+from io import BytesIO
+from typing import Any, BinaryIO
 
 from qcloud_cos import CosConfig, CosS3Client
 from starlette.concurrency import run_in_threadpool
@@ -151,6 +152,25 @@ class Cos:
             Bucket=self.bucket,
             Key=key,
         )
+
+    async def put_stream(
+        self,
+        key: str,
+        stream: BinaryIO,
+        *,
+        length: int,
+        content_type: str | None = None,
+    ) -> None:
+        await run_in_threadpool(
+            self.client.put_object,
+            Bucket=self.bucket,
+            Body=stream,
+            Key=key,
+        )
+
+    async def get_stream(self, key: str) -> BinaryIO:
+        data = await self.get_bytes(key)
+        return BytesIO(data)
 
     async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> str | None:
         """Generate a presigned download URL for LLM-accessible image references."""

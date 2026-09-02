@@ -1,125 +1,65 @@
-# OpenCitadel — Self-Hosted Enterprise AI Agent Platform
+# OpenCitadel v2
 
-<div align="center">
+[简体中文](README.zh-CN.md)
 
-**Private deployment · Every tool call declarable, approvable, traceable, and provable · MCP / A2A · Sandboxed execution**
+OpenCitadel is a self-hosted agent runtime built around one durable execution
+kernel. The v2 cutover is intentionally incompatible with the previous
+product: it starts from an empty PostgreSQL database and retains only Agent
+Runs, approvals, knowledge, inference configuration, MCP tools, teams,
+governance, quotas, audit, and notifications.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-teal.svg)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-[![Docker](https://img.shields.io/badge/docker--compose-ready-blue.svg)](https://docs.docker.com/compose/)
+## Why the kernel is different
 
-[简体中文](README.zh-CN.md) · [Documentation](docs/README.md) · [GitHub](https://github.com/OceaLong/opencitadel)
+- PostgreSQL commands and append-only events are the only workflow authority.
+- Pure reducers derive state; projections can be deleted and rebuilt.
+- External work is one of five durable effects: `model.call`,
+  `knowledge.retrieve`, `tool.call`, `file.operation`, or `knowledge.build`.
+- Every effect has an idempotency key, timeout, bounded retry policy, and
+  persisted outcome.
+- Approval freezes the reviewer set and converges on approve, reject, expire,
+  cancel, or error.
+- Docker and Kubernetes create one isolated, resource-bounded sandbox per Run.
+- Signed PostgreSQL authorization context plus forced RLS protects every
+  tenant-owned table.
 
-</div>
+## Core product
 
----
-
-OpenCitadel is a **governed, self-hosted AI agent platform**. Keep data, model calls, and file storage on your network; agents run browser, shell, and file tools inside isolated sandboxes and reach internal systems via MCP and A2A. Governance is part of the execution protocol: **every external call has a declared effect, durable invocation identity, policy snapshot, optional approval, and verifiable audit evidence**.
-
-Most agent-governance offerings are point solutions; OpenCitadel is an integrated platform:
-
-| Capability | MCP gateways | Agent firewalls / guardrails | Read-only diagnostics (k8sgpt, etc.) | OpenCitadel |
-|-----------|--------------|------------------------------|--------------------------------------|-------------|
-| Coverage | MCP traffic only | Single policy-interception point | Read-only, no execution | Browser / shell / file / MCP / A2A — the full tool chain |
-| Human-in-the-loop | — | Approval point | — | Persisted per-invocation approval + VNC takeover |
-| Evidence | Access logs | Logs | — | API-layer hash-chained audit + verifiable evidence packages |
-| Deployment | Gateway | Sidecar/SDK | CLI | Full self-hosted platform (Compose / Helm) |
-
-> Web Operator targets **enterprise-owned/self-hosted systems**; third-party SaaS requires an ownership declaration and audit trail—not a waiver of legal risk.
-
-## Demo video
-
-Due to the large size of the video file, please click on the image or link below to watch the complete demonstration:
-
-[![Demo Video Cover](docs/assets/images/img.png)](https://www.bilibili.com/video/BV1QGNi6BERh/?vd_source=4ce3545913066879813a27e759a60c52)
-
-> Video link: [Click here to watch the complete demonstration](https://www.bilibili.com/video/BV1QGNi6BERh/?vd_source=4ce3545913066879813a27e759a60c52)
-
-## Core modules
-
-| Module | Route | Description |
-|--------|-------|-------------|
-| **Agent chat** | `/`, `/sessions/[id]` | Event-sourced Agent/Ask Runs, per-invocation approval, VNC takeover, durable replay |
-| **Ops Patrol** | `/patrols` | Read-only infrastructure checks with approval-gated remediation: closed-world collector, server-side assertion engine, signed evidence packages |
-| **Automation** | `/automation` | Scheduled jobs, webhooks, notifications |
-| **Governed context sources** | `/knowledge` | Document knowledge bases: versioning, atomic publish, session version binding, retrieval Q&A |
-| **Integrations** | Settings modal → Integrations | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
-| **Admin** | `/admin/*` | Users, quotas, audit, usage, compliance evidence |
+| Area | UI | API root |
+| --- | --- | --- |
+| Agent Runs | `/`, `/runs/[id]` | `/api/runs` |
+| Approval inbox | `/approvals` | `/api/approvals` |
+| Files and knowledge | `/knowledge` | `/api/files`, `/api/knowledge-bases` |
+| Inference and MCP | `/settings` | `/api/inference`, `/api/integrations/mcp` |
+| Teams | `/teams` | `/api/teams`, `/api/invitations` |
+| Administration | `/admin` | `/api/admin`, `/api/governance-policy` |
 
 ## Quick start
 
-**10-minute BYO API key path**
-
 ```bash
-git clone https://github.com/OceaLong/opencitadel.git
-cd opencitadel
 make quickstart
 ```
 
-Open **http://localhost:8088**, sign in, configure an inference **endpoint**,
-**model**, and **chat binding** in Settings → Inference, and run your first
-agent task.
-
-`make quickstart` also builds the sandbox image and defaults to local MinIO storage — see the guides below for cloud storage and full configuration.
-
-- Step-by-step: [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md)
-- Production: [Deployment guide](docs/operations/deployment.md)
-- HTTPS & domain: [HTTPS setup](docs/operations/https-domain-setup.md)
-
-## Architecture at a glance
-
-```mermaid
-flowchart LR
-  UI["Next.js UI"] -->|"HTTP / SSE"| API["FastAPI API"]
-  API --> Inbox["PostgreSQL Command Inbox"]
-  Inbox --> Kernel["Execution Kernel"]
-  Kernel --> Events["Append-only Execution Events"]
-  Events --> API
-  Events -.->|"disposable wake-up"| Redis["Redis"]
-  API --> Storage["MinIO / COS Storage"]
-  Kernel --> Sandbox["Sandbox Runtime"]
-  Kernel --> LLM["LLM Providers"]
-  Kernel --> MCP["MCP / A2A"]
-  Kernel -->|"read-only probes"| Collector["ops-collector :8090"]
-  Kernel -->|"approval-gated writes"| Actuator["ops-actuator :8091"]
-```
-
-- **Single execution authority**: PostgreSQL events drive every Run; Redis is only a recoverable wake-up hint
-- **Explicit composition**: independent typed `ApiRuntime` / `KernelRuntime` graphs own resources, supervised tasks, and bounded shutdown
-- **Identity-safe client data**: authenticated caches are scoped by `userId + workspaceId` and invalidated before identity changes
-- **Sandbox isolation**: on-demand Docker or Kubernetes sandboxes with browser automation and VNC
-- **Governed write plane**: `ops-collector` (8090) is read-only; `ops-actuator` (8091) accepts exactly three registered write actions, reachable only after human approval — see [Governance plane](docs/architecture/governance-plane.md)
-- **Deployment**: Docker Compose (single node) or Helm / Kubernetes (horizontal scale)
-
-Full design: [Architecture overview](docs/architecture/overview.md).
-
-## Documentation map
-
-| Audience | Start here |
-|----------|------------|
-| First run | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) · [10-minute governance demo loop](docs/tutorials/08-ten-minute-governance-demo.md) |
-| Ops / DevOps | [Deployment](docs/operations/deployment.md) · [Ops Patrol](docs/tutorials/06-ops-patrol.md) · [Approved remediation](docs/tutorials/07-approved-remediation.md) · [Patrol operations](docs/operations/ops-patrol.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
-| Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) · [Governed Web Operator](docs/tutorials/04-governed-web-operator.md) · [Refund reconciliation & compliance](docs/tutorials/05-refund-reconciliation-compliance.md) |
-| Platform engineers | [Docs index](docs/README.md) · [Execution kernel](docs/architecture/execution-kernel.md) · [Security model](docs/architecture/security-model.md) · [Ops Patrol architecture](docs/architecture/ops-patrol.md) |
-| Contributors | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) |
-
-## Local development
+The script creates `.env` with independent local secrets, builds the sandbox
+image, runs the one-way greenfield migration, and starts the stack at
+`http://localhost:8088`. To intentionally erase local application data first:
 
 ```bash
-cp .env.example .env
-# Set BOOTSTRAP_ADMIN_PASSWORD; configure inference endpoint/model/bindings after first login
-
-docker compose --profile local up --build
-
-# Or run API / UI tests separately
-cd api && uv sync && uv run pytest
-cd ui && npm install && npm run test
+bash scripts/quickstart.sh --reset-data
 ```
 
-Module guides: [api/README.md](api/README.md) · [ui/README.md](ui/README.md) · [sandbox/README.md](sandbox/README.md)
+After login, configure an OpenAI-compatible endpoint, model, and binding under
+Settings, then start a Run. MinIO is enabled for local file storage.
 
-## License
+## Development
 
-Licensed under the [Apache License 2.0](LICENSE).
+```bash
+cd api && uv sync --all-groups && uv run pytest -q
+cd ui && npm install && npm run typecheck && npm test
+cd sandbox && uv sync && uv run pytest -q
+```
+
+See [kernel architecture](docs/architecture/kernel-v2.md),
+[deployment](docs/operations/deployment.md), [API](api/README.md), and
+[UI](ui/README.md).
+
+Licensed under [Apache 2.0](LICENSE).

@@ -1,213 +1,169 @@
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi import Response as StarletteResponse
+"""Team membership, invitation, and disposition routes."""
 
-from app.application.ports.crypto import CookieManagerPort
-from app.application.services.audit_service import AuditService
-from app.application.services.auth_service import AuthService
-from app.application.services.team_service import TeamService
-from app.domain.models.audit_log import AuditLog
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import Field
+
+from app.contexts.identity.runtime import IdentityRuntime
+from app.domain.models.scope import Principal
 from app.interfaces.auth_dependencies import get_current_principal
-from app.interfaces.client_ip import get_client_ip
-from app.interfaces.schemas import Response
-from app.interfaces.schemas.team import (
-    CreateTeamInvitationRequest,
-    CreateTeamRequest,
-    InvitationLinkResponse,
-    ListTeamMemberDetailsResponse,
-    ListTeamsResponse,
-    TeamInvitationPreviewResponse,
-    TeamInvitationRegisterRequest,
-    TeamMemberResponse,
-    TeamResponse,
-    UpdateTeamMemberRoleRequest,
-)
-from app.interfaces.service_dependencies import (
-    get_audit_service,
-    get_auth_service,
-    get_cookie_manager,
-    get_team_service,
-)
+from app.interfaces.service_dependencies import get_identity_runtime
+from app.kernel.interfaces.schemas import ApiModel
 
-router = APIRouter(prefix="/teams", tags=["团队模块"])
-invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"])
-public_invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"])
+router = APIRouter(prefix="/teams", tags=["teams"])
+invitation_router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
-@router.post("", response_model=Response[TeamResponse])
+class TeamBody(ApiModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=2_000)
+
+
+class InviteBody(ApiModel):
+    email: str = Field(min_length=3, max_length=320)
+    role: str = Field(default="member", pattern="^(admin|member)$")
+
+
+class AcceptBody(ApiModel):
+    token: str = Field(min_length=20, max_length=512)
+
+
+class DispositionBody(ApiModel):
+    plan_hash: str = Field(min_length=64, max_length=64)
+    confirmation: str = Field(min_length=1, max_length=500)
+
+
+@router.get("")
+async def list_teams(
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {"data": await runtime.queries.list_teams(principal.user_id)}
+
+
+@router.post("")
 async def create_team(
-    request: CreateTeamRequest,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[TeamResponse]:
-    team = await service.create_team(
-        name=request.name,
-        description=request.description,
-        actor_user_id=principal.user_id,
-    )
-    return Response.success(data=TeamResponse.from_domain(team))
+    body: TeamBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {
+        "data": await runtime.commands.create_team(
+            name=body.name,
+            description=body.description,
+            actor_user_id=principal.user_id,
+        )
+    }
 
 
-@router.get("", response_model=Response[ListTeamsResponse])
-async def list_my_teams(
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[ListTeamsResponse]:
-    teams = await service.list_my_teams(principal.user_id)
-    return Response.success(
-        data=ListTeamsResponse(teams=[TeamResponse.from_domain(t) for t in teams])
-    )
-
-
-@router.get("/{team_id}", response_model=Response[TeamResponse])
+@router.get("/{team_id}")
 async def get_team(
     team_id: str,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[TeamResponse]:
-    team = await service.get_team(team_id, principal.user_id)
-    return Response.success(data=TeamResponse.from_domain(team))
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {
+        "data": await runtime.queries.get_team(
+            team_id,
+            principal.user_id,
+            is_admin=principal.is_admin,
+        )
+    }
 
 
-@router.get("/{team_id}/members", response_model=Response[ListTeamMemberDetailsResponse])
-async def list_members(
+@router.post("/{team_id}/invitations")
+async def create_invitation(
     team_id: str,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[ListTeamMemberDetailsResponse]:
-    members = await service.list_member_details(team_id, principal.user_id)
-    return Response.success(data=ListTeamMemberDetailsResponse(members=members))
-
-
-@router.post("/{team_id}/leave", response_model=Response[None])
-async def leave_team(
-    team_id: str,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[None]:
-    await service.leave_team(team_id=team_id, user_id=principal.user_id)
-    return Response.success()
-
-
-@router.post("/{team_id}/invitations", response_model=Response[InvitationLinkResponse])
-async def create_team_invitation(
-    team_id: str,
-    request: CreateTeamInvitationRequest,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[InvitationLinkResponse]:
-    url = await service.create_team_invitation(
-        team_id=team_id,
-        actor_user_id=principal.user_id,
-        role=request.role,
-        email=request.email,
-    )
-    return Response.success(data=InvitationLinkResponse(url=url))
-
-
-@public_invitation_router.get("/{token}", response_model=Response[TeamInvitationPreviewResponse])
-async def preview_invitation(
-    token: str,
-    service: TeamService = Depends(get_team_service),
-) -> Response[TeamInvitationPreviewResponse]:
-    preview = await service.preview_invitation(token=token)
-    return Response.success(data=preview)
-
-
-@public_invitation_router.post("/{token}/register", response_model=Response[TeamMemberResponse])
-async def register_and_accept_invitation(
-    token: str,
-    request: TeamInvitationRegisterRequest,
-    response: StarletteResponse,
-    http_request: Request,
-    service: TeamService = Depends(get_team_service),
-    auth_service: AuthService = Depends(get_auth_service),
-    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
-) -> Response[TeamMemberResponse]:
-    result = await service.register_and_accept_invitation(
-        token=token,
-        email=request.email,
-        username=request.username,
-        password=request.password,
-    )
-    _user, tokens = await auth_service.login(
-        email_or_username=result.user.email,
-        password=request.password,
-        user_agent=http_request.headers.get("user-agent", ""),
-        ip_address=get_client_ip(http_request),
-    )
-    cookie_manager.set_auth_cookies(
-        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
-    )
-    return Response.success(
-        data=TeamMemberResponse.from_domain(result.member),
-    )
-
-
-@invitation_router.post("/{token}/accept", response_model=Response[TeamMemberResponse])
-async def accept_invitation(
-    token: str,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[TeamMemberResponse]:
-    member = await service.accept_invitation(token=token, user_id=principal.user_id)
-    return Response.success(data=TeamMemberResponse.from_domain(member))
-
-
-@router.delete("/{team_id}", response_model=Response[None])
-async def delete_team(
-    team_id: str,
-    request: Request,
-    strategy: str = Query("transfer_to_owner", pattern="^(cascade|transfer_to_owner)$"),
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-    audit_service: AuditService = Depends(get_audit_service),
-) -> Response[None]:
-    result = await service.delete_team(
-        team_id=team_id, actor_user_id=principal.user_id, strategy=strategy
-    )
-    await audit_service.record(
-        AuditLog(
+    body: InviteBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {
+        "data": await runtime.commands.invite(
+            team_id,
+            email=body.email,
+            role=body.role,
             actor_user_id=principal.user_id,
-            actor_ip=get_client_ip(request),
-            action="team.delete",
-            resource_type="team",
-            resource_id=team_id,
-            request_id=request.headers.get("x-request-id") or "",
-            metadata={
-                "strategy": result.strategy,
-                "affected_resources": result.affected_resources,
-                "transferred_to_user_id": result.transferred_to_user_id,
-            },
-        ),
-    )
-    return Response.success()
+        )
+    }
 
 
-@router.delete("/{team_id}/members/{user_id}", response_model=Response[None])
-async def remove_member(
+@invitation_router.post("/accept")
+async def accept_invitation(
+    body: AcceptBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {
+        "data": await runtime.commands.accept_invitation(
+            body.token,
+            actor_user_id=principal.user_id,
+        )
+    }
+
+
+@router.get("/{team_id}/disposition")
+async def preview_team_disposition(
     team_id: str,
-    user_id: str,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[None]:
-    await service.remove_member(
-        team_id=team_id, actor_user_id=principal.user_id, target_user_id=user_id
-    )
-    return Response.success()
+    action: str = Query(pattern="^(archive|restore|purge)$"),
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return {
+        "data": await runtime.queries.team_disposition(
+            team_id,
+            action=action,
+            actor_user_id=principal.user_id,
+            is_admin=principal.is_admin,
+        )
+    }
 
 
-@router.patch("/{team_id}/members/{user_id}", response_model=Response[TeamMemberResponse])
-async def update_member_role(
+async def _apply(
     team_id: str,
-    user_id: str,
-    request: UpdateTeamMemberRoleRequest,
-    principal=Depends(get_current_principal),
-    service: TeamService = Depends(get_team_service),
-) -> Response[TeamMemberResponse]:
-    member = await service.update_member_role(
-        team_id=team_id,
-        actor_user_id=principal.user_id,
-        target_user_id=user_id,
-        role=request.role,
-    )
-    return Response.success(data=TeamMemberResponse.from_domain(member))
+    action: str,
+    body: DispositionBody,
+    principal: Principal,
+    runtime: IdentityRuntime,
+):
+    return {
+        "data": await runtime.commands.apply_team_disposition(
+            team_id,
+            action=action,
+            plan_hash=body.plan_hash,
+            confirmation=body.confirmation,
+            actor_user_id=principal.user_id,
+            is_admin=principal.is_admin,
+        )
+    }
+
+
+@router.post("/{team_id}/commands/archive")
+async def archive_team(
+    team_id: str,
+    body: DispositionBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return await _apply(team_id, "archive", body, principal, runtime)
+
+
+@router.post("/{team_id}/commands/restore")
+async def restore_team(
+    team_id: str,
+    body: DispositionBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return await _apply(team_id, "restore", body, principal, runtime)
+
+
+@router.post("/{team_id}/commands/purge")
+async def purge_team(
+    team_id: str,
+    body: DispositionBody,
+    principal: Principal = Depends(get_current_principal),
+    runtime: IdentityRuntime = Depends(get_identity_runtime),
+):
+    return await _apply(team_id, "purge", body, principal, runtime)

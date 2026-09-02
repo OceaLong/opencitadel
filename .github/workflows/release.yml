@@ -41,14 +41,6 @@ jobs:
             context: sandbox
             file: sandbox/Dockerfile
             target: ""
-          - name: ops-collector
-            context: ops-collector
-            file: ops-collector/Dockerfile
-            target: ""
-          - name: ops-actuator
-            context: ops-actuator
-            file: ops-actuator/Dockerfile
-            target: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -109,14 +101,6 @@ jobs:
           - name: sandbox
             context: sandbox
             file: sandbox/Dockerfile
-            target: ""
-          - name: ops-collector
-            context: ops-collector
-            file: ops-collector/Dockerfile
-            target: ""
-          - name: ops-actuator
-            context: ops-actuator
-            file: ops-actuator/Dockerfile
             target: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

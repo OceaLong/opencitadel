@@ -1,33 +1,48 @@
-"""HTTP API composition root and deterministic lifecycle."""
+"""Greenfield HTTP composition root grouped into four bounded contexts."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
-from app.application.services.runtime_policy_service import RuntimePolicyService
+from app.application.ports.crypto import ApplicationUrls
 from app.composition.resources import (
     DEFAULT_RESOURCE_FACTORIES,
     ResourceFactories,
     open_process_resources,
 )
-from app.composition.shared import (
-    RuntimePolicyRepositoryFactory,
-    _default_runtime_policy_repository,
-    build_shared_services,
-)
-from app.composition.tasks import RestartPolicy, TaskFailure, TaskKind, TaskSupervisor
+from app.composition.tasks import TaskFailure, TaskSupervisor
 from app.composition.types import ApiRuntime, RuntimeReadiness
-from app.infrastructure.adapters.redis_capabilities import (
-    RedisRuntimePolicyHintStreamFactory,
-)
-from app.infrastructure.external.runtime_policy_notifier import (
-    RuntimePolicyHintListener,
-    RuntimePolicyHintPublisher,
-)
+from app.contexts.identity.auth import PostgresAuthService
+from app.contexts.identity.operations import PostgresIdentityOperations
+from app.contexts.identity.runtime import IdentityRuntime
+from app.contexts.identity.services import PostgresGovernanceService, PostgresQuotaService
+from app.contexts.inference.quota import PostgresQuotaGate
+from app.contexts.inference.runtime import InferenceRuntime
+from app.contexts.inference.services import OpenAIInferenceGateway, PostgresInferenceService
+from app.contexts.inference.tooling import PostgresToolCatalog
+from app.contexts.kernel.runtime import KernelApiRuntime
+from app.contexts.knowledge.runtime import KnowledgeRuntime
+from app.contexts.knowledge.services import PostgresKnowledgeService
+from app.domain.runtime_policy.governance import GovernancePolicy
+from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.cookie import AuthCookieManager
 from app.infrastructure.security.csrf import CsrfService
+from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.oauth_clients import OAuthClients
+from app.infrastructure.security.password_hasher import PasswordHasher
+from app.kernel.application.command_service import CommandService
+from app.kernel.domain.reducer import ReducerRegistry
+from app.kernel.domain.types import Workflow
+from app.kernel.domain.workflows.agent import agent_reducer
+from app.kernel.domain.workflows.knowledge_ingest import knowledge_ingest_reducer
+from app.kernel.infrastructure.postgres.facts import PostgresDecisionFactsFactory
+from app.kernel.infrastructure.postgres.queries import (
+    PostgresDispositionService,
+    PostgresKernelQueryService,
+)
+from app.kernel.infrastructure.postgres.store import PostgresKernelStore
 from app.runtime_role import ProcessRole
 from core.config import DeploymentSettings
 
@@ -37,13 +52,8 @@ async def open_api_runtime(
     settings: DeploymentSettings,
     *,
     factories: ResourceFactories = DEFAULT_RESOURCE_FACTORIES,
-    runtime_policy_repository_factory: RuntimePolicyRepositoryFactory = (
-        _default_runtime_policy_repository
-    ),
     on_critical_failure: Callable[[TaskFailure], None] | None = None,
 ) -> AsyncIterator[ApiRuntime]:
-    """Open the complete API graph without constructing kernel workers."""
-
     readiness = RuntimeReadiness()
     supervisor = TaskSupervisor(
         shutdown_timeout_seconds=settings.shutdown_timeout_seconds,
@@ -54,104 +64,127 @@ async def open_api_runtime(
         ProcessRole.API,
         factories=factories,
     ) as resources:
-        try:
-            shared = build_shared_services(
-                resources,
-                supervisor=supervisor,
-                runtime_policy_repository_factory=runtime_policy_repository_factory,
-            )
-            await shared.runtime_policy_reader.initialize()
+        session_factory = resources.postgres.session_factory
+        cipher = ApiKeyCipher(
+            settings.api_key_secret,
+            key_id=settings.api_key_secret_id,
+            previous_secrets=settings.api_key_previous_secrets,
+        )
 
-            runtime_policy_service = RuntimePolicyService(
-                repository=shared.runtime_policy_repository,
-                audit_service=shared.audit_service,
-                hint_publisher=RuntimePolicyHintPublisher(redis=resources.general_redis),
+        def encrypt_private(value: dict[str, object]) -> str:
+            return cipher.encrypt_versioned(
+                json.dumps(value, sort_keys=True, separators=(",", ":"))
             )
-            cookie_manager = AuthCookieManager(
+
+        def decrypt_private(value: str) -> dict[str, object]:
+            return json.loads(cipher.decrypt_versioned(value))
+
+        quota_gate = PostgresQuotaGate(session_factory)
+        commands = CommandService(
+            store=PostgresKernelStore(
+                session_factory,
+                encrypt_private=encrypt_private,
+                decrypt_private=decrypt_private,
+                command_validator=quota_gate.validate_command,
+            ),
+            reducers=ReducerRegistry(
+                {
+                    Workflow.AGENT: agent_reducer,
+                    Workflow.KNOWLEDGE_INGEST: knowledge_ingest_reducer,
+                }
+            ),
+            facts_factory=PostgresDecisionFactsFactory(session_factory),
+        )
+        token_codec = JwtService(
+            settings.jwt_secret,
+            access_ttl_seconds=settings.access_token_ttl_seconds,
+            refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
+            previous_secrets=settings.jwt_previous_secrets,
+        )
+        auth = PostgresAuthService(
+            session_factory,
+            password_hasher=PasswordHasher(),
+            token_codec=token_codec,
+            refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
+        )
+        inference_service = PostgresInferenceService(
+            session_factory,
+            cipher=cipher,
+        )
+        inference_gateway = OpenAIInferenceGateway(
+            session_factory,
+            cipher=cipher,
+        )
+        identity_operations = PostgresIdentityOperations(
+            session_factory,
+            retention_days=GovernancePolicy().retention_days,
+            storage=resources.object_storage_client,
+        )
+        identity = IdentityRuntime(
+            commands=identity_operations,
+            queries=identity_operations,
+            transactions=session_factory,
+            auth=auth,
+            quotas=PostgresQuotaService(session_factory),
+            governance=PostgresGovernanceService(session_factory),
+            cookies=AuthCookieManager(
                 domain=settings.cookie_domain,
                 secure=settings.cookie_secure,
                 access_max_age=settings.access_token_ttl_seconds,
                 refresh_max_age=settings.refresh_token_ttl_seconds,
-            )
-            csrf_service = CsrfService()
-            oauth_registry = OAuthClients(
+            ),
+            csrf=CsrfService(),
+            oauth=OAuthClients(
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret,
                 github_client_id=settings.github_client_id,
                 github_client_secret=settings.github_client_secret,
-            )
-            if resources.redis_connectivity.available:
-                policy_listener = RuntimePolicyHintListener(
-                    streams=RedisRuntimePolicyHintStreamFactory(resources.general_redis),
-                    reader=shared.runtime_policy_reader,
-                )
-                await supervisor.start(
-                    "runtime-policy-hints",
-                    policy_listener.run,
-                    kind=TaskKind.AUXILIARY,
-                    restart=RestartPolicy(),
-                )
-            runtime = ApiRuntime(
-                settings=settings,
-                resources=resources,
-                readiness=readiness,
-                supervisor=supervisor,
-                uow_factory=shared.uow_factory,
-                runtime_policy_repository=shared.runtime_policy_repository,
-                runtime_policy_reader=shared.runtime_policy_reader,
-                runtime_policy_service=runtime_policy_service,
-                token_codec=shared.token_codec,
-                secret_cipher=shared.secret_cipher,
-                password_hasher=shared.password_hasher,
-                service_api_key_hasher=shared.service_api_key_hasher,
-                cookie_manager=cookie_manager,
-                csrf_service=csrf_service,
-                oauth_registry=oauth_registry,
-                application_urls=shared.application_urls,
-                rate_limit_store=shared.rate_limit_store,
-                command_ingress=shared.command_ingress,
-                run_admission_service=shared.run_admission_service,
-                run_control_service=shared.run_control_service,
-                run_projection=shared.run_projection,
-                sandbox_factory=shared.sandbox_factory,
-                object_storage=shared.object_storage,
-                file_storage=shared.file_storage,
-                session_streams=shared.session_streams,
-                notification_streams=shared.notification_streams,
-                auth_service=shared.auth_service,
-                audit_service=shared.audit_service,
-                usage_stats_service=shared.usage_stats_service,
-                quota_service=shared.quota_service,
-                mcp_integration_service=shared.mcp_integration_service,
-                a2a_integration_service=shared.a2a_integration_service,
-                inference_model_service=shared.inference_model_service,
-                inference_endpoint_service=shared.inference_endpoint_service,
-                inference_binding_service=shared.inference_binding_service,
-                capability_service=shared.capability_service,
-                inference_status_service=shared.inference_status_service,
-                skill_service=shared.skill_service,
-                team_service=shared.team_service,
-                service_api_key_service=shared.service_api_key_service,
-                memory_service=shared.memory_service,
-                llm_token_usage_service=shared.llm_token_usage_service,
-                status_service=shared.status_service,
-                file_service=shared.file_service,
-                session_service=shared.session_service,
-                resource_binding_service=shared.resource_binding_service,
-                agent_service=shared.agent_service,
-                knowledge_base_service=shared.knowledge_base_service,
-                a2a_server_service=shared.a2a_server_service,
-                artifact_service=shared.artifact_service,
-                notification_service=shared.notification_service,
-                scheduled_job_service=shared.scheduled_job_service,
-                evidence_service=shared.evidence_service,
-                patrol_pack_service=shared.patrol_pack_service,
-                patrol_run_service=shared.patrol_run_service,
-                patrol_evidence_service=shared.patrol_evidence_service,
-                patrol_remediation_service=shared.patrol_remediation_service,
-                compliance_service=shared.compliance_service,
-                governance_profile_service=shared.governance_profile_service,
-                governance_overview_service=shared.governance_overview_service,
+            ),
+            application_urls=ApplicationUrls(
+                frontend_base_url=settings.frontend_base_url,
+                oauth_redirect_base=settings.oauth_redirect_base,
+            ),
+        )
+        knowledge_service = PostgresKnowledgeService(
+            session_factory,
+            storage=resources.object_storage_client,
+            commands=commands,
+            retention_days=GovernancePolicy().retention_days,
+            quota=quota_gate,
+        )
+        runtime = ApiRuntime(
+            settings=settings,
+            resources=resources,
+            readiness=readiness,
+            supervisor=supervisor,
+            identity=identity,
+            inference=InferenceRuntime(
+                commands=inference_service,
+                queries=inference_service,
+                gateway=inference_gateway,
+                transactions=session_factory,
+            ),
+            knowledge=KnowledgeRuntime(
+                commands=knowledge_service,
+                queries=knowledge_service,
+                gateway=knowledge_service,
+                transactions=session_factory,
+                dispositions=knowledge_service,
+            ),
+            kernel=KernelApiRuntime(
+                commands=commands,
+                queries=PostgresKernelQueryService(session_factory),
+                dispositions=PostgresDispositionService(
+                    session_factory,
+                    retention_days=GovernancePolicy().retention_days,
+                ),
+                catalog=PostgresToolCatalog(session_factory),
+            ),
+        )
+        try:
+            await auth.bootstrap_admin(
+                email=settings.bootstrap_admin_email,
+                password=settings.bootstrap_admin_password,
             )
             readiness.mark_ready()
             yield runtime

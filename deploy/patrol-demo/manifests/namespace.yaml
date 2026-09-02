@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: opencitadel-patrol-demo
-  labels:
-    opencitadel.io/disposable-patrol-demo: "true"

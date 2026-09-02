@@ -46,10 +46,6 @@ spec:
     # private services) directly on 80/443. Egress is now收敛 to the proxy Pod
     # only, so anything the proxy denies is unreachable.
     #
-    # 依赖：本 chart 尚未提供 squid / egress-proxy 部署（deploy/helm 无 squid
-    # 模板，属另一大项）。在带标签
-    # app.kubernetes.io/component=egress-proxy 的代理 Pod 部署之前，此策略
-    # fail-closed —— 沙箱除 DNS 外无任何出站。
     - to:
         - podSelector:
             matchLabels:

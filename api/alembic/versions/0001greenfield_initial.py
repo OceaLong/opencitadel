@@ -1,18 +1,20 @@
-"""Create the complete greenfield OpenCitadel schema.
+"""Create the destructive greenfield OpenCitadel v2 schema.
 
 Revision ID: 0001greenfield
 Revises: None
 """
 
 from collections.abc import Sequence
+from uuid import UUID
 
 import sqlalchemy as sa
-
 from alembic import op
+from app.domain.runtime_policy.governance import GovernancePolicy
 from app.infrastructure.models.registry import model_metadata
 from app.infrastructure.security.tenant_rls import (
-    EXECUTION_ROOT_TABLES,
+    RLS_TABLES,
     apply_row_level_security,
+    disable_policy_statements,
 )
 
 revision: str = "0001greenfield"
@@ -21,60 +23,39 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-FORMAL_PROJECTIONS = {
-    "execution_activity_projection",
-    "execution_approval_projection",
-    "execution_public_events",
-    "execution_resource_build_projection",
-    "execution_run_projection",
-}
-APPEND_ONLY_EXECUTION_TABLES = {
-    "execution_events",
-    "execution_stream_owners",
-}
-MUTABLE_EXECUTION_TABLES = EXECUTION_ROOT_TABLES - APPEND_ONLY_EXECUTION_TABLES
-
-
 def _execute(statements: str | list[str]) -> None:
-    if isinstance(statements, str):
-        statements = [statements]
-    for statement in statements:
+    for statement in [statements] if isinstance(statements, str) else statements:
         op.execute(sa.text(statement))
 
 
-def _assert_runtime_roles() -> None:
+def _install_extensions() -> None:
+    _execute(
+        [
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+            "CREATE EXTENSION IF NOT EXISTS vector",
+        ]
+    )
+
+
+def _install_runtime_roles() -> None:
     _execute(
         """
         DO $$
         DECLARE
             api_role text := current_setting('app.runtime_database_role', true);
-            kernel_role text := current_setting(
-                'app.execution_runtime_role', true
-            );
-            signing_secret text := current_setting(
-                'app.rls_signing_secret', true
-            );
+            kernel_role text := current_setting('app.execution_runtime_role', true);
         BEGIN
-            IF api_role IS NULL OR api_role = '' THEN
-                RAISE EXCEPTION 'app.runtime_database_role is required';
-            END IF;
-            IF kernel_role IS NULL OR kernel_role = '' THEN
-                RAISE EXCEPTION 'app.execution_runtime_role is required';
+            IF api_role IS NULL OR api_role = '' OR kernel_role IS NULL OR kernel_role = '' THEN
+                RAISE EXCEPTION 'runtime database role settings are required';
             END IF;
             IF api_role = kernel_role THEN
-                RAISE EXCEPTION 'API and execution-kernel roles must differ';
-            END IF;
-            IF signing_secret IS NULL OR signing_secret = '' THEN
-                RAISE EXCEPTION 'app.rls_signing_secret is required';
+                RAISE EXCEPTION 'API and kernel database roles must differ';
             END IF;
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
-                RAISE EXCEPTION 'API database role % does not exist', api_role;
+                EXECUTE format('CREATE ROLE %I NOLOGIN NOBYPASSRLS', api_role);
             END IF;
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_roles WHERE rolname = kernel_role
-            ) THEN
-                RAISE EXCEPTION 'execution-kernel role % does not exist',
-                    kernel_role;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = kernel_role) THEN
+                EXECUTE format('CREATE ROLE %I NOLOGIN NOBYPASSRLS', kernel_role);
             END IF;
         END;
         $$
@@ -82,45 +63,20 @@ def _assert_runtime_roles() -> None:
     )
 
 
-def _install_extensions() -> None:
-    _execute(
-        [
-            'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
-            "CREATE EXTENSION IF NOT EXISTS vector",
-            # 会话搜索按 ILIKE '%q%' 过滤 title/latest_message；启用 pg_trgm
-            # 以便后续为 sessions(title/latest_message) 建 GIN trgm 索引加速
-            # 子串检索（当前查询已正确，索引为纯性能优化，随模型改动落地）。
-            "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-        ]
-    )
-
-
-def _create_product_schema() -> None:
-    model_metadata.create_all(bind=op.get_bind(), checkfirst=False)
-
-
 def _install_authorization_guard() -> None:
     _execute(
         [
             """
-            CREATE TABLE execution_authorization_secrets (
-                singleton boolean PRIMARY KEY DEFAULT true
-                    CHECK (singleton),
+            CREATE TABLE kernel_authorization_secrets (
+                singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
                 signing_secret text NOT NULL CHECK (signing_secret <> '')
             )
             """,
             """
-            INSERT INTO execution_authorization_secrets (
-                singleton,
-                signing_secret
-            )
-            VALUES (
-                true,
-                current_setting('app.rls_signing_secret')
-            )
+            INSERT INTO kernel_authorization_secrets (singleton, signing_secret)
+            VALUES (true, current_setting('app.rls_signing_secret'))
             """,
-            "REVOKE ALL ON execution_authorization_secrets FROM PUBLIC",
+            "REVOKE ALL ON kernel_authorization_secrets FROM PUBLIC",
             """
             CREATE FUNCTION opencitadel_authorization_valid()
             RETURNS boolean
@@ -134,38 +90,25 @@ def _install_authorization_guard() -> None:
                 claims text;
                 expected_signature text;
                 provided_signature text := COALESCE(
-                    current_setting('app.auth_signature', true),
-                    ''
+                    current_setting('app.auth_signature', true), ''
                 );
             BEGIN
-                SELECT signing_secret
-                INTO secret
-                FROM public.execution_authorization_secrets
-                WHERE singleton = true;
+                SELECT signing_secret INTO secret
+                FROM public.kernel_authorization_secrets WHERE singleton = true;
                 IF secret IS NULL OR length(provided_signature) <> 64 THEN
                     RETURN false;
                 END IF;
                 claims := concat(
-                    COALESCE(current_setting('app.auth_mode', true), ''),
-                    chr(31),
-                    COALESCE(current_setting('app.user_id', true), ''),
-                    chr(31),
-                    COALESCE(current_setting('app.team_id', true), ''),
-                    chr(31),
-                    COALESCE(current_setting('app.is_admin', true), ''),
-                    chr(31),
-                    COALESCE(current_setting('app.request_id', true), ''),
-                    chr(31),
-                    COALESCE(current_setting('app.system_actor', true), ''),
-                    chr(31),
+                    COALESCE(current_setting('app.auth_mode', true), ''), chr(31),
+                    COALESCE(current_setting('app.user_id', true), ''), chr(31),
+                    COALESCE(current_setting('app.team_id', true), ''), chr(31),
+                    COALESCE(current_setting('app.is_admin', true), ''), chr(31),
+                    COALESCE(current_setting('app.request_id', true), ''), chr(31),
+                    COALESCE(current_setting('app.system_actor', true), ''), chr(31),
                     COALESCE(current_setting('app.is_auditor', true), '')
                 );
                 expected_signature := encode(
-                    public.hmac(
-                        convert_to(claims, 'UTF8'),
-                        convert_to(secret, 'UTF8'),
-                        'sha256'
-                    ),
+                    public.hmac(convert_to(claims, 'UTF8'), convert_to(secret, 'UTF8'), 'sha256'),
                     'hex'
                 );
                 RETURN expected_signature = provided_signature;
@@ -176,220 +119,126 @@ def _install_authorization_guard() -> None:
     )
 
 
-def _apply_row_level_security() -> None:
-    # Single canonical policy matrix (auditor read-all / no-write baked in).
-    apply_row_level_security(_execute)
-
-
-def _install_append_only_guards() -> None:
-    _execute(
-        [
+def _seed_governance_policy() -> None:
+    policy = GovernancePolicy()
+    revision_id = UUID("00000000-0000-0000-0000-000000000001")
+    connection = op.get_bind()
+    connection.execute(
+        sa.text(
             """
-            CREATE FUNCTION opencitadel_reject_execution_event_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-                RAISE EXCEPTION 'execution_events are immutable'
-                    USING ERRCODE = '55000';
-            END;
-            $$
-            """,
+            INSERT INTO governance_policy_revisions
+                (id, policy, digest, actor_user_id, note, created_at)
+            VALUES (:id, CAST(:policy AS jsonb), :digest, 'migration', 'greenfield default', now())
             """
-            CREATE TRIGGER execution_events_immutable
-            BEFORE UPDATE OR DELETE ON execution_events
-            FOR EACH ROW
-            EXECUTE FUNCTION opencitadel_reject_execution_event_mutation()
-            """,
+        ),
+        {
+            "id": revision_id,
+            "policy": __import__("json").dumps(policy.model_dump(mode="json")),
+            "digest": policy.digest,
+        },
+    )
+    connection.execute(
+        sa.text(
             """
-            CREATE TRIGGER execution_stream_owners_immutable
-            BEFORE UPDATE OR DELETE ON execution_stream_owners
-            FOR EACH ROW
-            EXECUTE FUNCTION opencitadel_reject_execution_event_mutation()
-            """,
+            INSERT INTO governance_policy_head (id, revision_id, generation, updated_at)
+            VALUES (1, :revision_id, 1, now())
             """
-            CREATE FUNCTION opencitadel_reject_audit_log_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-                RAISE EXCEPTION 'audit_logs are append-only'
-                    USING ERRCODE = '55000';
-            END;
-            $$
-            """,
-            """
-            CREATE TRIGGER audit_logs_immutable
-            BEFORE UPDATE OR DELETE ON audit_logs
-            FOR EACH ROW
-            EXECUTE FUNCTION opencitadel_reject_audit_log_mutation()
-            """,
-            """
-            CREATE FUNCTION opencitadel_reject_runtime_policy_revision_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-                RAISE EXCEPTION 'runtime policy revisions are immutable'
-                    USING ERRCODE = '55000';
-            END;
-            $$
-            """,
-            """
-            CREATE TRIGGER execution_policy_revisions_immutable
-            BEFORE UPDATE OR DELETE ON execution_policy_revisions
-            FOR EACH ROW
-            EXECUTE FUNCTION opencitadel_reject_runtime_policy_revision_mutation()
-            """,
-            """
-            CREATE TRIGGER operations_policy_revisions_immutable
-            BEFORE UPDATE OR DELETE ON operations_policy_revisions
-            FOR EACH ROW
-            EXECUTE FUNCTION opencitadel_reject_runtime_policy_revision_mutation()
-            """,
-            (
-                "REVOKE UPDATE, DELETE ON execution_events, "
-                "execution_stream_owners, audit_logs, "
-                "execution_policy_revisions, operations_policy_revisions FROM PUBLIC"
-            ),
-        ]
+        ),
+        {"revision_id": revision_id},
     )
 
 
-def _grant_runtime_privileges() -> None:
-    execution_mutable = ", ".join(sorted(MUTABLE_EXECUTION_TABLES))
-    projections = ", ".join(sorted(FORMAL_PROJECTIONS))
+def _install_immutability_guards() -> None:
     _execute(
-        f"""
+        [
+            """
+            CREATE FUNCTION opencitadel_reject_immutable_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION '% is append-only', TG_TABLE_NAME USING ERRCODE = '55000';
+            END;
+            $$
+            """,
+            """
+            CREATE FUNCTION opencitadel_guard_kernel_event_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF TG_OP = 'DELETE'
+                   AND public.opencitadel_authorization_valid()
+                   AND current_setting('app.auth_mode', true) = 'system'
+                   AND current_setting('app.system_actor', true) = 'kernel-purge' THEN
+                    RETURN OLD;
+                END IF;
+                RAISE EXCEPTION '% is append-only', TG_TABLE_NAME USING ERRCODE = '55000';
+            END;
+            $$
+            """,
+            """
+            CREATE TRIGGER kernel_events_immutable BEFORE UPDATE OR DELETE ON kernel_events
+            FOR EACH ROW EXECUTE FUNCTION opencitadel_guard_kernel_event_mutation()
+            """,
+            """
+            CREATE TRIGGER audit_records_immutable BEFORE UPDATE OR DELETE ON audit_records
+            FOR EACH ROW EXECUTE FUNCTION opencitadel_reject_immutable_mutation()
+            """,
+            """
+            CREATE TRIGGER governance_revisions_immutable
+            BEFORE UPDATE OR DELETE ON governance_policy_revisions
+            FOR EACH ROW EXECUTE FUNCTION opencitadel_reject_immutable_mutation()
+            """,
+            """
+            CREATE FUNCTION opencitadel_reject_owner_scope_change()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF OLD.owner_user_id IS DISTINCT FROM NEW.owner_user_id
+                   OR OLD.team_id IS DISTINCT FROM NEW.team_id THEN
+                    RAISE EXCEPTION 'owner scope is immutable' USING ERRCODE = '55000';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """,
+        ]
+    )
+    owner_tables = sorted(
+        table
+        for table in RLS_TABLES
+        if {"owner_user_id", "team_id"} <= set(model_metadata.tables[table].c.keys())
+    )
+    for table in owner_tables:
+        _execute(
+            f"CREATE TRIGGER {table}_owner_immutable BEFORE UPDATE ON {table} "
+            "FOR EACH ROW EXECUTE FUNCTION opencitadel_reject_owner_scope_change()"
+        )
+
+
+def _grant_runtime_privileges() -> None:
+    _execute(
+        """
         DO $$
         DECLARE
             api_role text := current_setting('app.runtime_database_role', true);
-            kernel_role text := current_setting(
-                'app.execution_runtime_role', true
-            );
-            product_tables text;
-            product_sequences text;
+            kernel_role text := current_setting('app.execution_runtime_role', true);
         BEGIN
+            EXECUTE format('GRANT USAGE ON SCHEMA public TO %I, %I', api_role, kernel_role);
             EXECUTE format(
-                'GRANT USAGE ON SCHEMA public TO %I, %I',
-                api_role,
-                kernel_role
-            );
-
-            SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ')
-            INTO product_tables
-            FROM pg_class AS c
-            JOIN pg_namespace AS n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
-              AND c.relkind IN ('r', 'p')
-              AND c.relname <> 'alembic_version'
-              AND left(c.relname, 10) <> 'execution_';
-
-            IF product_tables IS NOT NULL THEN
-                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
-                    || product_tables
-                    || format(' TO %I, %I', api_role, kernel_role);
-            END IF;
-
-            SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ')
-            INTO product_sequences
-            FROM pg_class AS c
-            JOIN pg_namespace AS n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
-              AND c.relkind = 'S'
-              AND left(c.relname, 10) <> 'execution_';
-
-            IF product_sequences IS NOT NULL THEN
-                EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE '
-                    || product_sequences
-                    || format(' TO %I, %I', api_role, kernel_role);
-            END IF;
-
-            EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
-                kernel_role
-            );
-            IF product_tables IS NOT NULL THEN
-                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
-                    || product_tables || format(' TO %I', kernel_role);
-            END IF;
-            IF product_sequences IS NOT NULL THEN
-                EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE '
-                    || product_sequences || format(' TO %I', kernel_role);
-            END IF;
-            EXECUTE format(
-                'GRANT SELECT, INSERT ON execution_events, '
-                'execution_stream_owners TO %I', kernel_role
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I, %I',
+                api_role, kernel_role
             );
             EXECUTE format(
-                'GRANT USAGE, SELECT ON SEQUENCE '
-                'execution_events_position_seq TO %I', kernel_role
+                'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I, %I',
+                api_role, kernel_role
             );
             EXECUTE format(
-                'GRANT SELECT, INSERT, UPDATE, DELETE ON {execution_mutable} '
-                'TO %I', kernel_role
-            );
-            -- Kernel-internal Run quarantine (no tenant RLS); kernel-only.
-            EXECUTE format(
-                'GRANT SELECT, INSERT, UPDATE ON execution_poisoned_runs '
-                'TO %I', kernel_role
-            );
-            -- Kernel-internal per-scope head watermark (no tenant RLS);
-            -- kernel-only. Upserted by the append path, read by projector
-            -- scope discovery (list_pending).
-            EXECUTE format(
-                'GRANT SELECT, INSERT, UPDATE ON execution_scope_head '
-                'TO %I', kernel_role
-            );
-
-            EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
-                api_role
+                'REVOKE UPDATE ON kernel_events FROM %I, %I', api_role, kernel_role
             );
             EXECUTE format(
-                'GRANT SELECT ON alembic_version TO %I', api_role
-            );
-            IF product_tables IS NOT NULL THEN
-                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
-                    || product_tables || format(' TO %I', api_role);
-            END IF;
-            IF product_sequences IS NOT NULL THEN
-                EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE '
-                    || product_sequences || format(' TO %I', api_role);
-            END IF;
-            EXECUTE format(
-                'GRANT SELECT, INSERT ON execution_command_inbox TO %I',
-                api_role
+                'REVOKE UPDATE, DELETE ON audit_records, governance_policy_revisions '
+                'FROM %I, %I', api_role, kernel_role
             );
             EXECUTE format(
-                'GRANT SELECT ON {projections} TO %I', api_role
-            );
-
-            EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON execution_policy_revisions, '
-                'operations_policy_revisions, runtime_policy_heads FROM %I, %I',
-                api_role,
-                kernel_role
-            );
-            EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON SEQUENCE '
-                'execution_policy_revisions_sequence_seq, '
-                'operations_policy_revisions_sequence_seq FROM %I, %I',
-                api_role,
-                kernel_role
-            );
-            EXECUTE format(
-                'GRANT SELECT, INSERT ON execution_policy_revisions, '
-                'operations_policy_revisions TO %I', api_role
-            );
-            EXECUTE format(
-                'GRANT SELECT, UPDATE ON runtime_policy_heads TO %I',
-                api_role
-            );
-            EXECUTE format(
-                'GRANT USAGE, SELECT ON SEQUENCE '
-                'execution_policy_revisions_sequence_seq, '
-                'operations_policy_revisions_sequence_seq TO %I',
-                api_role
-            );
-            EXECUTE format(
-                'GRANT SELECT ON execution_policy_revisions, '
-                'operations_policy_revisions, runtime_policy_heads TO %I',
-                kernel_role
+                'REVOKE INSERT, UPDATE, DELETE ON kernel_effects, kernel_timers, '
+                'kernel_outbox FROM %I', api_role
             );
         END;
         $$
@@ -398,38 +247,26 @@ def _grant_runtime_privileges() -> None:
 
 
 def upgrade() -> None:
-    _assert_runtime_roles()
     _install_extensions()
-    _create_product_schema()
+    _install_runtime_roles()
+    model_metadata.create_all(bind=op.get_bind(), checkfirst=False)
     _install_authorization_guard()
-    _apply_row_level_security()
-    _install_append_only_guards()
+    _seed_governance_policy()
+    apply_row_level_security(_execute)
+    _install_immutability_guards()
     _grant_runtime_privileges()
 
 
 def downgrade() -> None:
+    for table in sorted(RLS_TABLES):
+        _execute(disable_policy_statements(table))
+    model_metadata.drop_all(bind=op.get_bind(), checkfirst=True)
     _execute(
         [
-            ("DROP TRIGGER IF EXISTS execution_events_immutable ON execution_events"),
-            ("DROP TRIGGER IF EXISTS execution_stream_owners_immutable ON execution_stream_owners"),
-            ("DROP FUNCTION IF EXISTS opencitadel_reject_execution_event_mutation()"),
-            "DROP TRIGGER IF EXISTS audit_logs_immutable ON audit_logs",
-            "DROP FUNCTION IF EXISTS opencitadel_reject_audit_log_mutation()",
-            (
-                "DROP TRIGGER IF EXISTS execution_policy_revisions_immutable "
-                "ON execution_policy_revisions"
-            ),
-            (
-                "DROP TRIGGER IF EXISTS operations_policy_revisions_immutable "
-                "ON operations_policy_revisions"
-            ),
-            "DROP FUNCTION IF EXISTS opencitadel_reject_runtime_policy_revision_mutation()",
-        ]
-    )
-    model_metadata.drop_all(bind=op.get_bind(), checkfirst=False)
-    _execute(
-        [
+            "DROP FUNCTION IF EXISTS opencitadel_reject_owner_scope_change() CASCADE",
+            "DROP FUNCTION IF EXISTS opencitadel_guard_kernel_event_mutation() CASCADE",
+            "DROP FUNCTION IF EXISTS opencitadel_reject_immutable_mutation() CASCADE",
             "DROP FUNCTION IF EXISTS opencitadel_authorization_valid()",
-            "DROP TABLE IF EXISTS execution_authorization_secrets",
+            "DROP TABLE IF EXISTS kernel_authorization_secrets",
         ]
     )

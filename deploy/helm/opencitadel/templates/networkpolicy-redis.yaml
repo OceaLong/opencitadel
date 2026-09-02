@@ -8,8 +8,7 @@ spec:
     matchLabels:
       app.kubernetes.io/component: redis
   policyTypes: [Ingress]
-  # 仅允许 api / execution-kernel 访问 6379。ops-collector 为只读巡检组件，
-  # 其 egress 含 6379，启用时一并放行。
+  # 仅允许 api / execution-kernel 访问 6379。
   ingress:
     - from:
         - podSelector:
@@ -19,9 +18,6 @@ spec:
                 values:
                   - "api"
                   - "execution-kernel"
-                  {{- if .Values.opsCollector.enabled }}
-                  - "ops-collector"
-                  {{- end }}
       ports:
         - {protocol: TCP, port: 6379}
 {{- end }}
