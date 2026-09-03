@@ -8,6 +8,6 @@
     "test:meta": "playwright test --config meta/playwright.config.ts"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0"
+    "@playwright/test": "1.62.1"
   }
 }
