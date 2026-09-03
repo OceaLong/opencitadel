@@ -80,7 +80,8 @@ export function PolicyHistory({ kind, head, revisions, onRestored }: Props) {
                   {t("history.revision", { sequence: revision.sequence })} · {revision.note}
                 </p>
                 <p className="text-muted-foreground truncate text-xs">
-                  {revision.created_by} · {new Date(revision.created_at).toLocaleString(toBcp47(locale))}
+                  {revision.created_by} ·{" "}
+                  {new Date(revision.created_at).toLocaleString(toBcp47(locale))}
                 </p>
               </div>
               <Button

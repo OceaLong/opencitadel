@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -36,20 +36,22 @@ export default function AdminInvitationsPage() {
   const [inviteUrl, setInviteUrl] = useState("");
   const [creating, setCreating] = useState(false);
 
-  async function loadInvitations() {
+  const loadInvitations = useCallback(async () => {
     setLoading(true);
     try {
       const data = await adminApi.invitations({ limit: 100 });
       setInvitations(data.invitations);
       setTotal(data.total);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }
+  }, [tCommon]);
 
   useEffect(() => {
     void loadInvitations();
-  }, []);
+  }, [loadInvitations]);
 
   async function createInvite() {
     if (!inviteEmail.trim()) {

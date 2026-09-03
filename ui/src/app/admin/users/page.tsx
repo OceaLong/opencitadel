@@ -97,7 +97,12 @@ export default function AdminUsersPage() {
 
   // 选择 "转移给团队" 策略时懒加载可选团队列表(选择器必选,避免提交缺 team_id 被后端 400)。
   useEffect(() => {
-    if (!deleteTarget || deleteStrategy !== "transfer_to_team" || teams.length > 0 || teamsLoading) {
+    if (
+      !deleteTarget ||
+      deleteStrategy !== "transfer_to_team" ||
+      teams.length > 0 ||
+      teamsLoading
+    ) {
       return;
     }
     let cancelled = false;

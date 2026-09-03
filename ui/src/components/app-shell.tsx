@@ -24,7 +24,7 @@ import { SettingsDialogProvider } from "@/providers/settings-dialog-provider";
 
 const AUTH_PREFIXES = ["/login", "/register"];
 const SHELLLESS_PREFIXES = ["/share/artifact", "/invitations"];
-const AUTH_REQUIRED_PREFIXES = ["/admin", "/teams"];
+const AUTH_REQUIRED_PREFIXES = ["/admin", "/teams", "/approvals"];
 
 function isAuthRoute(pathname: string): boolean {
   return AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));

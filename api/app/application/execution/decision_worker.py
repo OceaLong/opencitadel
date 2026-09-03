@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Protocol
 
@@ -58,9 +59,13 @@ class DecisionWorker:
         *,
         source: DecisionSource,
         run_service: RunCommandService,
+        approval_ttl_minutes: Callable[[datetime], Awaitable[int]] | None = None,
     ) -> None:
         self._source = source
         self._run_service = run_service
+        # Operations-policy approval TTL, injected into RequestApproval payloads
+        # at submit time so tenants can override the aggregate's fixed default.
+        self._approval_ttl_minutes = approval_ttl_minutes
 
     async def run_once(
         self,
@@ -72,6 +77,7 @@ class DecisionWorker:
             raise ValueError("limit must be positive")
         candidates = await self._source.load_ready(limit=limit)
         submitted = rejected = idle = 0
+        approval_ttl: int | None = None
         for candidate in candidates:
             state = candidate.state
             with _tracer.start_as_current_span("run.decision") as span:
@@ -89,6 +95,16 @@ class DecisionWorker:
                     idle += 1
                     continue
                 span.set_attribute("opencitadel.command_type", command.command_type)
+                if (
+                    command.command_type == "RequestApproval"
+                    and self._approval_ttl_minutes is not None
+                    and command.payload.get("ttl_minutes") is None
+                ):
+                    if approval_ttl is None:
+                        approval_ttl = await self._approval_ttl_minutes(now)
+                    command = command.model_copy(
+                        update={"payload": {**command.payload, "ttl_minutes": approval_ttl}}
+                    )
                 result = await self._run_service.submit(
                     command,
                     CommandContext(

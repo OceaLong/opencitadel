@@ -40,10 +40,7 @@ export const scheduledJobsApi = {
   /**
    * 获取某个定时任务的运行历史（分页）
    */
-  listRuns: (
-    jobId: string,
-    params?: ListScheduledJobRunsParams,
-  ): Promise<ScheduledJobRunsData> => {
+  listRuns: (jobId: string, params?: ListScheduledJobRunsParams): Promise<ScheduledJobRunsData> => {
     const query: Record<string, number> = {};
     if (params?.limit != null) query.limit = params.limit;
     if (params?.offset != null) query.offset = params.offset;

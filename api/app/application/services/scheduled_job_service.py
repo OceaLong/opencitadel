@@ -11,6 +11,7 @@ from app.application.ports.crypto import SecretCipherError, VersionedSecretCiphe
 from app.application.ports.queries import RunHistoryEntry, RunProjectionPort
 from app.application.services.notification_service import NotificationService
 from app.application.services.patrol_run_service import PatrolRunService
+from app.application.services.quota_service import QuotaService
 from app.application.services.resource_binding_service import (
     ResourceBindingService,
 )
@@ -62,9 +63,11 @@ class ScheduledJobService:
         policy_reader: OperationsPolicyReader,
         notification_service: NotificationService,
         secret_cipher: VersionedSecretCipher,
+        quota_service: QuotaService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._patrol_run_service = patrol_run_service
+        self._quota_service = quota_service
         self._resource_guard = resource_guard
         self._resource_binding_service = resource_binding_service
         self._run_admission = run_admission_service
@@ -419,6 +422,12 @@ class ScheduledJobService:
                     return locked_job.last_run_session_id
                 job = locked_job
                 scope = self._scope_for_job(job)
+                # 定时任务与手动建会话同受属主配额约束（日会话数/月 Token/并发）。
+                # 复用当前写事务（嵌套第二个 UoW 会触发 NestedUnitOfWorkError）。
+                if self._quota_service is not None:
+                    await self._quota_service.check_session_quota(
+                        job.owner_user_id, scope=scope, uow=uow
+                    )
                 validated_resources = None
                 if job.knowledge_base_id:
                     if not self._resource_guard or not self._resource_binding_service:

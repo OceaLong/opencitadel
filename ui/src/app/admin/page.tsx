@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
 import { AdminStatCard } from "@/components/admin/stat-card";
+import { SystemHealthCard } from "@/components/admin/system-health-card";
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
 import {
   AuditActivityChart,
@@ -38,9 +40,11 @@ import { IconInvitation, IconLayers, IconModel, IconPhoneCall, IconUsers } from 
 
 export default function AdminOverviewPage() {
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [timeseries, setTimeseries] = useState<UsageTimeseriesPoint[]>([]);
@@ -61,6 +65,7 @@ export default function AdminOverviewPage() {
     let cancelled = false;
     async function load() {
       setLoading(true);
+      setError(null);
       const dateParams = getAdminDateRange(range);
       try {
         const [
@@ -94,6 +99,12 @@ export default function AdminOverviewPage() {
         setRecentAudit(auditData.logs);
         setAuditByDay(auditSummary.by_day);
         setRecentInvitations(invitationData.invitations);
+      } catch (err) {
+        // 任一请求失败都会让整页数据缺失,必须显式报错而不是渲染全 0。
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : tCommon("loadFailed");
+        setError(message);
+        toast.error(message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -102,7 +113,7 @@ export default function AdminOverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, tCommon]);
 
   if (loading) {
     return (
@@ -117,6 +128,19 @@ export default function AdminOverviewPage() {
           ))}
         </div>
         <Skeleton className="h-72 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={t("overviewTitle")}
+          description={t("overviewSubtitle")}
+          actions={<AdminTimeRangePicker value={range} onChange={setRange} />}
+        />
+        <EmptyState title={error} className="py-12" />
       </div>
     );
   }
@@ -167,6 +191,8 @@ export default function AdminOverviewPage() {
           icon={IconLayers}
         />
       </div>
+
+      <SystemHealthCard />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <UsageTimeseriesChart points={timeseries} />

@@ -33,6 +33,14 @@ config.set_main_option(
 # target_metadata = mymodel.Base.metadata
 target_metadata = model_metadata
 
+# Tables managed by raw SQL inside migrations (not by ORM metadata); exclude
+# them from autogenerate/`alembic check` so they are never flagged as drift.
+_RAW_SQL_TABLES = frozenset({"execution_authorization_secrets"})
+
+
+def _include_object(object_, name, type_, reflected, compare_to):
+    return not (type_ == "table" and name in _RAW_SQL_TABLES)
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -52,16 +60,15 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
-    context.configure(
-        url=url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
+    # The migrations depend on live GUCs (app.rls_signing_secret and the two
+    # runtime-role settings) that must never be baked into generated SQL files
+    # -- the signing secret would leak in plaintext. Offline SQL generation is
+    # therefore unsupported; run migrations online (python -m app.migrate).
+    raise NotImplementedError(
+        "offline (--sql) migration generation is unsupported: migrations "
+        "require session GUCs (app.rls_signing_secret et al.) that must not "
+        "be emitted into SQL scripts; run them online via python -m app.migrate"
     )
-
-    with context.begin_transaction():
-        context.run_migrations()
 
 
 def run_migrations_online() -> None:
@@ -78,7 +85,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=_include_object,
+        )
 
         with context.begin_transaction():
             connection.execute(
@@ -91,12 +102,12 @@ def run_migrations_online() -> None:
             )
             connection.execute(
                 text("SELECT set_config('app.rls_signing_secret', :value, false)"),
-                {"value": settings.session_secret},
+                {"value": settings.database_authorization_signing_secret},
             )
             configure_sync_system_authorization(
                 connection,
                 actor="alembic-migration",
-                signing_secret=settings.session_secret,
+                signing_secret=settings.database_authorization_signing_secret,
             )
             context.run_migrations()
 

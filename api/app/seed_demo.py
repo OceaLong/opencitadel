@@ -500,7 +500,9 @@ async def run_seed_command(
                     secret_cipher=versioned_cipher,
                     audit_signing_key=settings.audit_signing_key,
                     audit_signing_key_id=settings.audit_signing_key_id,
-                    database_authorization_signing_secret=settings.session_secret,
+                    database_authorization_signing_secret=(
+                        settings.database_authorization_signing_secret
+                    ),
                 ),
             )
 

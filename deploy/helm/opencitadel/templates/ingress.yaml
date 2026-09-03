@@ -1,13 +1,33 @@
 {{- if .Values.ingress.enabled }}
+{{- /*
+默认安全响应头 annotations（HSTS / nosniff / Referrer-Policy / CSP），面向
+ingress-nginx 的 configuration-snippet。CSP 单一来源为
+.Values.securityHeaders.contentSecurityPolicy，与 nginx/templates/
+default.http(s).conf.template 保持一致，避免双份漂移。
+用户 .Values.ingress.annotations 同 key 时覆盖默认值。
+*/}}
+{{- $annotations := dict }}
+{{- if .Values.ingress.securityHeaders }}
+{{- $csp := .Values.securityHeaders.contentSecurityPolicy }}
+{{- $snippet := printf "more_set_headers \"Strict-Transport-Security: max-age=31536000; includeSubDomains\";\nmore_set_headers \"X-Content-Type-Options: nosniff\";\nmore_set_headers \"Referrer-Policy: strict-origin-when-cross-origin\";\nmore_set_headers \"Content-Security-Policy: %s\";\n" $csp }}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/configuration-snippet" $snippet }}
+{{- end }}
+{{- $annotations = mergeOverwrite $annotations (.Values.ingress.annotations | default dict) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "opencitadel.fullname" . }}
+  {{- with $annotations }}
   annotations:
-    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}

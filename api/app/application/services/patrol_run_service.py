@@ -22,6 +22,7 @@ from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.notification_service import NotificationService
 from app.application.services.patrol_report_service import PatrolReportService
+from app.application.services.quota_service import QuotaService
 from app.application.services.runtime_policy_reader import OperationsPolicyReader
 from app.domain.errors import (
     BadRequestError,
@@ -71,8 +72,10 @@ class PatrolRunService:
         audit_service: AuditService | None = None,
         artifact_service: ArtifactService | None = None,
         notification_service: NotificationService | None = None,
+        quota_service: QuotaService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
+        self._quota_service = quota_service
         self._audit_service = audit_service
         self._artifact_service = artifact_service
         self._notification_service = notification_service
@@ -174,6 +177,12 @@ class PatrolRunService:
                 raise ConflictError(
                     "Pack 缺少已验证 capability hash",
                     error_key="apiErrors.patrol.packVersionNotValidated",
+                )
+            # 巡检 Run 的执行会话同受配额约束；无属主的团队 Pack 只校验团队维度。
+            # 复用当前写事务（嵌套第二个 UoW 会触发 NestedUnitOfWorkError）。
+            if self._quota_service is not None:
+                await self._quota_service.check_session_quota(
+                    pack.owner_user_id, scope=scope, uow=uow
                 )
             session = Session(
                 title=f"[巡检] {pack.name}",
@@ -640,14 +649,36 @@ class PatrolRunService:
                     await uow.commit()
             self._governance_metrics.observe_patrol_finalized(run, results, findings)
             if self._notification_service is not None and pack is not None:
+                summary_message = (
+                    f'Patrol "{pack.name}" completed: {run.status.value}; '
+                    f"findings={run.warn_count + run.fail_count + run.error_count}"
+                )
                 await self._notification_service.send(
                     pack.owner_user_id,
                     "patrol_complete",
-                    f'Patrol "{pack.name}" completed: {run.status.value}; findings={run.warn_count + run.fail_count + run.error_count}',
+                    summary_message,
                     i18n_key="notifications.patrolCompleted",
                     i18n_params={"packName": pack.name, "status": run.status.value},
                     session_id=run.session_id,
                 )
+                channels = [channel.model_dump() for channel in pack.config.notify_channels]
+                if channels:
+                    pack_scope = (
+                        OwnerScope.team(pack.owner_user_id, pack.team_id)
+                        if pack.team_id
+                        else OwnerScope.personal(pack.owner_user_id)
+                    )
+                    # 渠道分发失败不能污染 Run 的产出物错误状态。
+                    try:
+                        await self._notification_service.dispatch_notify_channels(
+                            pack.owner_user_id,
+                            pack_scope,
+                            channels,
+                            summary_message,
+                            subject=f"OpenCitadel Patrol · {pack.name}",
+                        )
+                    except (OSError, RuntimeError, ValueError):
+                        logger.exception("Patrol 通知渠道分发失败 run=%s", run.id)
         except (OSError, RuntimeError, ValueError) as exc:
             logger.exception("Patrol output materialization failed run=%s", run.id)
             run.summary = {**run.summary, "output_error": str(exc)[:1000]}

@@ -135,6 +135,20 @@ class DBKnowledgeBaseRepository(
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
+    async def list_deleted_kbs_before(self, cutoff: datetime, *, limit: int = 100) -> list[str]:
+        """保留期清理：跨作用域返回 ``deleted_at`` 早于 cutoff 的知识库 id（需系统授权）。"""
+        stmt = (
+            select(KnowledgeBaseModel.id)
+            .where(
+                KnowledgeBaseModel.deleted_at.is_not(None),
+                KnowledgeBaseModel.deleted_at < cutoff,
+            )
+            .order_by(KnowledgeBaseModel.deleted_at.asc())
+            .limit(max(1, min(limit, 500)))
+        )
+        result = await self.db_session.execute(stmt)
+        return list(result.scalars().all())
+
     async def soft_delete(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
         """软删除：设置 ``deleted_at``；仅命中未删除的行。"""
         stmt = self._apply_scope(

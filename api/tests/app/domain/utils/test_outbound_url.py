@@ -119,3 +119,31 @@ def test_outbound_url_returns_all_validated_public_addresses(monkeypatch):
     assert target.hostname == "example.com"
     assert target.port == 443
     assert target.addresses == ("93.184.216.34", "2606:2800:220:1::")
+
+
+def test_allowlisted_host_may_resolve_into_docker_desktop_benchmark_range(monkeypatch):
+    """Docker Desktop allocates container networks from 198.18.0.0/15; an
+    explicitly allowlisted internal hostname resolving there must pass, while
+    non-allowlisted hosts in the same range stay rejected."""
+    import pytest
+
+    from app.domain.utils import outbound_url as module
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_addresses",
+        lambda hostname, port, resolver: ("198.18.1.112",),
+    )
+    resolved = module.resolve_outbound_url(
+        "http://opencitadel-ops-collector:8090/mcp",
+        allowed_ports=(8090,),
+        allow_private_hosts=("opencitadel-ops-collector",),
+    )
+    assert resolved is not None
+
+    with pytest.raises(module.OutboundURLRejected):
+        module.resolve_outbound_url(
+            "http://evil.example.com:8090/",
+            allowed_ports=(8090,),
+            allow_private_hosts=(),
+        )

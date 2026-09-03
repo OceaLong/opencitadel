@@ -269,6 +269,7 @@ async def run_kernel(
                 policy_reader=runtime.policy_reader,
                 stopping=runtime.supervisor.stop_event,
                 batch_size=settings.execution_activity_batch_size,
+                idle_poll_seconds=settings.execution_idle_poll_seconds,
             )
             install_signal_handlers(runtime.supervisor.request_stop)
             await runtime.supervisor.start(

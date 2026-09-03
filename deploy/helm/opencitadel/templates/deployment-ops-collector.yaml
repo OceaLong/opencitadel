@@ -9,11 +9,11 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: ops-collector
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ops-collector") | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/component: ops-collector
+        {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ops-collector") | nindent 8 }}
     spec:
       serviceAccountName: {{ if .Values.opsCollector.serviceAccount.create }}{{ include "opencitadel.fullname" . }}-ops-collector{{ else }}{{ required "opsCollector.serviceAccount.name is required when serviceAccount.create=false" .Values.opsCollector.serviceAccount.name }}{{ end }}
       securityContext:
@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: collector
-          image: "{{ .Values.opsCollector.image.repository }}:{{ .Values.opsCollector.image.tag }}"
+          image: {{ include "opencitadel.image" (dict "root" . "image" .Values.opsCollector.image) }}
           imagePullPolicy: {{ .Values.opsCollector.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -77,7 +77,7 @@ metadata:
   name: {{ include "opencitadel.fullname" . }}-ops-collector
 spec:
   selector:
-    app.kubernetes.io/component: ops-collector
+    {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ops-collector") | nindent 4 }}
   ports:
     - name: mcp
       port: 8090

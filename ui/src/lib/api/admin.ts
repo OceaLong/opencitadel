@@ -1,5 +1,7 @@
+import { translate } from "@/i18n/translate";
+
 import type { AuthUser } from "./auth";
-import { del, get, patch, post, put } from "./fetch";
+import { authenticatedFetch, del, get, patch, post, put } from "./fetch";
 import type { TeamMember, TeamMemberDetail } from "./team";
 
 export type AdminUser = AuthUser & { token_version: number };
@@ -177,7 +179,8 @@ export const adminApi = {
   auditSummary: (params?: AdminDateRangeParams) =>
     get<AuditSummary>("/admin/audit/summary", buildParams(params)),
 
-  exportAuditCsvUrl: (params?: {
+  /** 导出审计日志 CSV。走 authenticatedFetch，403/500 抛错供 toast。 */
+  exportAuditCsv: async (params?: {
     action?: string;
     actor_user_id?: string;
     resource_type?: string;
@@ -185,13 +188,18 @@ export const adminApi = {
     session_id?: string;
     start_at?: string;
     end_at?: string;
-  }) => {
+  }): Promise<Blob> => {
     const built = buildParams(params ?? {});
-    if (!built) return "/api/admin/audit/export";
-    const query = new URLSearchParams(
-      Object.entries(built).map(([key, value]) => [key, String(value)]),
-    ).toString();
-    return `/api/admin/audit/export?${query}`;
+    const query = built
+      ? new URLSearchParams(
+          Object.entries(built).map(([key, value]) => [key, String(value)]),
+        ).toString()
+      : "";
+    const response = await authenticatedFetch(`/admin/audit/export${query ? `?${query}` : ""}`);
+    if (!response.ok) {
+      throw new Error(translate("errors.downloadFailedWithStatus", { status: response.status }));
+    }
+    return response.blob();
   },
 
   teams: (params?: { limit?: number; offset?: number }) =>

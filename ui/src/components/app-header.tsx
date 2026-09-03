@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { ApprovalsIndicator } from "@/components/approvals-indicator";
 import { NotificationInbox } from "@/components/notification-inbox";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -107,6 +108,7 @@ export function AppHeader() {
           title={t("modelStatus", { status: modelStatusKey })}
           aria-label={t("modelStatus", { status: modelStatusKey })}
         />
+        <ApprovalsIndicator />
         <NotificationInbox />
       </div>
     </header>

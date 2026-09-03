@@ -116,7 +116,9 @@
       "maxConcurrentTasks": "并发活跃会话过多",
       "monthlyTokenLimit": "已超月度 Token 配额",
       "storageLimit": "已超存储配额"
-    }
+    },
+    "pageNotFound": "页面不存在",
+    "pageNotFoundDescription": "你访问的页面不存在或已被移动。"
   },
   "apiErrors": {
     "auth": {
@@ -235,8 +237,6 @@
     "loginFailed": "登录失败",
     "loginRegister": "登录 / 注册",
     "logout": "退出登录",
-    "noAccount": "还没有账号？",
-    "registerLink": "使用邀请链接注册",
     "registerTitle": "接受邀请",
     "registerDescription": "使用管理员提供的邀请链接创建账号。",
     "missingInviteToken": "缺少邀请 token。",
@@ -249,7 +249,8 @@
     "loginToSelectModel": "登录后即可选择模型",
     "selectModelAfterLogin": "登录后选择模型",
     "loginToUseAi": "登录后即可使用 AI 功能",
-    "loginToSendMessage": "登录后即可发送消息"
+    "loginToSendMessage": "登录后即可发送消息",
+    "inviteOnlyRegistration": "注册需要管理员邀请，请向管理员索取邀请链接。"
   },
   "home": {
     "subtitle": "我能为你做什么?",
@@ -1004,7 +1005,12 @@
     "timeRange7d": "近 7 天",
     "timeRange30d": "近 30 天",
     "timeRange90d": "近 90 天",
-    "timeRangeAll": "全部时间"
+    "timeRangeAll": "全部时间",
+    "systemHealthTitle": "系统健康",
+    "systemHealthDesc": "Postgres、Redis、API 与推理服务状态",
+    "healthOk": "正常",
+    "healthError": "异常",
+    "inferenceServiceLabel": "推理服务"
   },
   "adminNav": {
     "auditorSubtitle": "只读合规与审计门户",
@@ -1142,7 +1148,9 @@
     "sessionChainOk": "会话证据链完整",
     "sessionChainBroken": "会话证据链异常",
     "verifySessionChain": "验证链",
-    "verifySessionFailed": "验证会话链失败"
+    "verifySessionFailed": "验证会话链失败",
+    "generateReportFailed": "生成报告失败",
+    "exportFailed": "导出失败"
   },
   "governanceProfile": {
     "title": "治理档案",
@@ -1318,7 +1326,8 @@
     "scheduledJobCompleted": "定时任务「{jobName}」已完成",
     "scheduledJobStarted": "定时任务「{jobName}」已开始执行",
     "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}",
-    "approvalWaiting": "「{subject}」需要审批"
+    "approvalWaiting": "「{subject}」需要审批",
+    "approvalExpired": "审批超时未处理，运行已取消（{subject}）"
   },
   "toolUse": {
     "statusRunning": "执行中",
@@ -1444,7 +1453,8 @@
       "load": "巡检加载失败",
       "replay": "重新运行失败",
       "runLoad": "Run 加载失败",
-      "trigger": "触发失败"
+      "trigger": "触发失败",
+      "update": "更新巡检失败"
     },
     "evidencePercent": "证据 {value}%",
     "findingStatus": {
@@ -1502,6 +1512,7 @@
       "empty": "此次 Run 尚无发起的修复提案。",
       "errors": {
         "checkLoad": "加载修复所需的检查详情失败",
+        "detailLoad": "修复详情加载失败",
         "listLoad": "加载修复记录失败",
         "propose": "发起修复失败"
       },
@@ -1518,8 +1529,15 @@
       },
       "title": "修复记录",
       "unavailable": "策略已禁止创建修复提案。",
+      "viewDetail": "查看详情",
       "viewRecheckRun": "查看复检 Run",
-      "viewSession": "查看审批会话"
+      "viewSession": "查看审批会话",
+      "detail": {
+        "afterLabel": "执行后观测",
+        "beforeLabel": "执行前观测",
+        "paramsLabel": "参数",
+        "title": "修复详情"
+      }
     },
     "pack": {
       "boundary": "10 项检查；无修复、Shell、浏览器或任意查询能力。",
@@ -1628,7 +1646,39 @@
       },
       "stepsAria": "创建巡检步骤",
       "threshold": "阈值",
-      "timezone": "IANA 时区"
+      "timezone": "IANA 时区",
+      "checksPreviewNotice": "检查项由所选模板固定，此处仅供预览；暂不支持自定义配置。",
+      "collectorEmpty": "未找到采集器，请先在 设置 > 集成 中注册 MCP Server。",
+      "collectorLoadFailed": "采集器列表加载失败。请检查网络后重试，或在 设置 > 集成 中注册。",
+      "targetRefPlaceholder": "例如 my-app-stack",
+      "clusterPlaceholder": "例如 prod-cluster",
+      "namespacesPlaceholder": "例如 default, production",
+      "namespacesHint": "多个命名空间用逗号分隔。",
+      "updateAndRevalidate": "保存并重新验证"
+    },
+    "edit": {
+      "description": "调整范围、计划与通知，保存后将重新验证",
+      "title": "编辑巡检"
+    },
+    "notify": {
+      "add": "添加渠道",
+      "addressLabel": "邮箱地址",
+      "channelArgLabel": "频道参数",
+      "empty": "尚未配置通知渠道，运行结果仍会进入应用内通知收件箱。",
+      "remove": "移除渠道",
+      "secretLabel": "签名密钥",
+      "serverLabel": "通知服务",
+      "serverPlaceholder": "选择 MCP Server",
+      "typeEmail": "邮件",
+      "typeLabel": "渠道类型",
+      "typeMcp": "MCP 工具",
+      "typeWebhook": "Webhook",
+      "urlLabel": "Webhook 地址"
+    },
+    "runs": {
+      "description": "跨巡检包的运行记录",
+      "filterAll": "全部状态",
+      "title": "巡检运行历史"
     }
   },
   "redirect": {
@@ -1778,6 +1828,25 @@
     "sendFailed": "发送响应失败",
     "toolConfirmTitle": "工具操作需要审批",
     "unknownTool": "未知工具"
+  },
+  "approvals": {
+    "title": "待我审批",
+    "description": "集中处理智能体运行产生的待审批请求",
+    "empty": "暂无审批请求",
+    "filterAll": "全部状态",
+    "status": {
+      "pending": "待审批",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "cancelled": "已取消",
+      "expired": "已过期"
+    },
+    "viewSession": "查看会话",
+    "requestedAt": "发起于 {time}",
+    "decidedAt": "决策于 {time}",
+    "approveSuccess": "已批准",
+    "rejectSuccess": "已拒绝",
+    "indicatorLabel": "待审批"
   },
   "operatorScope": {
     "confirmCreate": "启动 Web Operator 会话",

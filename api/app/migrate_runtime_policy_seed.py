@@ -19,7 +19,9 @@ async def seed_runtime_policy_heads(settings: DeploymentSettings) -> bool:
         engine,
         expire_on_commit=False,
         info={
-            "database_authorization_signing_secret": settings.session_secret,
+            "database_authorization_signing_secret": (
+                settings.database_authorization_signing_secret
+            ),
         },
     )
     repository = PostgresRuntimePolicyRepository(

@@ -11,6 +11,7 @@ NotificationType = Literal[
     "job_complete",
     "job_failed",
     "approval_waiting",
+    "approval_expired",
     "artifact_final",
     "patrol_complete",
 ]

@@ -1,4 +1,15 @@
-import { get } from "./fetch";
+import { translate } from "@/i18n/translate";
+
+import { authenticatedFetch, get } from "./fetch";
+
+/** 导出类接口的共用兜底：非 2xx 时抛可展示的错误（供调用方 toast）。 */
+async function fetchBlob(path: string): Promise<Blob> {
+  const response = await authenticatedFetch(path);
+  if (!response.ok) {
+    throw new Error(translate("errors.downloadFailedWithStatus", { status: response.status }));
+  }
+  return response.blob();
+}
 
 export type ChainVerifyResult = {
   ok: boolean;
@@ -165,7 +176,9 @@ export const complianceApi = {
     return get<{ sessions: EvidenceSessionItem[] }>(`/admin/evidence/sessions${q ? `?${q}` : ""}`);
   },
 
-  evidencePackageUrl: (sessionId: string) => `/api/admin/evidence/sessions/${sessionId}/package`,
+  /** 下载会话证据包（ZIP）。走 authenticatedFetch，403/500 抛错供 toast。 */
+  downloadEvidencePackage: (sessionId: string): Promise<Blob> =>
+    fetchBlob(`/admin/evidence/sessions/${sessionId}/package`),
 
   getGovernanceProfile: (sessionId: string) =>
     get<GovernanceProfile>(`/admin/governance/sessions/${sessionId}/profile`),
@@ -187,17 +200,18 @@ export const complianceApi = {
     return get<{ report: ComplianceReport }>(`/admin/compliance/report?${q}`);
   },
 
-  complianceReportUrl: (params?: {
+  /** 导出合规报告（md/pdf）。走 authenticatedFetch，403/500 抛错供 toast。 */
+  downloadComplianceReport: (params?: {
     framework?: string;
     start?: string;
     end?: string;
     format?: "md" | "pdf";
-  }) => {
+  }): Promise<Blob> => {
     const qs = new URLSearchParams();
     if (params?.framework) qs.set("framework", params.framework);
     if (params?.start) qs.set("start", params.start);
     if (params?.end) qs.set("end", params.end);
     qs.set("format", params?.format ?? "pdf");
-    return `/api/admin/compliance/report?${qs.toString()}`;
+    return fetchBlob(`/admin/compliance/report?${qs.toString()}`);
   },
 };

@@ -49,7 +49,10 @@ class DeploymentSettings(BaseSettings):
     env: str = "development"
     log_level: str = "INFO"
     log_format: str = "text"  # text | json
-    cors_origins: str = "*"
+    # 跨域来源列表（逗号分隔）。空串与 "*" 的实际效果相同：因为携带凭据
+    # (allow_credentials=True) 时通配符不合法，两者都会被折叠为“不放行任何
+    # 跨域来源”（仅 nginx 同源访问）。需要跨域时必须显式列出来源。
+    cors_origins: str = ""
     otel_enabled: bool = False
     otel_service_name: str = "opencitadel-api"
     otel_exporter_endpoint: str = ""
@@ -82,11 +85,12 @@ class DeploymentSettings(BaseSettings):
     # injected into the untrusted sandbox container (only the derived token is).
     # Required and >=32 chars in production.
     sandbox_token_seed: str = ""
-    # Bearer tokens the Ops Actuator / Ops Collector MCP servers require on their
-    # streamable-http endpoints. Callers must present `Authorization: Bearer
-    # <token>`; empty means no header is injected (only valid when talking to a
-    # stdio server or an unauthenticated legacy deployment).
-    ops_actuator_token: str = ""
+    # Bearer token the Ops Collector MCP server requires on its streamable-http
+    # endpoint; the demo seed stamps it into the registered MCPServerRecord's
+    # Authorization header. Empty means no header is injected (stdio / legacy).
+    # The Actuator's token is NOT mirrored here: its Authorization header is
+    # configured on the MCP Server registration (Settings -> Integrations), and
+    # OPS_ACTUATOR_TOKEN belongs to the actuator server process itself.
     ops_collector_token: str = ""
     sandbox_driver: str = "auto"
     sandbox_address: str = ""
@@ -160,14 +164,21 @@ class DeploymentSettings(BaseSettings):
     # 的上限（Semaphore）。每个 claim 内含多次数据库连接 checkout，因此并发上限
     # 必须 <= 连接池有效容量（postgres_pool_size + postgres_max_overflow），否则
     # 高并发下会出现连接排队 / 死锁向量。保持默认 8 <= 10（5+5）。
-    # TODO(P1-3 wiring): execution_activity_batch_size / execution_idle_poll_seconds
-    # 目前仍由 execution_kernel_main.ExecutionKernelProcess 的默认值（batch_size=100,
-    # idle_poll_seconds=1.0）承载；把它们接到这些 settings 需改 execution_kernel_main.py
-    # 与 execution_ports.py（本次改动范围之外）。execution_activity_max_concurrency
-    # 同理需在 build_execution_kernel_runtime 处传入 ActivityWorker(max_concurrency=...)。
     execution_activity_batch_size: int = 100
     execution_activity_max_concurrency: int = 8
     execution_idle_poll_seconds: float = 1.0
+
+    # 回收站保留期：软删的会话/知识库超期后由调度器 leader tick 自动物理清除
+    # （每 tick 限一批，清除动作写审计）。0 = 关闭自动清理，仅保留手动 purge。
+    recycle_bin_retention_days: int = 30
+    recycle_bin_purge_batch_size: int = 100
+
+    # Web 搜索提供方：searxng | tavily | bing_api | bing_html（默认，HTML 抓取，
+    # 脆弱且可能被反爬）| none（不注册搜索工具）。API 型提供方失败显式报错，
+    # 不会静默返回空结果。
+    search_provider: str = "bing_html"
+    search_endpoint: str = ""
+    search_api_key: str = ""
 
     # Redis 连接
     redis_host: str = "localhost"

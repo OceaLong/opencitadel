@@ -228,6 +228,11 @@ test("Patrol Pack executes through the formal Collector path and fails closed wh
         transport: "streamable_http",
         enabled: true,
         url: "http://opencitadel-ops-collector:8090/mcp",
+        // The Collector's streamable-http endpoint mandates a bearer token
+        // (OPS_COLLECTOR_TOKEN from .env.e2e, injected by the runner).
+        headers: process.env.OPS_COLLECTOR_TOKEN
+          ? { Authorization: `Bearer ${process.env.OPS_COLLECTOR_TOKEN}` }
+          : undefined,
         visibility: "private",
         tool_policies: Object.fromEntries(
           [
@@ -278,8 +283,11 @@ test("Patrol Pack executes through the formal Collector path and fails closed wh
       .getByRole("option", { name: /Compose service baseline|Compose 服务基线/ })
       .click();
     await page.getByRole("button", { name: /Next|下一步/ }).click();
+    // The wizard no longer pre-fills demo defaults; target_ref must match the
+    // deterministic acceptance Collector (OPS_COLLECTOR_TARGET_REF).
+    await page.locator("#patrol-target-ref").fill("opencitadel-local");
     await page.locator("#patrol-cluster").fill(acceptanceId("patrol-cluster"));
-    await page.locator("#patrol-namespace").fill("opencitadel");
+    await page.locator("#patrol-namespaces").fill("opencitadel");
     await page.getByRole("button", { name: /Next|下一步/ }).click();
     await expect(
       page.getByText(/OpenCitadel API health|OpenCitadel API 健康/),

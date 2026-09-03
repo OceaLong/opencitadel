@@ -39,11 +39,10 @@ class RunStatus(StrEnum):
 
 TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED})
 
-# Default human-approval time-to-live in minutes. This is the pure aggregate's
-# fallback when no per-tenant override is threaded in. The configurable surface
-# lives on ``OperationsPolicy.approval.ttl_minutes`` (runtime_policy/operations);
-# TODO(E3): thread that operations-policy value into RequestApproval at command
-# build time (owned by the decision loop) so tenants can override this default.
+# Default human-approval time-to-live in minutes: the pure aggregate's fallback
+# when the command carries no ttl_minutes. The configurable surface is
+# ``OperationsPolicy.approval.ttl_minutes``, injected into RequestApproval
+# payloads by the kernel DecisionWorker at submit time.
 DEFAULT_APPROVAL_TTL_MINUTES = 1440
 
 
@@ -193,6 +192,8 @@ class RequestApprovalPayload(_Payload):
     approval_kind: Annotated[str, Field(min_length=1, max_length=64)]
     risk_summary: Annotated[str, Field(min_length=1, max_length=1024)]
     subject_label: Annotated[str, Field(min_length=1, max_length=128)]
+    # Bounds mirror OperationsPolicy.approval.ttl_minutes (1 minute .. 30 days).
+    ttl_minutes: Annotated[int, Field(ge=1, le=43_200)] | None = None
 
 
 class DecideApprovalPayload(_Payload):
@@ -650,7 +651,7 @@ class RunAggregate:
         # fences the WAITING state so an unanswered approval cannot pin the Run
         # forever. The timer cancels itself the moment the approval is decided or
         # the Run reaches any terminal state.
-        due_at = issued_at + timedelta(minutes=DEFAULT_APPROVAL_TTL_MINUTES)
+        due_at = issued_at + timedelta(minutes=payload.ttl_minutes or DEFAULT_APPROVAL_TTL_MINUTES)
         timer_id = uuid5(
             NAMESPACE_URL,
             f"opencitadel:approval-timeout:{payload.approval_id}",

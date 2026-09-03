@@ -1,6 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
+  "$defs": {
+    "noPlaceholder": {
+      "not": {
+        "pattern": "(?i)(replace-with|change-?me|change-in-production)"
+      }
+    }
+  },
   "properties": {
     "replicaCount": {
       "type": "object",
@@ -41,6 +48,7 @@
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
         },
+        "token": { "type": "string" },
         "serviceAccount": {
           "type": "object",
           "required": ["create", "name"],
@@ -49,11 +57,95 @@
             "name": { "type": "string" }
           }
         }
+      },
+      "if": {
+        "required": ["enabled"],
+        "properties": { "enabled": { "const": true } }
+      },
+      "then": {
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 32,
+            "$ref": "#/$defs/noPlaceholder"
+          }
+        }
+      }
+    },
+    "opsActuator": {
+      "type": "object",
+      "required": ["enabled", "targetRef", "allowedNamespaces"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "targetRef": { "type": "string", "minLength": 1 },
+        "allowedNamespaces": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "token": { "type": "string" },
+        "serviceAccount": {
+          "type": "object",
+          "required": ["create", "name"],
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string" }
+          }
+        }
+      },
+      "if": {
+        "required": ["enabled"],
+        "properties": { "enabled": { "const": true } }
+      },
+      "then": {
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 32,
+            "$ref": "#/$defs/noPlaceholder"
+          }
+        }
       }
     },
     "autoscaling": {
       "type": "object",
       "not": { "required": ["worker"] }
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "TRUSTED_PROXY_CIDRS": {
+          "type": "string",
+          "not": {
+            "pattern": "(^|,)\\s*(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)[0-9.]*/([0-9]|1[0-9]|2[0-3])\\s*(,|$)"
+          }
+        }
+      }
+    },
+    "securityHeaders": {
+      "type": "object",
+      "required": ["contentSecurityPolicy"],
+      "properties": {
+        "contentSecurityPolicy": { "type": "string", "minLength": 1 }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "minLength": 1 },
+            "scrapeTimeout": { "type": "string", "minLength": 1 },
+            "labels": { "type": "object" }
+          }
+        }
+      }
     },
     "secrets": {
       "type": "object",
@@ -62,6 +154,7 @@
         "auditSigningKey",
         "jwtSecret",
         "sessionSecret",
+        "sandboxTokenSeed",
         "bootstrapAdminPassword",
         "postgresAdminPassword",
         "postgresMigrationPassword",
@@ -70,16 +163,69 @@
         "redisPassword"
       ],
       "properties": {
-        "apiKeySecret": { "type": "string", "minLength": 32 },
-        "auditSigningKey": { "type": "string", "minLength": 32 },
-        "jwtSecret": { "type": "string", "minLength": 32 },
-        "sessionSecret": { "type": "string", "minLength": 32 },
-        "bootstrapAdminPassword": { "type": "string", "minLength": 12 },
-        "postgresAdminPassword": { "type": "string", "minLength": 16 },
-        "postgresMigrationPassword": { "type": "string", "minLength": 16 },
-        "postgresPassword": { "type": "string", "minLength": 16 },
-        "executionKernelPostgresPassword": { "type": "string", "minLength": 16 },
-        "redisPassword": { "type": "string", "minLength": 16 }
+        "apiKeySecret": {
+          "type": "string",
+          "minLength": 32,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "auditSigningKey": {
+          "type": "string",
+          "minLength": 32,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "jwtSecret": {
+          "type": "string",
+          "minLength": 32,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "sessionSecret": {
+          "type": "string",
+          "minLength": 32,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "sandboxTokenSeed": {
+          "type": "string",
+          "minLength": 32,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "bootstrapAdminPassword": {
+          "type": "string",
+          "minLength": 12,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "postgresAdminPassword": {
+          "type": "string",
+          "minLength": 16,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "postgresMigrationPassword": {
+          "type": "string",
+          "minLength": 16,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "postgresPassword": {
+          "type": "string",
+          "minLength": 16,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "executionKernelPostgresPassword": {
+          "type": "string",
+          "minLength": 16,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "redisPassword": {
+          "type": "string",
+          "minLength": 16,
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "metricsToken": {
+          "type": "string",
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            { "const": "" },
+            { "minLength": 32 }
+          ]
+        }
       }
     }
   }

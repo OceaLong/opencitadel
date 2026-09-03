@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import zipfile
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -15,10 +16,13 @@ from app.application.ports.reporting import EvidenceSignerPort, ReportRendererPo
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.governance_profile_service import GovernanceProfileService
+from app.domain.errors import NotFoundError
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.audit_chain import canonical as canonical_json
 from app.domain.utils.audit_redaction import redact_value, scrub_secret_patterns
+
+logger = logging.getLogger(__name__)
 
 
 def _md_value(key: str, value: Any) -> str:
@@ -211,10 +215,17 @@ class EvidenceService:
                 scope = OwnerScope.personal(record.owner_user_id)
             else:
                 continue
-            profile = await self._governance_profile_service.build_profile(
-                session_id,
-                scope=scope,
-            )
+            try:
+                profile = await self._governance_profile_service.build_profile(
+                    session_id,
+                    scope=scope,
+                )
+            except NotFoundError:
+                # One inconsistent row (e.g. a session no longer visible in its
+                # reconstructed scope) must not 404 the whole compliance
+                # listing; such a row has no buildable evidence profile anyway.
+                logger.warning("evidence listing skipped session %s: 治理画像不可构建", session_id)
+                continue
             items.append(
                 {
                     "session_id": session_id,

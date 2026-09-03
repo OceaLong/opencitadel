@@ -54,6 +54,29 @@ async def create_service_key(
     return Response.success(data=response)
 
 
+@router.post("/{key_id}/rotate", response_model=Response[CreatedServiceApiKeyResponse])
+async def rotate_service_key(
+    key_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ServiceApiKeyService = Depends(get_service_api_key_service),
+    audit: AuditService = Depends(get_audit_service),
+) -> Response[CreatedServiceApiKeyResponse]:
+    rotated = await service.rotate_key(user_id=ctx.principal.user_id, key_id=key_id)
+    await record_workspace_audit(
+        audit,
+        ctx,
+        action="service_api_key_rotated",
+        resource_type="service_api_key",
+        resource_id=key_id,
+        metadata={"prefix": rotated.key.prefix},
+    )
+    response = CreatedServiceApiKeyResponse(
+        **ServiceApiKeyResponse.from_domain(rotated.key).model_dump(),
+        plaintext=rotated.plaintext,
+    )
+    return Response.success(data=response)
+
+
 @router.delete("/{key_id}", response_model=Response[dict | None])
 async def revoke_service_key(
     key_id: str,

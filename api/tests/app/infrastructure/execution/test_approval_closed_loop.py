@@ -3,7 +3,8 @@
 Exercises the three halves the loop was missing:
 
 * the formal projector, on ``ApprovalRequested``, pings the reviewer with an
-  ``approval_waiting`` notification (and only once, never on rebuild);
+  ``approval_waiting`` notification, and on ``ApprovalExpired`` with an
+  ``approval_expired`` one (each exactly once, never on rebuild);
 * an ``ApprovalExpired`` fact drives the approval projection to ``expired``
   (not ``cancelled``) even though a ``RunCancelled`` follows it; and
 * the reviewer inbox query returns a scope's approvals, filtered by status and
@@ -243,8 +244,11 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
 
         second = await projector.run_once(scope, limit=100)
         assert second.processed == 2
-        # No second ping; only ApprovalRequested pings the reviewer.
-        assert len(notifier.notices) == 1
+        # The expiry itself pings once more so the initiator learns the Run was
+        # cancelled by timeout, instead of it failing silently.
+        assert len(notifier.notices) == 2
+        assert notifier.notices[1].kind == "approval_expired"
+        assert notifier.notices[1].user_id == owner
 
         # The approval settled as 'expired', not 'cancelled', despite the
         # trailing RunCancelled.
@@ -261,7 +265,7 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
 
         # Rebuild replays every event but must NOT re-ping the reviewer.
         await projector.rebuild(scope)
-        assert len(notifier.notices) == 1
+        assert len(notifier.notices) == 2
     finally:
         await _cleanup([owner])
 

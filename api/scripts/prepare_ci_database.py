@@ -81,6 +81,9 @@ def main() -> None:
             cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
             cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            # Migration 0001 needs pg_trgm; the migration role lacks database-level
+            # CREATE, so the extension must be pre-created by the superuser here.
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
             _ensure_group(cursor, "opencitadel_execution_api")
             _ensure_group(cursor, "opencitadel_execution_kernel")
             _ensure_login(cursor, migration_user, migration_password, inherit=False)

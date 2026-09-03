@@ -110,6 +110,10 @@ export default function LoginPage() {
                 )}
               </div>
             )}
+            {/* 注册需邀请：无邀请 token 场景不提供注册链接，避免链到永久禁用的注册页。 */}
+            <p className="text-muted-foreground text-center text-xs">
+              {t("inviteOnlyRegistration")}
+            </p>
           </form>
         </CardContent>
       </Card>

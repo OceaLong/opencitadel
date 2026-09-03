@@ -146,7 +146,10 @@ export function RecycleBinDialog({
                         {item.primary}
                       </p>
                       {item.secondary ? (
-                        <p className="text-muted-foreground truncate text-xs" title={item.secondary}>
+                        <p
+                          className="text-muted-foreground truncate text-xs"
+                          title={item.secondary}
+                        >
                           {item.secondary}
                         </p>
                       ) : null}

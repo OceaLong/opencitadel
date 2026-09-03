@@ -293,7 +293,9 @@ export function TeamDetailPageClient({ teamId }: { teamId: string }) {
                   <div className="text-muted-foreground truncate text-xs">{member.email}</div>
                 ) : null}
                 <div className="text-muted-foreground text-xs">
-                  {t("joinedAt", { date: new Date(member.joined_at).toLocaleString(toBcp47(locale)) })}
+                  {t("joinedAt", {
+                    date: new Date(member.joined_at).toLocaleString(toBcp47(locale)),
+                  })}
                 </div>
               </div>
               <div className="flex items-center gap-2">

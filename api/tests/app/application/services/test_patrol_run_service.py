@@ -893,3 +893,72 @@ async def test_mark_run_failed_does_not_touch_remediation_for_non_remediation_ru
 
     assert repo.remediations[remediation.id].status == PatrolRemediationStatus.EXECUTED
     assert repo.remediations[remediation.id].error_code is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_dispatches_configured_notify_channels() -> None:
+    """Packs with notify_channels must fan out on completion, not just in-app."""
+    from unittest.mock import MagicMock
+
+    from app.domain.models.scheduled_job import NotifyChannel
+
+    pack = make_pack()
+    pack.config.notify_channels = [
+        NotifyChannel(type="webhook", url="https://example.test/hook", secret="s" * 32)
+    ]
+    repo = PatrolRepo(pack)
+    uow = Uow(repo)
+    notification_service = MagicMock()
+    notification_service.send = AsyncMock()
+    notification_service.dispatch_notify_channels = AsyncMock()
+    service = PatrolRunService(
+        lambda: uow,
+        run_admission_service=Admission(),
+        command_ingress=CommandIngress(uow),
+        policy_reader=MutablePolicyReader(),
+        fixture_replay_enabled=False,
+        governance_metrics=NoopGovernanceMetrics(),
+        notification_service=notification_service,
+    )
+    scope = OwnerScope.personal("user-1")
+    run = await service.trigger_pack(pack.id, scope, "user-1", idempotency_key="notify-1")
+    observation = {"unavailable_replicas": 0, "not_ready_workloads": []}
+    digest = hashlib.sha256(
+        json.dumps(observation, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    evidence = [
+        PatrolEvidenceRef(
+            type="summary",
+            ref="collector://evidence/1/summary",
+            sha256=digest,
+            target_ref=repo.pack.config.target_ref,
+        ),
+        PatrolEvidenceRef(
+            type="resource_refs",
+            ref="collector://evidence/1/resources",
+            sha256=digest,
+            target_ref=repo.pack.config.target_ref,
+        ),
+    ]
+    submission = PatrolObservationSubmission(
+        check_id="k8s-workload-availability",
+        observation=observation,
+        evidence_refs=evidence,
+        agent_status="pass",
+    )
+
+    await service.finalize_run(
+        run_id=run.id,
+        session_id=run.session_id,
+        idempotency_key=run.submission_idempotency_key,
+        collector_capability_hash=run.collector_capability_hash,
+        submissions=[submission],
+    )
+
+    notification_service.send.assert_awaited()
+    notification_service.dispatch_notify_channels.assert_awaited_once()
+    call = notification_service.dispatch_notify_channels.await_args
+    assert call.args[0] == "user-1"
+    channels = call.args[2]
+    assert channels[0]["type"] == "webhook"
+    assert channels[0]["url"] == "https://example.test/hook"

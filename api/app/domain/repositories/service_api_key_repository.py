@@ -14,4 +14,9 @@ class ServiceApiKeyRepository(ABC):
     async def save(self, key: ServiceApiKey) -> None: ...
 
     @abstractmethod
+    async def rotate(
+        self, key_id: str, user_id: str, *, key_hash: str, prefix: str
+    ) -> ServiceApiKey | None: ...
+
+    @abstractmethod
     async def revoke(self, key_id: str, user_id: str) -> None: ...

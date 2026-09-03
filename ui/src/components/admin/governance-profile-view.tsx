@@ -86,7 +86,9 @@ export function GovernanceProfileView({ profile }: Props) {
               <Badge variant="outline">{run.family}</Badge>
               <span className="font-mono text-xs">{run.run_id}</span>
             </div>
-            <p className="text-muted-foreground mt-2 text-xs">{formatDateTime(run.created_at, locale)}</p>
+            <p className="text-muted-foreground mt-2 text-xs">
+              {formatDateTime(run.created_at, locale)}
+            </p>
           </li>
         ))}
       </TimelineCard>

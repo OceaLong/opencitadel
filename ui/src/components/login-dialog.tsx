@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -98,12 +97,12 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
               )}
             </div>
           )}
-          <p className="text-muted-foreground text-center text-xs">
-            {t("noAccount")}{" "}
-            <Link href="/register" className="text-primary underline underline-offset-4">
-              {t("registerLink")}
-            </Link>
-          </p>
+          {/*
+            注册入口默认隐藏：注册页强依赖 URL 中的 invite_token，且前端没有
+            "是否开放注册"的探测手段——裸链到 /register 只会落到永久禁用的表单。
+            这里改为提示"注册需邀请"，邀请链接由管理员单独发放。
+          */}
+          <p className="text-muted-foreground text-center text-xs">{t("inviteOnlyRegistration")}</p>
         </form>
       </DialogContent>
     </Dialog>

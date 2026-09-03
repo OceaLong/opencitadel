@@ -2,22 +2,24 @@ replicaCount:
   api: 2
   ui: 1
 
+# 镜像默认指向 GHCR 发布仓库。tag 留空时模板回退到 Chart.appVersion
+# （见 _helpers.tpl 的 opencitadel.image 助手），随 chart 发布自动对齐。
 image:
   api:
-    repository: opencitadel-api
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-api
+    tag: ""
     pullPolicy: IfNotPresent
   executionKernel:
-    repository: opencitadel-execution-kernel
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-execution-kernel
+    tag: ""
     pullPolicy: IfNotPresent
   ui:
-    repository: opencitadel-ui
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-ui
+    tag: ""
     pullPolicy: IfNotPresent
   sandbox:
-    repository: opencitadel-sandbox
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-sandbox
+    tag: ""
 
 ui:
   enabled: true
@@ -34,8 +36,8 @@ shutdown:
 opsCollector:
   enabled: false
   image:
-    repository: opencitadel-ops-collector
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-ops-collector
+    tag: ""  # 空 = 跟随 Chart.appVersion
     pullPolicy: IfNotPresent
   targetRef: opencitadel-local
   allowedNamespaces: [opencitadel]
@@ -63,8 +65,8 @@ opsCollector:
 opsActuator:
   enabled: false
   image:
-    repository: opencitadel-ops-actuator
-    tag: latest
+    repository: ghcr.io/ocealong/opencitadel-ops-actuator
+    tag: ""  # 空 = 跟随 Chart.appVersion
     pullPolicy: IfNotPresent
   targetRef: opencitadel-local
   allowedNamespaces: [opencitadel]
@@ -177,6 +179,18 @@ topologySpread:
 # 部分表达式依赖 F1/F2 计划落地的指标（http_requests_total、rate_limit_rejected_total
 # 等），指标未落地前对应规则不会触发（no data），不影响其余规则。
 monitoring:
+  # 启用后渲染 ServiceMonitor CRD（需集群已安装 Prometheus Operator），
+  # 抓取 api Service 的 /api/metrics，Bearer token 引用主 Secret 的
+  # METRICS_TOKEN 键。注意：secrets.metricsToken 留空时该端点 fail-closed
+  # 返回 404，抓取会一直失败——启用前必须同时设置 metricsToken。
+  serviceMonitor:
+    enabled: false
+    # 抓取间隔 / 超时（Prometheus duration 格式）。
+    interval: 30s
+    scrapeTimeout: 10s
+    # 附加到 ServiceMonitor metadata.labels，供 Prometheus Operator
+    # serviceMonitorSelector 选中，例如 {release: kube-prometheus-stack}。
+    labels: {}
   prometheusRule:
     enabled: false
     # 留空则渲染到 Release namespace。指定后写入该 namespace（须与 Prometheus
@@ -216,7 +230,25 @@ ingress:
   enabled: false
   host: opencitadel.local
   className: ""
+  # 自定义 annotations，与默认安全响应头 annotations 合并（同 key 时以此处为准）。
   annotations: {}
+  # 默认注入安全响应头 annotations（HSTS / CSP / nosniff / Referrer-Policy，
+  # 面向 ingress-nginx 的 configuration-snippet）。CSP 内容取
+  # securityHeaders.contentSecurityPolicy。置 false 可完全关闭默认注入。
+  securityHeaders: true
+  # TLS 配置，结构同 networking.k8s.io/v1 Ingress 的 spec.tls，例如：
+  # tls:
+  #   - hosts: [opencitadel.local]
+  #     secretName: opencitadel-tls
+  tls: []
+
+# 安全响应头单一来源。默认值与 nginx/templates/default.http(s).conf.template
+# 中现行 CSP 保持一致；改这里即可同步 ingress 注入的 CSP，避免双份漂移。
+securityHeaders:
+  contentSecurityPolicy: >-
+    default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'
+    'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none';
+    object-src 'none'; base-uri 'self'
 
 autoscaling:
   api:
@@ -264,7 +296,9 @@ env:
   POLICY_HEAD_REFRESH_INTERVAL_SECONDS: "5"
   POLICY_MAX_STALENESS_SECONDS: "30"
   SANDBOX_DRIVER: kubernetes
-  SANDBOX_IMAGE: opencitadel-sandbox
+  # 留空时由 image.sandbox 推导（tag 空则回退 Chart.appVersion，见
+  # _helpers.tpl 的 opencitadel.sandboxImage 助手）。填值则整体覆盖。
+  SANDBOX_IMAGE: ""
   SANDBOX_NAME_PREFIX: opencitadel-sandbox
   SANDBOX_NETWORK: ""
   # 留空时由 egressProxy 自动指向集群内 <release>-egress-proxy:3128（见
@@ -286,8 +320,13 @@ env:
   # the built-in MCP registration is not rejected by the outbound guard.
   OUTBOUND_ALLOWED_PORTS: "80,443,8080,8443,8090,8091,11434"
   OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
-  # Set to the exact ingress-controller or service-mesh proxy CIDRs.
-  TRUSTED_PROXY_CIDRS: "10.0.0.0/8"
+  # 信任的反向代理 CIDR（逗号分隔）。默认空串 = 不信任任何代理，
+  # X-Forwarded-For 一律忽略（fail-closed，客户端 IP 取直连对端地址）。
+  # 生产必须按 ingress-controller / mesh sidecar Pod 的精确地址配置
+  # （单个 /32，或不宽于 /24 的窄段）。API 生产校验会拒绝宽于 /24 的
+  # RFC1918 段（如 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16）：这些网段
+  # 与沙箱/Pod 网络重叠，信任后被攻破的沙箱可伪造 X-Forwarded-For。
+  TRUSTED_PROXY_CIDRS: ""
   FRONTEND_BASE_URL: https://opencitadel.local
   OAUTH_REDIRECT_BASE: https://opencitadel.local/api/auth/oauth
   STORAGE_PROVIDER: cos
@@ -309,6 +348,9 @@ secrets:
   auditPreviousSigningKeys: "{}"
   jwtSecret: replace-with-strong-random-secret
   sessionSecret: replace-with-strong-random-secret
+  # 沙箱访问令牌派生种子（env SANDBOX_TOKEN_SEED）。生产必填 >= 32 字符强
+  # 随机值，缺失或占位值会让 API/execution-kernel 启动即失败。
+  sandboxTokenSeed: replace-with-strong-sandbox-token-seed
   bootstrapAdminEmail: admin@example.com
   bootstrapAdminPassword: replace-with-strong-password
   postgresAdminPassword: replace-with-distinct-admin-password
@@ -321,7 +363,8 @@ secrets:
   minioAccessKey: minioadmin
   minioSecretKey: minioadmin
   # /api/metrics 的 Bearer token；留空表示该端点 fail-closed 关闭（404）。
-  # 启用 Prometheus 抓取前需设置为强随机值。
+  # 启用 Prometheus 抓取（monitoring.serviceMonitor.enabled=true）前必须
+  # 设置为 >= 32 字符强随机值，否则抓取只会得到 404。
   metricsToken: ""
 
 migrate:

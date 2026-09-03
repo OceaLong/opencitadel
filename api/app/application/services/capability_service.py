@@ -73,10 +73,12 @@ class CapabilityService:
         *,
         policy_heads: PolicyHeadReader,
         pdf_probe: Callable[[], bool] | None = None,
+        search_provider: str = "bing_html",
     ) -> None:
         self._bindings = bindings
         self._policy_heads = policy_heads
         self._pdf_probe = pdf_probe or _default_pdf_probe
+        self._search_provider = (search_provider or "none").strip().lower()
 
     async def get_capabilities(
         self,
@@ -90,6 +92,7 @@ class CapabilityService:
             "ops_patrol",
             "ops_patrol_remediation",
             "report_pdf",
+            "web_search",
         )
         if scope is None:
             denied = CapabilityState(
@@ -175,6 +178,25 @@ class CapabilityService:
                 details={"engine": "weasyprint"},
             )
         )
+        if self._search_provider == "none":
+            web_search = CapabilityState(
+                state=CapabilityStateValue.NOT_CONFIGURED,
+                reason_key="capabilities.reason.searchProviderNotConfigured",
+            )
+        elif self._search_provider == "bing_html":
+            # HTML scraping works until the target changes markup or challenges
+            # the bot; report it as degraded so operators know to configure an
+            # API-based provider.
+            web_search = CapabilityState(
+                state=CapabilityStateValue.DEGRADED,
+                reason_key="capabilities.reason.searchHtmlScrapingFragile",
+                details={"provider": self._search_provider},
+            )
+        else:
+            web_search = CapabilityState(
+                state=CapabilityStateValue.AVAILABLE,
+                details={"provider": self._search_provider},
+            )
         return CapabilitySnapshot(
             items={
                 "chat": chat,
@@ -184,6 +206,7 @@ class CapabilityService:
                 "ops_patrol": patrol,
                 "ops_patrol_remediation": remediation,
                 "report_pdf": report_pdf,
+                "web_search": web_search,
             }
         )
 

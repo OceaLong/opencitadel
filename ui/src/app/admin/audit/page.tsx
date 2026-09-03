@@ -42,6 +42,7 @@ import { type PaginatedFetcher, usePaginatedList } from "@/hooks/use-paginated-l
 import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog, type AuditLogDetail } from "@/lib/api/admin";
 import { type ChainVerifyResult, complianceApi } from "@/lib/api/compliance";
+import { saveBlob } from "@/lib/download";
 import { IconCopy, IconDownload } from "@/lib/icons";
 
 function actionBadgeVariant(action: string): "secondary" | "destructive" | "warning" | "success" {
@@ -83,25 +84,36 @@ export default function AdminAuditPage() {
     [actionFilter, actorFilter, dateParams],
   );
 
-  const exportUrl = useMemo(
-    () =>
-      adminApi.exportAuditCsvUrl({
+  const [exporting, setExporting] = useState(false);
+
+  // <a href> 直连改为 authenticatedFetch + Blob：403/500 走 toast，而不是浏览器跳 JSON 错误页。
+  const exportCsv = useCallback(async () => {
+    setExporting(true);
+    try {
+      const blob = await adminApi.exportAuditCsv({
         ...dateParams,
         action: actionFilter === "all" ? undefined : actionFilter,
         actor_user_id: actorFilter.trim() || undefined,
-      }),
-    [actionFilter, actorFilter, dateParams],
-  );
+      });
+      saveBlob(blob, "audit-logs.csv");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
+    } finally {
+      setExporting(false);
+    }
+  }, [actionFilter, actorFilter, dateParams, tCommon]);
 
   const verifyChain = useCallback(async () => {
     setChainLoading(true);
     try {
       const result = await complianceApi.verifyChain();
       setChain(result);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
     } finally {
       setChainLoading(false);
     }
-  }, []);
+  }, [tCommon]);
 
   const fetchAudit = useCallback<PaginatedFetcher<AuditLog>>(
     async ({ limit, offset }) => {
@@ -129,15 +141,20 @@ export default function AdminAuditPage() {
     prevPage,
   } = usePaginatedList<AuditLog>(fetchAudit);
 
-  const openDetail = useCallback(async (logId: string) => {
-    setDetailLoading(true);
-    try {
-      const data = await adminApi.auditDetail(logId);
-      setDetail(data);
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+  const openDetail = useCallback(
+    async (logId: string) => {
+      setDetailLoading(true);
+      try {
+        const data = await adminApi.auditDetail(logId);
+        setDetail(data);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [tCommon],
+  );
 
   const copyToClipboard = useCallback(
     async (value: string) => {
@@ -200,11 +217,9 @@ export default function AdminAuditPage() {
             >
               {chainLoading ? <LoadingSpinner /> : t("verifyChain")}
             </Button>
-            <Button variant="outline" asChild>
-              <a href={exportUrl}>
-                <IconDownload className="mr-1 size-4" />
-                {t("exportCsv")}
-              </a>
+            <Button variant="outline" disabled={exporting} onClick={() => void exportCsv()}>
+              {exporting ? <LoadingSpinner /> : <IconDownload className="mr-1 size-4" />}
+              {t("exportCsv")}
             </Button>
           </div>
         }

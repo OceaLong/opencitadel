@@ -11,6 +11,7 @@ import {
 } from "@/components/admin/governance-overview-charts";
 import { AdminStatCard } from "@/components/admin/stat-card";
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,17 +23,23 @@ import { IconActivity, IconAudit, IconSecurity } from "@/lib/icons";
 
 export default function AdminGovernancePage() {
   const t = useTranslations("governanceOverview");
+  const tCommon = useTranslations("common");
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<GovernanceOverview | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
+      setError(null);
       try {
         const data = await complianceApi.getGovernanceOverview({ days: getAdminDays(range) });
         if (!cancelled) setOverview(data);
+      } catch (err) {
+        // 加载失败要呈现明确错误态,不能伪装成全 0 的治理指标。
+        if (!cancelled) setError(err instanceof Error ? err.message : tCommon("loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -41,7 +48,7 @@ export default function AdminGovernancePage() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, tCommon]);
 
   if (loading) {
     return (
@@ -56,6 +63,19 @@ export default function AdminGovernancePage() {
           ))}
         </div>
         <Skeleton className="h-72 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={t("pageTitle")}
+          description={t("pageDescription")}
+          actions={<AdminTimeRangePicker value={range} onChange={setRange} />}
+        />
+        <EmptyState title={error} className="py-12" />
       </div>
     );
   }

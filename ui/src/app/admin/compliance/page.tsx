@@ -15,17 +15,35 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { complianceApi, type EvidenceSessionItem } from "@/lib/api/compliance";
+import { saveBlob } from "@/lib/download";
 
 export default function AdminCompliancePage() {
   const t = useTranslations("compliance");
+  const tCommon = useTranslations("common");
   const tGovernanceProfile = useTranslations("governanceProfile");
   const [sessions, setSessions] = useState<EvidenceSessionItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
   const [verifyingSessionId, setVerifyingSessionId] = useState<string | null>(null);
+  const [downloadingSessionId, setDownloadingSessionId] = useState<string | null>(null);
+
+  // <a href> 直连改为 authenticatedFetch + Blob：403/500 走 toast，而不是浏览器跳 JSON 错误页。
+  const downloadPackage = async (sessionId: string) => {
+    setDownloadingSessionId(sessionId);
+    try {
+      const blob = await complianceApi.downloadEvidencePackage(sessionId);
+      saveBlob(blob, `evidence-${sessionId}.zip`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("exportFailed"));
+    } finally {
+      setDownloadingSessionId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [list, chain] = await Promise.all([
         complianceApi.listEvidenceSessions({ limit: 50 }),
@@ -33,10 +51,13 @@ export default function AdminCompliancePage() {
       ]);
       setSessions(list.sessions);
       setChainOk(chain.ok);
+    } catch (err) {
+      // 加载失败要呈现明确错误态,不能伪装成"暂无证据会话"的空态。
+      setError(err instanceof Error ? err.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tCommon]);
 
   useEffect(() => {
     void load();
@@ -84,6 +105,16 @@ export default function AdminCompliancePage() {
             <div className="flex justify-center py-12">
               <LoadingSpinner />
             </div>
+          ) : error ? (
+            <EmptyState
+              title={error}
+              className="py-10"
+              action={
+                <Button variant="outline" size="sm" onClick={() => void load()}>
+                  {tCommon("retry")}
+                </Button>
+              }
+            />
           ) : sessions.length === 0 ? (
             <EmptyState title={t("noEvidenceSessions")} className="py-10" />
           ) : (
@@ -147,11 +178,18 @@ export default function AdminCompliancePage() {
                               t("verifySessionChain")
                             )}
                           </Button>
-                          <Button variant="outline" size="sm" asChild>
-                            <a href={complianceApi.evidencePackageUrl(s.session_id)}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={downloadingSessionId === s.session_id}
+                            onClick={() => void downloadPackage(s.session_id)}
+                          >
+                            {downloadingSessionId === s.session_id ? (
+                              <LoadingSpinner />
+                            ) : (
                               <Download className="mr-1 size-3.5" />
-                              {t("downloadPackage")}
-                            </a>
+                            )}
+                            {t("downloadPackage")}
                           </Button>
                           <Button variant="outline" size="sm" asChild>
                             <Link href={`/admin/compliance/sessions/${s.session_id}`}>

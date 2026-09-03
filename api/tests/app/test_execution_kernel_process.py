@@ -278,8 +278,12 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
             observed.append("closed")
 
     class _ImmediateProcess:
-        def __init__(self, *, runtime, wakeup, policy_reader, stopping, batch_size):
-            observed.append(("process", runtime, wakeup, policy_reader, batch_size))
+        def __init__(
+            self, *, runtime, wakeup, policy_reader, stopping, batch_size, idle_poll_seconds
+        ):
+            observed.append(
+                ("process", runtime, wakeup, policy_reader, batch_size, idle_poll_seconds)
+            )
             self._stopping = stopping
 
         async def run(self):
@@ -308,6 +312,7 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
         wakeup,
         policy_reader,
         settings.execution_activity_batch_size,
+        settings.execution_idle_poll_seconds,
     )
     assert observed[2] == ("signals", supervisor.request_stop)
     assert set(observed[3:-1]) == {"run", "heartbeat"}

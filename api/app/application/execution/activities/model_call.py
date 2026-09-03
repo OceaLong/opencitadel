@@ -58,10 +58,7 @@ class ModelCallActivityHandler:
         self._skills = skills
         self._token_usage = token_usage
         self._files = files
-        # 运行中 Token 预算拦截依赖；未注入时退化为无操作，保持既有行为不变。
-        # TODO(E4 接入): 在 ``app/composition/kernel.py`` 构造本处理器时补一行
-        #   ``quota=shared.quota_service``（``shared.quota_service`` 已就绪）。
-        #   kernel.py 属 C 系列执行基础设施，本次不改；这是唯一待接线的一处。
+        # 运行中 Token 预算拦截依赖；未注入时退化为无操作。
         self._quota = quota
         self._client_factory = client_factory
 

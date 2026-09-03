@@ -76,6 +76,7 @@ from app.composition.types import ResourceBundle
 from app.composition.uow import DBUnitOfWorkDependencies, create_uow_factory
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.object_storage import ObjectStoragePort
+from app.domain.external.search import SearchEngine
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.health_status import HealthStatus
 from app.domain.repositories.runtime_policy_repository import RuntimePolicyRepository
@@ -132,7 +133,7 @@ from app.infrastructure.external.json_parser.repair_json_parser import RepairJSO
 from app.infrastructure.external.knowledge.web_connector import HttpWebDocumentGateway
 from app.infrastructure.external.llm.circuit_breaker import LLMCircuitBreaker
 from app.infrastructure.external.sandbox.factory import SandboxFactory
-from app.infrastructure.external.search.bing_search import BingSearchEngine
+from app.infrastructure.external.search.providers import build_search_engine
 from app.infrastructure.external.session_list_notifier import DebouncedSessionListPublisher
 from app.infrastructure.observability.otel_adapter import OtelObservabilityAdapter
 from app.infrastructure.repositories.postgres_runtime_policy_repository import (
@@ -208,7 +209,7 @@ class SharedServices:
     mcp_connection_pool: InfrastructureMCPConnectionPoolAdapter
     a2a_connection_pool: InfrastructureA2AConnectionPoolAdapter
     json_parser: RepairJSONParser
-    search_engine: BingSearchEngine
+    search_engine: SearchEngine | None
     image_generator: ProviderImageGenerator
     resilient_llm_factory: ResilientLLMFactoryAdapter
     observability: OtelObservabilityAdapter
@@ -428,7 +429,11 @@ def build_shared_services(
         outbound_policy=outbound_policy,
     )
     json_parser = RepairJSONParser()
-    search_engine = BingSearchEngine()
+    search_engine = build_search_engine(
+        settings.search_provider,
+        endpoint=settings.search_endpoint,
+        api_key=settings.search_api_key,
+    )
     image_generator = ProviderImageGenerator(outbound_policy=outbound_policy)
     object_storage = _object_storage(resources)
     file_storage = _file_storage(resources, uow_factory=uow_factory)
@@ -538,6 +543,7 @@ def build_shared_services(
     capability_service = CapabilityService(
         bindings=inference_binding_service,
         policy_heads=runtime_policy_reader,
+        search_provider=settings.search_provider,
     )
     inference_status_service = InferenceStatusService(
         models=inference_model_service,
@@ -577,6 +583,7 @@ def build_shared_services(
         session_list_publisher=session_publisher,
         resource_guard=resource_guard,
         resource_binding_service=resource_binding_service,
+        quota_service=quota_service,
     )
     knowledge_base_service = KnowledgeBaseService(
         uow_factory=uow_factory,
@@ -588,6 +595,7 @@ def build_shared_services(
         run_projection=run_projection,
         web_documents=web_documents,
         inference_bindings=inference_binding_service,
+        quota_service=quota_service,
     )
     artifact_service = ArtifactService(
         uow_factory=uow_factory,
@@ -636,6 +644,7 @@ def build_shared_services(
         policy_reader=runtime_policy_reader,
         fixture_replay_enabled=fixture_replay_enabled(settings),
         governance_metrics=governance_metrics,
+        quota_service=quota_service,
     )
     patrol_evidence_service = PatrolEvidenceService(
         uow_factory=uow_factory,
@@ -662,6 +671,7 @@ def build_shared_services(
         policy_reader=runtime_policy_reader,
         notification_service=notification_service,
         secret_cipher=versioned_cipher,
+        quota_service=quota_service,
     )
     agent_service = AgentService(
         uow_factory=uow_factory,

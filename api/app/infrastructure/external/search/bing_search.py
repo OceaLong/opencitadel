@@ -114,6 +114,19 @@ def _parse_bing_html(html: str, query: str, date_range: str | None) -> ToolResul
         total_results=total_results,
         results=search_results,
     )
+    if not search_results:
+        # Zero parsed items almost always means a layout change or a bot
+        # challenge page, not a genuinely empty result set. Fail loudly so the
+        # agent reports the outage instead of answering from an empty search.
+        return ToolResult(
+            success=False,
+            message=(
+                "Bing HTML parsing returned no results (likely layout change or "
+                "bot challenge); consider configuring SEARCH_PROVIDER=searxng/"
+                "tavily/bing_api"
+            ),
+            data=results,
+        )
     return ToolResult(success=True, data=results)
 
 

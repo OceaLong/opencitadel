@@ -57,7 +57,10 @@ describe("sessionApi search + recycle bin", () => {
 
   it("keeps the bare stream URL when no keyword is given", async () => {
     mocks.createSSEStream.mockResolvedValue(new ReadableStream());
-    sessionApi.streamSessions(() => {}, () => {});
+    sessionApi.streamSessions(
+      () => {},
+      () => {},
+    );
     await vi.waitFor(() => {
       expect(mocks.createSSEStream).toHaveBeenCalledWith("/sessions/stream", {}, expect.anything());
     });

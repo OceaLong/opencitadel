@@ -90,7 +90,9 @@ export function PatrolPackList({
                   <span className="inline-flex items-center gap-1">
                     <Clock3 className="size-3.5" />
                     {pack.next_run_at
-                      ? t("nextRun", { value: new Date(pack.next_run_at).toLocaleString(toBcp47(locale)) })
+                      ? t("nextRun", {
+                          value: new Date(pack.next_run_at).toLocaleString(toBcp47(locale)),
+                        })
                       : t("scheduleOff")}{" "}
                     · {pack.config.timezone}
                   </span>

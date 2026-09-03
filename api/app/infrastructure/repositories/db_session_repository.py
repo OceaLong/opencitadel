@@ -296,6 +296,17 @@ class DBSessionRepository(SessionRepository):
             session.resource_bindings = bindings[session.id]
         return sessions
 
+    async def list_deleted_before(self, cutoff: datetime, *, limit: int = 100) -> list[str]:
+        """保留期清理：跨作用域返回 ``deleted_at`` 早于 cutoff 的会话 id（需系统授权）。"""
+        stmt = (
+            select(SessionModel.id)
+            .where(SessionModel.deleted_at.is_not(None), SessionModel.deleted_at < cutoff)
+            .order_by(SessionModel.deleted_at.asc())
+            .limit(max(1, min(limit, 500)))
+        )
+        result = await self.db_session.execute(stmt)
+        return list(result.scalars().all())
+
     async def soft_delete(self, session_id: str, scope: OwnerScope | None = None) -> bool:
         """软删除：设置 ``deleted_at``；仅命中未删除的行。"""
         stmt = self._apply_scope(

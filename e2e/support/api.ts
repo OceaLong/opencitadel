@@ -35,9 +35,13 @@ export async function appApi<T>(
   const method = init.method?.toUpperCase() ?? "GET";
   const browserResponse = await page.evaluate(
     async ({ requestPath, requestInit }) => {
-      const csrf = document.cookie
-        .split("; ")
-        .find((cookie) => cookie.startsWith("csrf_token="))
+      // COOKIE_SECURE deployments emit the __Host--prefixed cookie name;
+      // prefer it over the bare dev/http name (mirrors ui/src/lib/api/fetch.ts).
+      const cookies = document.cookie.split("; ");
+      const csrf = (
+        cookies.find((cookie) => cookie.startsWith("__Host-csrf_token=")) ??
+        cookies.find((cookie) => cookie.startsWith("csrf_token="))
+      )
         ?.split("=")
         .slice(1)
         .join("=");

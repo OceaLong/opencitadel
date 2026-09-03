@@ -115,6 +115,7 @@
     "runtimePolicy.unavailable"
   ],
   "notificationKeys": [
+    "notifications.approvalExpired",
     "notifications.approvalWaiting",
     "notifications.patrolCompleted",
     "notifications.scheduledJobCompleted",

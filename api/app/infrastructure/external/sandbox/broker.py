@@ -118,15 +118,29 @@ async def create_sandbox(
         existing = None
     if existing is not None:
         raise HTTPException(status_code=409, detail="sandbox already exists")
-    container = client.containers.run(
-        **build_docker_sandbox_config(
-            runtime.deployment,
-            body.policy,
-            sandbox_id,
-            operations_revision_id=body.operations_revision_id,
-            access_token=body.access_token,
+    try:
+        container = client.containers.run(
+            **build_docker_sandbox_config(
+                runtime.deployment,
+                body.policy,
+                sandbox_id,
+                operations_revision_id=body.operations_revision_id,
+                access_token=body.access_token,
+            )
         )
-    )
+    except docker.errors.ImageNotFound as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"sandbox image '{runtime.deployment.image}' not found; "
+                "build it first (docker compose build opencitadel-sandbox)"
+            ),
+        ) from exc
+    except docker.errors.APIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"docker rejected sandbox start: {exc.explanation or exc}",
+        ) from exc
     payload = _container_payload(container, runtime.deployment)
     if not payload["ip"]:
         container.remove(force=True)

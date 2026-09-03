@@ -50,17 +50,29 @@ def extract_text_from_a2a_params(params: dict[str, Any]) -> str:
     )
 
 
-def build_a2a_text_response(request_id: Any, text: str) -> dict[str, Any]:
+def build_a2a_text_response(
+    request_id: Any,
+    text: str,
+    *,
+    task_id: str | None = None,
+    context_id: str | None = None,
+) -> dict[str, Any]:
+    # taskId/contextId make the task lifecycle reachable: without them a caller
+    # has no id to feed into tasks/get, tasks/cancel, or a follow-up multi-turn
+    # message/send (contextId).
+    message: dict[str, Any] = {
+        "messageId": str(uuid.uuid4()),
+        "role": "agent",
+        "kind": "message",
+        "parts": [{"kind": "text", "text": text}],
+    }
+    if task_id is not None:
+        message["taskId"] = task_id
+        message["contextId"] = context_id or task_id
     return {
         "jsonrpc": "2.0",
         "id": request_id,
-        "result": {
-            "message": {
-                "messageId": str(uuid.uuid4()),
-                "role": "agent",
-                "parts": [{"kind": "text", "text": text}],
-            }
-        },
+        "result": {"message": message},
     }
 
 
@@ -178,10 +190,10 @@ class A2AServerService:
             guard["id"] = request_id
             return guard
 
-        session = await self._session_service.create_session(
-            title="A2A Request",
-            scope=scope,
-        )
+        session, lookup_error = await self._session_for_message(payload, scope, title="A2A Request")
+        if lookup_error is not None:
+            lookup_error["id"] = request_id
+            return lookup_error
         final_text = ""
         try:
             async for event in self._agent_service.chat(
@@ -203,6 +215,7 @@ class A2AServerService:
         return build_a2a_text_response(
             request_id,
             final_text or "The Run completed without a text result.",
+            task_id=session.id,
         )
 
     async def stream_message_events(
@@ -223,10 +236,11 @@ class A2AServerService:
             yield json.dumps(guard)
             return
 
-        session = await self._session_service.create_session(
-            title="A2A Stream",
-            scope=scope,
-        )
+        session, lookup_error = await self._session_for_message(payload, scope, title="A2A Stream")
+        if lookup_error is not None:
+            lookup_error["id"] = request_id
+            yield json.dumps(lookup_error)
+            return
         accumulated = ""
         try:
             async for event in self._agent_service.chat(
@@ -242,7 +256,12 @@ class A2AServerService:
                             {
                                 "jsonrpc": "2.0",
                                 "id": request_id,
-                                "result": {"kind": "text", "text": message},
+                                "result": {
+                                    "kind": "text",
+                                    "text": message,
+                                    "taskId": session.id,
+                                    "contextId": session.id,
+                                },
                             },
                             ensure_ascii=False,
                         )
@@ -254,6 +273,7 @@ class A2AServerService:
                 build_a2a_text_response(
                     request_id,
                     accumulated or "The Run completed without a text result.",
+                    task_id=session.id,
                 ),
                 ensure_ascii=False,
             )
@@ -265,6 +285,44 @@ class A2AServerService:
     def _task_id_from_params(payload: dict[str, Any]) -> str | None:
         task_id = (payload.get("params") or {}).get("id")
         return task_id if isinstance(task_id, str) and task_id else None
+
+    @staticmethod
+    def _context_id_from_params(payload: dict[str, Any]) -> str | None:
+        """A follow-up turn addresses its session via message.contextId/taskId."""
+        params = payload.get("params") or {}
+        message = params.get("message") or {}
+        for value in (
+            message.get("contextId"),
+            message.get("taskId"),
+            params.get("contextId"),
+        ):
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    async def _session_for_message(
+        self,
+        payload: dict[str, Any],
+        scope: OwnerScope,
+        *,
+        title: str,
+    ):
+        """Reuse the addressed session for multi-turn, or create a fresh one.
+
+        Returns ``(session, error_response)``; exactly one is None.
+        """
+        context_id = self._context_id_from_params(payload)
+        if context_id is not None:
+            session = await self._session_service.get_session(context_id, scope=scope)
+            if not session:
+                return None, build_a2a_error_response(
+                    None,
+                    "Unknown contextId",
+                    A2A_TASK_NOT_FOUND_CODE,
+                )
+            return session, None
+        session = await self._session_service.create_session(title=title, scope=scope)
+        return session, None
 
     async def _resolve_task_state(
         self,
@@ -343,9 +401,13 @@ class A2AServerService:
                 A2A_TASK_NOT_FOUND_CODE,
             )
         # Reuse the existing session-stop path; it submits a CancelRun command
-        # and is a no-op when no Run is active.
+        # and is a no-op when no Run is active. Cancellation is asynchronous
+        # (the command travels through the execution kernel), so report the
+        # observed Run state truthfully instead of assuming "canceled" —
+        # callers poll tasks/get until the task settles.
         await self._agent_service.stop_session(task_id, owner_scope=scope)
-        return build_a2a_task_response(request_id, task_id, "canceled")
+        state = await self._resolve_task_state(task_id, session, scope)
+        return build_a2a_task_response(request_id, task_id, state)
 
 
 __all__ = [

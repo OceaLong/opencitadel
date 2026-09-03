@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Plus, RefreshCw } from "lucide-react";
 
+import { AsyncBoundary } from "@/components/async-boundary";
 import { PageHeader } from "@/components/page-header";
 import { PatrolPackList } from "@/components/patrol/patrol-pack-list";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
@@ -21,7 +22,7 @@ export default function PatrolsPage() {
   const runAdmissionAvailable = isCapabilityAvailable(capability("ops_patrol"));
   const { user, loading: authLoading } = useAuth();
   const readOnly = user?.global_role === "auditor";
-  const { packs, latestRuns, loading, refresh, trigger, triggeringId, toggle, actionId } =
+  const { packs, latestRuns, loading, error, refresh, trigger, triggeringId, toggle, actionId } =
     usePatrolPacks();
   return (
     <ScrollablePageContent>
@@ -46,17 +47,23 @@ export default function PatrolsPage() {
             </>
           }
         />
-        <PatrolPackList
-          packs={packs}
-          latestRuns={latestRuns}
-          loading={loading}
-          onTrigger={(pack) => void trigger(pack.id)}
-          onToggle={(pack) => void toggle(pack)}
-          triggeringId={triggeringId}
-          actionId={actionId}
-          readOnly={readOnly}
-          runAdmissionDisabled={capabilityLoading || !runAdmissionAvailable}
-        />
+        <AsyncBoundary
+          loading={false}
+          error={loading ? null : error}
+          onRetry={() => void refresh()}
+        >
+          <PatrolPackList
+            packs={packs}
+            latestRuns={latestRuns}
+            loading={loading}
+            onTrigger={(pack) => void trigger(pack.id)}
+            onToggle={(pack) => void toggle(pack)}
+            triggeringId={triggeringId}
+            actionId={actionId}
+            readOnly={readOnly}
+            runAdmissionDisabled={capabilityLoading || !runAdmissionAvailable}
+          />
+        </AsyncBoundary>
       </div>
     </ScrollablePageContent>
   );

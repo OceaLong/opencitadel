@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.application.dto.session_io import FileReadResult, ShellReadResult
 from app.application.ports.streams import SessionListPublisher
+from app.application.services.quota_service import QuotaService
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.domain.errors import BadRequestError, NotFoundError, ServerRequestsError
@@ -40,6 +41,7 @@ class SessionService:
         session_list_publisher: SessionListPublisher,
         resource_guard: ResourceGuardService | None = None,
         resource_binding_service: ResourceBindingService | None = None,
+        quota_service: QuotaService | None = None,
     ) -> None:
         """构造函数，完成会话服务初始化"""
         self._uow_factory = uow_factory
@@ -48,6 +50,7 @@ class SessionService:
         self._session_list_publisher = session_list_publisher
         self._resource_guard = resource_guard
         self._resource_binding_service = resource_binding_service
+        self._quota_service = quota_service
 
     async def create_session(
         self,
@@ -61,9 +64,14 @@ class SessionService:
         operator_scope: str | None = None,
         operator_domains: list[str] | None = None,
         scope: OwnerScope | None = None,
+        quota_exempt: bool = False,
     ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info("创建一个空白新任务会话")
+        # 配额准入统一在服务层执行，HTTP 路由之外的建会话路径（A2A 等）同样
+        # 受控；quota_exempt 仅供系统维护类路径显式豁免。
+        if self._quota_service is not None and not quota_exempt and scope is not None:
+            await self._quota_service.check_session_quota(scope.user_id, scope=scope)
         default_mode = SessionMode.ASK if knowledge_base_id else SessionMode.AGENT
         resolved_mode = mode or default_mode
         validated_resources = None
@@ -180,10 +188,10 @@ class SessionService:
         """软删除任务会话：置 ``deleted_at``，进入回收站，可恢复。
 
         证据链完整性要求删除可回溯，因此不再物理删除；物理删除只发生在
-        ``purge_session``（回收站手动清除或保留期到期后）。关联 sandbox 是可
-        重建的运行时资源，删除时销毁以立即释放；恢复后按需重新拉起。
-        保留期清理（软删 30 天后自动 purge）留待调度器挂载。TODO(recycle-bin):
-        在 scheduled_job 服务里挂一个保留期清理 tick（scheduler 文件超出本次范围）。
+        ``purge_session``（回收站手动清除）或保留期到期后的自动清理
+        （``RecycleBinRetentionService``，挂在调度器 leader tick，保留期见
+        ``RECYCLE_BIN_RETENTION_DAYS``）。关联 sandbox 是可重建的运行时资源，
+        删除时销毁以立即释放；恢复后按需重新拉起。
         """
         if scope is None:
             raise ValueError("session deletion requires an owner scope")

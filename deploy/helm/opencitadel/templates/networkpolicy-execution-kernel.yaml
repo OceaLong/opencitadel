@@ -6,7 +6,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/component: execution-kernel
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "execution-kernel") | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - ports:
@@ -28,13 +28,13 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: postgres
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "postgres") | nindent 14 }}
       ports:
         - {protocol: TCP, port: 5432}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: redis
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "redis") | nindent 14 }}
       ports:
         - {protocol: TCP, port: 6379}
     {{- if .Values.opsCollector.enabled }}
@@ -42,7 +42,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: ops-collector
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ops-collector") | nindent 14 }}
       ports:
         - {protocol: TCP, port: 8090}
     {{- end }}

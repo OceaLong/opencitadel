@@ -239,6 +239,7 @@ def build_execution_kernel_runtime(
     activity_registry: ActivityRegistry,
     worker_id: str | None = None,
     activity_max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
+    approval_ttl_minutes=None,
 ) -> ExecutionKernelRuntime:
     command_handler = SqlAlchemyExecutionOrchestrator(
         session_factory=session_factory,
@@ -275,6 +276,7 @@ def build_execution_kernel_runtime(
                 authorization=authorization,
             ),
             run_service=run_service,
+            approval_ttl_minutes=approval_ttl_minutes,
         ),
         outbox_dispatcher=OutboxDispatcher(
             store=SqlAlchemyOutboxStore(

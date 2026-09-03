@@ -951,3 +951,22 @@ def test_expire_after_run_is_terminal_is_absorbed() -> None:
         command("ExpireApproval", terminal.stream_version, {"approval_id": str(APPROVAL_ID)}),
     )
     assert absorbed.events == ()
+
+
+def test_request_approval_honours_policy_injected_ttl() -> None:
+    """The operations-policy TTL carried on the command must drive the timeout."""
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    _approve_pending(aggregate, events)
+    state = replay(aggregate, events, stream_id=str(RUN_ID)).state
+
+    decision = aggregate.decide(
+        state,
+        command(
+            "RequestApproval",
+            2,
+            {**REQUEST_APPROVAL_PAYLOAD, "ttl_minutes": 30},
+        ),
+    )
+
+    assert decision.scheduled_commands[0].due_at == NOW + timedelta(minutes=30)

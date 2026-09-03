@@ -19,6 +19,7 @@ from app.application.ports.queries import (
     RunProjectionPort,
 )
 from app.application.services.inference_binding_service import InferenceBindingService
+from app.application.services.quota_service import QuotaService
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.domain.errors import BadRequestError, ConflictError, NotFoundError
@@ -85,6 +86,7 @@ class KnowledgeBaseService:
         resource_binding_service: ResourceBindingService | None = None,
         version_builder: KnowledgeVersionBuilder | None = None,
         inference_bindings: InferenceBindingService | None = None,
+        quota_service: QuotaService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._file_storage = file_storage
@@ -96,6 +98,7 @@ class KnowledgeBaseService:
         self._resource_binding_service = resource_binding_service
         self._version_builder = version_builder or KnowledgeVersionBuilder(uow_factory)
         self._inference_bindings = inference_bindings
+        self._quota_service = quota_service
 
     async def _admit_build(
         self,
@@ -941,6 +944,9 @@ class KnowledgeBaseService:
             )
         elif kb.ready_doc_count <= 0:
             raise BadRequestError("知识库尚无就绪文档，请等待索引完成后再开始问答")
+        # 知识库问答会话与普通会话同受配额约束。
+        if self._quota_service is not None and scope is not None:
+            await self._quota_service.check_session_quota(scope.user_id, scope=scope)
         session = Session(
             title=f"文档知识库对话 · {kb.name}",
             mode=mode,
@@ -1006,9 +1012,9 @@ class KnowledgeBaseService:
         """软删除知识库：置 ``deleted_at``，进入回收站，可恢复。
 
         证据链完整性要求删除可回溯，因此不再物理删除；物理删除只发生在
-        ``purge_kb``（回收站手动清除或保留期到期后）。保留期清理（软删 30 天后
-        自动 purge）留待调度器挂载。TODO(recycle-bin): 在 scheduled_job 服务里
-        挂一个保留期清理 tick（scheduler 文件超出本次范围）。
+        ``purge_kb``（回收站手动清除）或保留期到期后的自动清理
+        （``RecycleBinRetentionService``，挂在调度器 leader tick，保留期见
+        ``RECYCLE_BIN_RETENTION_DAYS``）。
         """
         kb = await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:

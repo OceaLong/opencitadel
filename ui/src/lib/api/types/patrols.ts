@@ -9,12 +9,27 @@ type PatrolRunStatus =
 type PatrolCheckStatus = "pass" | "warn" | "fail" | "error" | "skipped";
 type PatrolFindingStatus = "open" | "acknowledged" | "resolved" | "false_positive";
 
+/**
+ * 巡检通知渠道（对齐后端 NotifyChannel schema）：
+ * type=mcp 用 server_id + channel_arg；type=webhook 用 url + secret；
+ * type=email 用 address。其余字段留空字符串。
+ */
+export type PatrolNotifyChannel = {
+  type: "mcp" | "webhook" | "email";
+  server_id: string;
+  channel_arg: string;
+  url: string;
+  secret: string;
+  address: string;
+};
+
 export type PatrolPackConfig = {
   schema_version: 1;
   target_ref: string;
   timezone: string;
   schedule: { cron: string; enabled: boolean };
   scope: { cluster: string; namespaces: string[]; environment: "dev" | "staging" | "production" };
+  notify_channels?: PatrolNotifyChannel[];
   defaults: {
     timeout_seconds: number;
     run_timeout_seconds: number;

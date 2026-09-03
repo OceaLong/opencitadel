@@ -1,0 +1,32 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- /*
+Prometheus Operator 抓取配置：抓 api Service 的 /api/metrics。
+该端点 fail-closed：METRICS_TOKEN（secrets.metricsToken）为空时返回 404，
+启用本模板前必须设置 metricsToken，否则抓取只会一直失败。
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-api
+  labels:
+    app.kubernetes.io/component: api
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "api") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /api/metrics
+      scheme: http
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      # Bearer token 引用主 Secret 的 METRICS_TOKEN 键（secrets.metricsToken）。
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+          key: METRICS_TOKEN
+{{- end }}

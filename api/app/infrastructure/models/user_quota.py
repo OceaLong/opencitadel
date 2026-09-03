@@ -59,10 +59,9 @@ class UserQuotaORM(Base):
 class TeamQuotaORM(Base):
     """团队维度配额表，字段镜像 :class:`UserQuotaORM`，主键/外键为 ``team_id``。
 
-    ``model_metadata.create_all`` 会自动建表（greenfield 干净重建覆盖）。
-    TODO(tenant_rls): 本表尚未注册进 ``tenant_rls``，无行级隔离；应新增
-    ``team_quotas`` 的团队作用域读策略（``team_id`` = 当前团队，写入限系统/管理员），
-    详见 ``app/infrastructure/security/tenant_rls.py`` 中 ``user_quotas`` 的写法。
+    ``model_metadata.create_all`` 会自动建表（greenfield 干净重建覆盖）。行级
+    隔离见 ``app/infrastructure/security/tenant_rls.py`` 中 ``team_quotas`` 的
+    团队作用域策略。
     """
 
     __tablename__ = "team_quotas"

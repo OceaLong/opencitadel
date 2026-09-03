@@ -143,9 +143,13 @@ previous map, set the new `JWT_SECRET`, and restart replicas; tokens still in
 flight keep validating until they expire. `DATABASE_AUTHORIZATION_SIGNING_SECRET`
 defaults to `SESSION_SECRET`, which keeps existing deployments and their seeded
 RLS `app.rls_signing_secret` value unchanged; set it to a distinct strong value
-only to split the DB authorization trust domain from the session cookie one, and
-rotate it in lockstep with the database's signing secret. Never log plaintext
-secrets or copy them into Runtime Policy.
+only to split the DB authorization trust domain from the session cookie one. The
+database stamps its copy of the secret during the first migration, so setting or
+changing the value on an existing database requires running
+`python -m app.rotate_db_signing_secret` (re-entrant; updates the stored secret
+and verifies a signed probe in one transaction) and then restarting the api and
+execution-kernel replicas. Never log plaintext secrets or copy them into Runtime
+Policy.
 
 After bootstrap, configure endpoint, typed model, and purpose bindings through
 **Settings → Inference** or `/api/inference`. Chat, embedding, and rerank

@@ -127,11 +127,7 @@ export function SessionList() {
     listBody = (
       <EmptyState
         title={
-          query.trim()
-            ? t("searchEmpty")
-            : sessions.length === 0
-              ? t("empty")
-              : t("filterEmpty")
+          query.trim() ? t("searchEmpty") : sessions.length === 0 ? t("empty") : t("filterEmpty")
         }
         className="py-8"
       />

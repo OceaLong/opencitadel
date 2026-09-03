@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { AsyncBoundary } from "@/components/async-boundary";
 import { PatrolRunDetailView } from "@/components/patrol/patrol-run-detail";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +18,11 @@ export function PatrolRunPageClient({ id }: { id: string }) {
   const t = useTranslations("patrol");
   const { user } = useAuth();
   const [run, setRun] = useState<PatrolRunDetail | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // 重试计数：错误态点"重试"时递增以重启轮询 effect。
+  const [reloadKey, setReloadKey] = useState(0);
+  // 首屏是否已成功加载过：加载后轮询失败只 toast，不整页替换为错误态。
+  const loadedRef = useRef(false);
   useReportPageTitle(
     run ? `Run #${run.id.length > 8 ? `${run.id.slice(0, 8)}…` : run.id}` : undefined,
   );
@@ -34,12 +40,17 @@ export function PatrolRunPageClient({ id }: { id: string }) {
       try {
         const next = await patrolsApi.getRun(id);
         if (!active) return;
+        loadedRef.current = true;
         setRun(next);
+        setLoadError(null);
         if (["queued", "running"].includes(next.status)) {
           timer = window.setTimeout(() => void poll(), 3000);
         }
       } catch (error) {
-        if (active) toast.error(error instanceof Error ? error.message : t("errors.runLoad"));
+        if (!active) return;
+        const message = error instanceof Error ? error.message : t("errors.runLoad");
+        if (loadedRef.current) toast.error(message);
+        else setLoadError(message);
       }
     };
     timer = window.setTimeout(() => void poll(), 0);
@@ -47,14 +58,26 @@ export function PatrolRunPageClient({ id }: { id: string }) {
       active = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [id, t]);
+  }, [id, t, reloadKey]);
   if (!run)
     return (
       <ScrollablePageContent>
-        <div className="grid gap-3">
-          <Skeleton className="h-44" />
-          <Skeleton className="h-72" />
-        </div>
+        <AsyncBoundary
+          loading={!loadError}
+          error={loadError}
+          onRetry={() => {
+            setLoadError(null);
+            setReloadKey((key) => key + 1);
+          }}
+          loadingFallback={
+            <div className="grid gap-3">
+              <Skeleton className="h-44" />
+              <Skeleton className="h-72" />
+            </div>
+          }
+        >
+          {null}
+        </AsyncBoundary>
       </ScrollablePageContent>
     );
   return (

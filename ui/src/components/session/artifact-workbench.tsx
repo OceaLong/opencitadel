@@ -210,9 +210,7 @@ export function ArtifactWorkbench({
         shareInfo.expiresAt
           ? t("shareExpiresAt", { date: formatDateTime(shareInfo.expiresAt, locale) })
           : null,
-        shareInfo.tokenPreview
-          ? t("shareTokenSuffix", { suffix: shareInfo.tokenPreview })
-          : null,
+        shareInfo.tokenPreview ? t("shareTokenSuffix", { suffix: shareInfo.tokenPreview }) : null,
       ].filter((part): part is string => Boolean(part))
     : [];
 

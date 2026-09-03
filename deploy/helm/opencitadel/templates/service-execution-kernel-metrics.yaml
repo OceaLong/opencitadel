@@ -4,7 +4,7 @@ metadata:
   name: {{ include "opencitadel.fullname" . }}-execution-kernel-metrics
 spec:
   selector:
-    app.kubernetes.io/component: execution-kernel
+    {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "execution-kernel") | nindent 4 }}
   ports:
     - name: metrics
       port: {{ .Values.executionKernel.metricsPort }}

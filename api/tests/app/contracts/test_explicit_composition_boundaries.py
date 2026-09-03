@@ -30,6 +30,7 @@ SETTINGS_ENTRYPOINTS = {
     "app/main.py",
     "app/migrate.py",
     "app/migrate_storage.py",
+    "app/rotate_db_signing_secret.py",
     "app/seed_demo.py",
 }
 

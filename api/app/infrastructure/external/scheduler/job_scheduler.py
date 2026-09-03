@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from app.application.services.patrol_retention_service import (
         PatrolRetentionService,
     )
+    from app.application.services.recycle_bin_retention_service import (
+        RecycleBinRetentionService,
+    )
     from app.application.services.resource_version_gc_service import (
         ResourceVersionGCService,
     )
@@ -190,6 +193,7 @@ async def run_scheduler_loop(
     stop_event: asyncio.Event,
     resource_version_gc_service: Optional["ResourceVersionGCService"] = None,
     patrol_retention_service: Optional["PatrolRetentionService"] = None,
+    recycle_bin_retention_service: Optional["RecycleBinRetentionService"] = None,
     mcp_pool: Optional["MCPConnectionPoolPort"] = None,
     a2a_pool: Optional["A2AConnectionPoolPort"] = None,
 ) -> None:
@@ -263,6 +267,7 @@ async def run_scheduler_loop(
                     operations=operations,
                     resource_version_gc_service=resource_version_gc_service,
                     patrol_retention_service=patrol_retention_service,
+                    recycle_bin_retention_service=recycle_bin_retention_service,
                 ),
                 leases=leases,
                 key=SCHEDULER_LEADER_KEY,
@@ -288,6 +293,7 @@ async def _run_scheduler_leader_tick(
     operations: Any,
     resource_version_gc_service: Optional["ResourceVersionGCService"],
     patrol_retention_service: Optional["PatrolRetentionService"],
+    recycle_bin_retention_service: Optional["RecycleBinRetentionService"],
 ) -> None:
     """One leader-only tick: reconcile, GC/retention ticks, and job triggers.
 
@@ -330,6 +336,14 @@ async def _run_scheduler_leader_tick(
                 logger.info("Patrol retention tick metrics=%s", retention_result)
         except (OSError, RuntimeError, ValueError):
             logger.exception("Patrol retention tick failed")
+
+    if recycle_bin_retention_service is not None and recycle_bin_retention_service.enabled:
+        try:
+            purge_result = await recycle_bin_retention_service.purge_expired(now=datetime.now(UTC))
+            if any(purge_result.values()):
+                logger.info("Recycle-bin retention tick purged=%s", purge_result)
+        except (OSError, RuntimeError, ValueError):
+            logger.exception("Recycle-bin retention tick failed")
 
     try:
         async with uow_factory() as uow:

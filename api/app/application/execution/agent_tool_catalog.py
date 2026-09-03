@@ -58,7 +58,7 @@ class AgentToolCatalog:
         *,
         uow_factory: Callable[[], IUnitOfWork],
         sandbox_factory: SandboxFactoryPort,
-        search_engine: SearchEngine,
+        search_engine: SearchEngine | None,
         mcp_connection_pool: MCPConnectionPoolPort,
         a2a_connection_pool: A2AConnectionPoolPort,
         mcp_servers: MCPServerService,
@@ -240,12 +240,14 @@ class AgentToolCatalog:
             if model_id is not None and not isinstance(model_id, str):
                 raise ValueError("model_id must be a string")
             model = await self._models.resolve_chat(model_id, scope=scope)
+            # SEARCH_PROVIDER=none 时不注册搜索工具：显式缺席优于静默空结果。
+            if self._search_engine is not None:
+                candidates.append(SearchTool(search_engine=self._search_engine))
             candidates.extend(
                 [
                     FileTool(sandbox=sandbox),
                     ShellTool(sandbox=sandbox),
                     BrowserTool(browser=browser),
-                    SearchTool(search_engine=self._search_engine),
                     ImageGenerationTool(
                         inference_model=model,
                         image_generator=self._image_generator,

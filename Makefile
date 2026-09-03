@@ -1,4 +1,4 @@
-.PHONY: quickstart build lint quality-check test test-api test-ui test-patrol test-patrol-fixtures test-actuator acceptance-e2e
+.PHONY: quickstart build lint quality-check test test-api test-api-strict test-ui test-sandbox test-patrol test-patrol-fixtures test-actuator acceptance-e2e
 
 # Single source of truth for first-party Python lint scope (paths relative to
 # api/, where the ruff-carrying venv lives). CI calls `make lint` — extend the
@@ -33,8 +33,16 @@ quality-check: lint
 test-api:
 	cd api && uv run pytest -q
 
+# Strict mode: Postgres/Redis-backed suites FAIL (not skip) when the backing
+# services are unavailable — the anti-false-green variant CI relies on.
+test-api-strict:
+	cd api && OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 OPENCITADEL_REQUIRE_REDIS_TESTS=1 uv run pytest -q
+
 test-ui:
 	cd ui && npm run test
+
+test-sandbox:
+	cd sandbox && uv run pytest -q
 
 test-patrol:
 	cd ops-collector && uv run pytest -q
@@ -56,4 +64,6 @@ test-actuator:
 acceptance-e2e:
 	./scripts/run-acceptance-e2e.sh
 
-test: test-api test-ui
+# Full first-party test surface. quality-check carries the lint/i18n/contract
+# gates; sandbox / ops-collector / ops-actuator suites run via their targets.
+test: quality-check test-api test-ui test-sandbox test-patrol test-actuator

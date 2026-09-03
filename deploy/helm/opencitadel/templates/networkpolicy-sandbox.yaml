@@ -13,6 +13,8 @@ spec:
   ingress:
     - from:
         - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In
@@ -53,7 +55,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: egress-proxy
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "egress-proxy") | nindent 14 }}
       ports:
         - protocol: TCP
           port: 3128

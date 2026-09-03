@@ -41,6 +41,18 @@ class DBServiceApiKeyRepository(ServiceApiKeyRepository):
         else:
             self.db_session.add(ServiceApiKeyORM.from_domain(key))
 
+    async def rotate(
+        self, key_id: str, user_id: str, *, key_hash: str, prefix: str
+    ) -> ServiceApiKey | None:
+        """换发密钥材料：仅命中属主本人的未撤销 Key；返回更新后的 Key。"""
+        record = await self.db_session.get(ServiceApiKeyORM, key_id)
+        if record is None or record.owner_user_id != user_id or record.revoked_at is not None:
+            return None
+        record.key_hash = key_hash
+        record.prefix = prefix
+        record.last_used_at = None
+        return record.to_domain()
+
     async def revoke(self, key_id: str, user_id: str) -> None:
         await self.db_session.execute(
             update(ServiceApiKeyORM)

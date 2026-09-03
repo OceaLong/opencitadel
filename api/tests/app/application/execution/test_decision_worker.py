@@ -102,3 +102,58 @@ async def test_worker_passes_validated_context_and_uses_snapshot_timeout() -> No
     await worker.run_once(now=NOW, limit=1)
 
     assert service.commands[0][0].payload["timeout_at"] == (NOW + timedelta(seconds=17)).isoformat()
+
+
+@pytest.mark.asyncio
+async def test_worker_injects_operations_approval_ttl(monkeypatch) -> None:
+    """RequestApproval commands must carry the tenant's approval TTL, not rely
+    on the aggregate's fixed default — otherwise the control-plane knob is dead."""
+    from app.application.execution import decision_worker as module
+    from app.domain.execution.commands import RegisteredCommand
+
+    approval_command = RegisteredCommand(
+        command_id=UUID(int=5),
+        command_type="RequestApproval",
+        run_id=RUN_ID,
+        payload={
+            "approval_id": str(UUID(int=6)),
+            "subject_activity_id": str(UUID(int=7)),
+            "approval_kind": "tool_effect",
+            "risk_summary": "risk",
+            "subject_label": "tool",
+        },
+    )
+    monkeypatch.setattr(module, "next_command", lambda *args, **kwargs: approval_command)
+    service = Service()
+    ttl_calls = []
+
+    async def approval_ttl(now):
+        ttl_calls.append(now)
+        return 30
+
+    worker = DecisionWorker(
+        source=Source(),
+        run_service=service,
+        approval_ttl_minutes=approval_ttl,
+    )
+    await worker.run_once(now=NOW, limit=1)
+
+    assert ttl_calls == [NOW]
+    assert service.commands[0][0].payload["ttl_minutes"] == 30
+
+
+@pytest.mark.asyncio
+async def test_worker_leaves_non_approval_commands_untouched() -> None:
+    service = Service()
+
+    async def approval_ttl(now):
+        raise AssertionError("must not fetch TTL for non-approval commands")
+
+    worker = DecisionWorker(
+        source=Source(),
+        run_service=service,
+        approval_ttl_minutes=approval_ttl,
+    )
+    await worker.run_once(now=NOW, limit=1)
+
+    assert "ttl_minutes" not in service.commands[0][0].payload

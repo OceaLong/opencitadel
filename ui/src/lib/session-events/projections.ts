@@ -160,8 +160,7 @@ export function foldTimelineEvent(
 
   if (event.type === "error") {
     const error =
-      modelErrorMessage(event.data.code, locale) ??
-      translate("errors.appError", undefined, locale);
+      modelErrorMessage(event.data.code, locale) ?? translate("errors.appError", undefined, locale);
     const previous = timeline[timeline.length - 1];
     if (
       previous?.kind === "error" &&
@@ -209,7 +208,8 @@ export function createObservationState(): ObservationBuildState {
 export function foldObservationEvent(state: ObservationBuildState, event: SSEEventData): void {
   const createdAt = toMillis(event.data.created_at);
   if (createdAt !== undefined) {
-    state.startedAt = state.startedAt === undefined ? createdAt : Math.min(state.startedAt, createdAt);
+    state.startedAt =
+      state.startedAt === undefined ? createdAt : Math.min(state.startedAt, createdAt);
     state.endedAt = state.endedAt === undefined ? createdAt : Math.max(state.endedAt, createdAt);
   }
   if (event.type === "tool") {

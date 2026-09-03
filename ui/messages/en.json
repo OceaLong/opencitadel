@@ -116,7 +116,9 @@
       "maxConcurrentTasks": "Too many concurrent active sessions",
       "monthlyTokenLimit": "Monthly token quota exceeded",
       "storageLimit": "Storage quota exceeded"
-    }
+    },
+    "pageNotFound": "Page not found",
+    "pageNotFoundDescription": "The page you are looking for does not exist or has been moved."
   },
   "apiErrors": {
     "auth": {
@@ -235,8 +237,6 @@
     "loginFailed": "Sign in failed",
     "loginRegister": "Sign in / Register",
     "logout": "Sign out",
-    "noAccount": "Don't have an account?",
-    "registerLink": "Register with invite link",
     "registerTitle": "Accept invitation",
     "registerDescription": "Create an account using the invite link from your administrator.",
     "missingInviteToken": "Missing invite token.",
@@ -249,7 +249,8 @@
     "loginToSelectModel": "Sign in to select a model",
     "selectModelAfterLogin": "Select model after sign in",
     "loginToUseAi": "Sign in to use AI features",
-    "loginToSendMessage": "Sign in to send messages"
+    "loginToSendMessage": "Sign in to send messages",
+    "inviteOnlyRegistration": "Registration is by invitation only. Ask an administrator for an invite link."
   },
   "home": {
     "subtitle": "What can I do for you?",
@@ -1004,7 +1005,12 @@
     "timeRange7d": "Last 7 days",
     "timeRange30d": "Last 30 days",
     "timeRange90d": "Last 90 days",
-    "timeRangeAll": "All time"
+    "timeRangeAll": "All time",
+    "systemHealthTitle": "System health",
+    "systemHealthDesc": "Postgres, Redis, API, and inference service status",
+    "healthOk": "OK",
+    "healthError": "Error",
+    "inferenceServiceLabel": "Inference service"
   },
   "adminNav": {
     "auditorSubtitle": "Read-only compliance and audit portal",
@@ -1142,7 +1148,9 @@
     "sessionChainOk": "Session evidence chain intact",
     "sessionChainBroken": "Session evidence chain broken",
     "verifySessionChain": "Verify chain",
-    "verifySessionFailed": "Failed to verify session chain"
+    "verifySessionFailed": "Failed to verify session chain",
+    "generateReportFailed": "Failed to generate report",
+    "exportFailed": "Export failed"
   },
   "governanceProfile": {
     "title": "Governance profile",
@@ -1318,7 +1326,8 @@
     "scheduledJobCompleted": "Scheduled job \"{jobName}\" completed",
     "scheduledJobStarted": "Scheduled job \"{jobName}\" started",
     "patrolCompleted": "Patrol \"{packName}\" completed with status {status}",
-    "approvalWaiting": "Approval needed for {subject}"
+    "approvalWaiting": "Approval needed for {subject}",
+    "approvalExpired": "Approval expired without a decision; the run was cancelled ({subject})"
   },
   "toolUse": {
     "statusRunning": "running",
@@ -1444,7 +1453,8 @@
       "load": "Failed to load patrols",
       "replay": "Failed to replay run",
       "runLoad": "Failed to load Run",
-      "trigger": "Failed to trigger patrol"
+      "trigger": "Failed to trigger patrol",
+      "update": "Failed to update patrol"
     },
     "evidencePercent": "Evidence {value}%",
     "findingStatus": {
@@ -1502,6 +1512,7 @@
       "empty": "No remediations proposed for this run yet.",
       "errors": {
         "checkLoad": "Failed to load check details for remediation",
+        "detailLoad": "Failed to load remediation detail",
         "listLoad": "Failed to load remediations",
         "propose": "Failed to propose remediation"
       },
@@ -1518,8 +1529,15 @@
       },
       "title": "Remediations",
       "unavailable": "Remediation proposals are disabled by policy.",
+      "viewDetail": "View detail",
       "viewRecheckRun": "View recheck run",
-      "viewSession": "View approval session"
+      "viewSession": "View approval session",
+      "detail": {
+        "afterLabel": "Observation after",
+        "beforeLabel": "Observation before",
+        "paramsLabel": "Parameters",
+        "title": "Remediation detail"
+      }
     },
     "pack": {
       "boundary": "10 checks; no remediation, Shell, browser, or arbitrary query capability.",
@@ -1628,7 +1646,39 @@
       },
       "stepsAria": "Patrol creation steps",
       "threshold": "Threshold",
-      "timezone": "IANA timezone"
+      "timezone": "IANA timezone",
+      "checksPreviewNotice": "Checks are fixed by the selected template and shown here for preview only; custom checks are not yet configurable.",
+      "collectorEmpty": "No collectors found. Register an MCP Server in Settings > Integrations first.",
+      "collectorLoadFailed": "Failed to load collectors. Check your network and retry, or register one in Settings > Integrations.",
+      "targetRefPlaceholder": "e.g. my-app-stack",
+      "clusterPlaceholder": "e.g. prod-cluster",
+      "namespacesPlaceholder": "e.g. default, production",
+      "namespacesHint": "Separate multiple namespaces with commas.",
+      "updateAndRevalidate": "Save and revalidate"
+    },
+    "edit": {
+      "description": "Update scope, schedule, and notifications; saving triggers revalidation",
+      "title": "Edit patrol"
+    },
+    "notify": {
+      "add": "Add channel",
+      "addressLabel": "Email address",
+      "channelArgLabel": "Channel argument",
+      "empty": "No notification channels configured. Results still appear in the in-app notification inbox.",
+      "remove": "Remove channel",
+      "secretLabel": "Signing secret",
+      "serverLabel": "Notification server",
+      "serverPlaceholder": "Select an MCP Server",
+      "typeEmail": "Email",
+      "typeLabel": "Channel type",
+      "typeMcp": "MCP tool",
+      "typeWebhook": "Webhook",
+      "urlLabel": "Webhook URL"
+    },
+    "runs": {
+      "description": "Runs across all patrol packs",
+      "filterAll": "All statuses",
+      "title": "Patrol run history"
     }
   },
   "redirect": {
@@ -1778,6 +1828,25 @@
     "sendFailed": "Failed to send response",
     "toolConfirmTitle": "Tool action requires approval",
     "unknownTool": "Unknown tool"
+  },
+  "approvals": {
+    "title": "Approval inbox",
+    "description": "Review and decide pending approval requests from agent runs",
+    "empty": "No approval requests",
+    "filterAll": "All statuses",
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled",
+      "expired": "Expired"
+    },
+    "viewSession": "View session",
+    "requestedAt": "Requested at {time}",
+    "decidedAt": "Decided at {time}",
+    "approveSuccess": "Approved",
+    "rejectSuccess": "Rejected",
+    "indicatorLabel": "Pending approvals"
   },
   "operatorScope": {
     "confirmCreate": "Start Web Operator session",

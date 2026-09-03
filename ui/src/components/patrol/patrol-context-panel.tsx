@@ -7,6 +7,7 @@ import { Plus } from "lucide-react";
 
 import { AccountMenu } from "@/components/account-menu";
 import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
 
 import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
@@ -17,10 +18,11 @@ import { useAuth } from "@/providers/auth-provider";
 export function PatrolContextPanel() {
   const pathname = usePathname();
   const t = useTranslations("patrol");
+  const tCommon = useTranslations("common");
   const labels = usePatrolLabels();
   const { user } = useAuth();
   const readOnly = user?.global_role === "auditor";
-  const { packs, latestRuns, loading } = usePatrolPacks();
+  const { packs, latestRuns, loading, error, refresh } = usePatrolPacks();
 
   return (
     <Sidebar>
@@ -28,7 +30,14 @@ export function PatrolContextPanel() {
         <SidebarTrigger className="cursor-pointer" />
       </SidebarHeader>
       <SidebarContent className="p-2">
-        {loading ? null : (
+        {loading ? null : error ? (
+          <div className="flex flex-col items-start gap-2 px-3 py-2">
+            <p className="text-muted-foreground text-xs">{error}</p>
+            <Button variant="outline" size="sm" onClick={() => void refresh()}>
+              {tCommon("retry")}
+            </Button>
+          </div>
+        ) : (
           <div className="space-y-1">
             {!readOnly && (
               <Link

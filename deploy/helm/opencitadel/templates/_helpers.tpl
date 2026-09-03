@@ -2,6 +2,37 @@
 {{- printf "%s" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Selector labels：component + release instance。带上 instance 后同 namespace
+安装两个 release 时，各自的 Deployment/Service/NetworkPolicy 不再互抢对方
+的 Pod。用法：
+  {{ include "opencitadel.selectorLabels" (dict "root" $ "component" "api") }}
+*/}}
+{{- define "opencitadel.selectorLabels" -}}
+app.kubernetes.io/component: {{ .component }}
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- end -}}
+
+{{/*
+镜像引用：tag 留空时回退到 Chart.appVersion。用法：
+  image: {{ include "opencitadel.image" (dict "root" $ "image" .Values.image.api) }}
+*/}}
+{{- define "opencitadel.image" -}}
+{{- printf "%s:%s" .image.repository (.image.tag | default .root.Chart.AppVersion) -}}
+{{- end -}}
+
+{{/*
+Sandbox image env. 显式 .Values.env.SANDBOX_IMAGE 优先；留空时由
+.Values.image.sandbox 推导（tag 空则回退 Chart.appVersion）。
+*/}}
+{{- define "opencitadel.sandboxImage" -}}
+{{- if .Values.env.SANDBOX_IMAGE -}}
+{{- .Values.env.SANDBOX_IMAGE -}}
+{{- else -}}
+{{- include "opencitadel.image" (dict "root" . "image" .Values.image.sandbox) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "opencitadel.postgresHost" -}}
 {{- if .Values.postgresql.enabled -}}
 {{- printf "%s-postgres" (include "opencitadel.fullname" .) -}}

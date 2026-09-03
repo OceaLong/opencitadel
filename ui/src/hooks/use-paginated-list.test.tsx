@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
 import { act, useEffect } from "react";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderComponent } from "@/test-utils/render";
 
-import { type PaginatedFetcher, usePaginatedList, type UsePaginatedListResult } from "./use-paginated-list";
+import en from "../../messages/en.json";
+import {
+  type PaginatedFetcher,
+  usePaginatedList,
+  type UsePaginatedListResult,
+} from "./use-paginated-list";
 
 type Item = { id: string };
 
@@ -34,6 +40,15 @@ function Harness({
   return null;
 }
 
+/** Renders the harness under the intl provider the hook now requires. */
+function renderHarness(props: Parameters<typeof Harness>[0]) {
+  return renderComponent(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <Harness {...props} />
+    </NextIntlClientProvider>,
+  );
+}
+
 describe("usePaginatedList", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -48,7 +63,7 @@ describe("usePaginatedList", () => {
     }));
     const sinkRef: { current: UsePaginatedListResult<Item> | null } = { current: null };
 
-    const { unmount } = await renderComponent(<Harness fetcher={fetcher} sinkRef={sinkRef} />);
+    const { unmount } = await renderHarness({ fetcher, sinkRef });
 
     expect(fetcher).toHaveBeenCalledWith({ limit: 20, offset: 0 });
     expect(sinkRef.current?.items).toEqual([{ id: "0" }]);
@@ -69,7 +84,7 @@ describe("usePaginatedList", () => {
     }));
     const sinkRef: { current: UsePaginatedListResult<Item> | null } = { current: null };
 
-    const { unmount } = await renderComponent(<Harness fetcher={fetcher} sinkRef={sinkRef} />);
+    const { unmount } = await renderHarness({ fetcher, sinkRef });
 
     await act(async () => {
       await sinkRef.current?.nextPage();
@@ -96,7 +111,7 @@ describe("usePaginatedList", () => {
     });
     const sinkRef: { current: UsePaginatedListResult<Item> | null } = { current: null };
 
-    const { unmount } = await renderComponent(<Harness fetcher={fetcher} sinkRef={sinkRef} />);
+    const { unmount } = await renderHarness({ fetcher, sinkRef });
     expect(sinkRef.current?.items).toEqual([{ id: "a" }]);
 
     await act(async () => {
@@ -106,6 +121,38 @@ describe("usePaginatedList", () => {
     expect(sinkRef.current?.items).toEqual([{ id: "a" }]);
     expect(sinkRef.current?.offset).toBe(0);
     expect(sinkRef.current?.loading).toBe(false);
+    // fetcher 自行处理过的失败不会触发 hook 的 error。
+    expect(sinkRef.current?.error).toBeNull();
+
+    await unmount();
+  });
+
+  it("catches a throwing fetcher, exposes error and keeps prior state", async () => {
+    let call = 0;
+    const fetcher = vi.fn(async () => {
+      call += 1;
+      if (call === 1) return { items: [{ id: "a" }], total: 10 };
+      throw new Error("boom");
+    });
+    const sinkRef: { current: UsePaginatedListResult<Item> | null } = { current: null };
+
+    const { unmount } = await renderHarness({ fetcher, sinkRef });
+    expect(sinkRef.current?.error).toBeNull();
+
+    await act(async () => {
+      await sinkRef.current?.load(20);
+    });
+    expect(sinkRef.current?.error).toBe("boom");
+    expect(sinkRef.current?.items).toEqual([{ id: "a" }]);
+    expect(sinkRef.current?.offset).toBe(0);
+    expect(sinkRef.current?.loading).toBe(false);
+
+    // A later successful load clears the error.
+    call = 0;
+    await act(async () => {
+      await sinkRef.current?.load(0);
+    });
+    expect(sinkRef.current?.error).toBeNull();
 
     await unmount();
   });
@@ -114,9 +161,7 @@ describe("usePaginatedList", () => {
     const fetcher = vi.fn(async () => ({ items: [], total: 25 }));
     const sinkRef: { current: UsePaginatedListResult<Item> | null } = { current: null };
 
-    const { unmount } = await renderComponent(
-      <Harness fetcher={fetcher} pageSize={10} sinkRef={sinkRef} />,
-    );
+    const { unmount } = await renderHarness({ fetcher, pageSize: 10, sinkRef });
 
     expect(fetcher).toHaveBeenCalledWith({ limit: 10, offset: 0 });
     expect(sinkRef.current?.totalPages).toBe(3);

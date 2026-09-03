@@ -61,16 +61,17 @@ type TranslationMap = Record<string, TranslationValue>;
  * matches the previous per-file default behavior.
  */
 export function mockNextIntl(map: TranslationMap = {}, locale = "en") {
+  // 真实 next-intl 的 useTranslations 返回 useMemo 过的稳定引用；这里同样
+  // 返回单例翻译函数，避免把 t 放进 effect 依赖的组件在测试里无限重渲染。
+  const translate = (key: string, values?: Record<string, unknown>): string => {
+    const entry = map[key];
+    if (typeof entry === "function") return entry(values);
+    if (entry !== undefined) return entry;
+    return values ? `${key}:${JSON.stringify(values)}` : key;
+  };
   return {
     useLocale: () => locale,
-    useTranslations:
-      () =>
-      (key: string, values?: Record<string, unknown>): string => {
-        const entry = map[key];
-        if (typeof entry === "function") return entry(values);
-        if (entry !== undefined) return entry;
-        return values ? `${key}:${JSON.stringify(values)}` : key;
-      },
+    useTranslations: () => translate,
   };
 }
 

@@ -49,6 +49,7 @@ from app.infrastructure.models.patrol import (
     PatrolRunModel,
 )
 from app.infrastructure.models.session import SessionModel
+from app.infrastructure.models.team import TeamMemberORM
 from app.infrastructure.repositories.db_notification_repository import DBNotificationRepository
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
@@ -60,13 +61,21 @@ _CHECKPOINT_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True)
 class ApprovalWaitingNotice:
-    """One approval that just entered the pending state and needs a reviewer."""
+    """One approval lifecycle fact that needs to reach reviewers.
 
-    user_id: str
+    ``user_id`` targets a single recipient; a purely team-owned Run sets it to
+    None and carries ``team_id`` instead, and the notifier fans out to the
+    team's reviewers. ``kind`` is "approval_waiting" (pending, needs a
+    decision) or "approval_expired" (TTL elapsed, Run was cancelled).
+    """
+
+    user_id: str | None
     approval_id: UUID
     run_id: UUID
     session_id: str | None
     subject_label: str
+    team_id: str | None = None
+    kind: str = "approval_waiting"
 
 
 @runtime_checkable
@@ -96,27 +105,72 @@ class PostgresApprovalNotifier:
         self._authorization = authorization
         self._publisher = publisher
 
-    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None:
-        notification = Notification(
-            user_id=notice.user_id,
+    @staticmethod
+    def _build_notification(notice: ApprovalWaitingNotice, user_id: str) -> Notification:
+        # Literal i18n_key values: the quality-baseline contract scans the AST
+        # for constant i18n_key keywords to keep contracts/i18n-runtime-keys.json
+        # in sync with the UI catalog.
+        if notice.kind == "approval_expired":
+            return Notification(
+                user_id=user_id,
+                type="approval_expired",
+                message="审批超时未处理，Run 已取消"
+                + (f"：{notice.subject_label}" if notice.subject_label else ""),
+                i18n_key="notifications.approvalExpired",
+                i18n_params={"subject": notice.subject_label},
+                session_id=notice.session_id,
+            )
+        return Notification(
+            user_id=user_id,
             type="approval_waiting",
             message=f"审批等待处理：{notice.subject_label}",
             i18n_key="notifications.approvalWaiting",
             i18n_params={"subject": notice.subject_label},
             session_id=notice.session_id,
         )
+
+    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None:
+        notifications: list[Notification] = []
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            await DBNotificationRepository(session).save(notification)
+            recipients = (
+                [notice.user_id]
+                if notice.user_id
+                else await self._team_reviewers(session, notice.team_id)
+            )
+            if not recipients:
+                logger.warning("审批通知无可用接收人 run=%s team=%s", notice.run_id, notice.team_id)
+                return
+            repository = DBNotificationRepository(session)
+            for user_id in recipients:
+                notification = self._build_notification(notice, user_id)
+                await repository.save(notification)
+                notifications.append(notification)
             await session.commit()
         if self._publisher is not None:
-            try:
-                await self._publisher.publish(
-                    notice.user_id,
-                    json.dumps(notification.model_dump(mode="json")),
+            for notification in notifications:
+                try:
+                    await self._publisher.publish(
+                        notification.user_id,
+                        json.dumps(notification.model_dump(mode="json")),
+                    )
+                except (OSError, RuntimeError, ValueError) as exc:
+                    logger.warning("审批通知 Redis 发布失败 user=%s: %s", notification.user_id, exc)
+
+    @staticmethod
+    async def _team_reviewers(session: AsyncSession, team_id: str | None) -> list[str]:
+        """Reviewers for a purely team-owned approval: owners/admins, else everyone."""
+        if not team_id:
+            return []
+        rows = (
+            await session.execute(
+                select(TeamMemberORM.user_id, TeamMemberORM.role).where(
+                    TeamMemberORM.team_id == team_id
                 )
-            except (OSError, RuntimeError, ValueError) as exc:
-                logger.warning("审批通知 Redis 发布失败 user=%s: %s", notice.user_id, exc)
+            )
+        ).all()
+        privileged = [user_id for user_id, role in rows if role in ("owner", "admin")]
+        return privileged or [user_id for user_id, _role in rows]
 
 
 class PostgresFormalProjector:
@@ -271,14 +325,14 @@ class PostgresFormalProjector:
         run_state: RunState,
         notices: list[ApprovalWaitingNotice],
     ) -> None:
-        if event.event_type != "ApprovalRequested":
+        if event.event_type not in ("ApprovalRequested", "ApprovalExpired"):
             return
-        # Personal-scope runs notify their owner. Team-scope runs carry no single
-        # reviewer identity here; owner_user_id may still be set (the initiating
-        # user), so notify that. TODO(E3): fan out to all team reviewers when the
-        # run is purely team-owned (owner_user_id is None).
+        # Personal-scope runs notify their owner (the initiating user). A purely
+        # team-owned Run (owner_user_id is None) carries the team id instead so
+        # the notifier can fan out to the team's reviewers — otherwise team
+        # approvals sit silent until they expire.
         user_id = event.owner_user_id
-        if not user_id:
+        if not user_id and not event.team_id:
             return
         payload = event.public_payload
         session_id = (
@@ -290,7 +344,14 @@ class PostgresFormalProjector:
                 approval_id=UUID(str(payload["approval_id"])),
                 run_id=run_state.run_id,
                 session_id=session_id,
-                subject_label=str(payload["subject_label"]),
+                # ApprovalExpired's payload carries no subject_label.
+                subject_label=str(payload.get("subject_label") or ""),
+                team_id=None if user_id else event.team_id,
+                kind=(
+                    "approval_expired"
+                    if event.event_type == "ApprovalExpired"
+                    else "approval_waiting"
+                ),
             )
         )
 

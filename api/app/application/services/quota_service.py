@@ -27,37 +27,55 @@ class QuotaService:
 
     async def check_session_quota(
         self,
-        user_id: str,
+        user_id: str | None,
         scope: OwnerScope | None = None,
+        *,
+        uow: IUnitOfWork | None = None,
     ) -> None:
-        """会话创建准入：日会话数 + 月 Token + 并发任务数（用户 + 团队）。"""
+        """会话创建准入：日会话数 + 月 Token + 并发任务数（用户 + 团队）。
+
+        ``user_id`` 为 None（无属主的纯团队路径，如团队巡检 Pack）时跳过用户
+        维度，团队维度仍独立校验。调用方已持有打开的写事务时必须传入 ``uow``
+        复用之——在事务内新开 UoW 会触发嵌套守卫（NestedUnitOfWorkError）。
+        """
+        if uow is not None:
+            await self._check_session_quota_in(uow, user_id, scope)
+            return
+        async with self._uow_factory() as own_uow:
+            await self._check_session_quota_in(own_uow, user_id, scope)
+
+    async def _check_session_quota_in(
+        self,
+        uow: IUnitOfWork,
+        user_id: str | None,
+        scope: OwnerScope | None,
+    ) -> None:
         team_id = _team_id(scope)
         now = datetime.now(UTC)
         session_since = now - _SESSION_WINDOW
         token_since = now - _TOKEN_WINDOW
 
-        async with self._uow_factory() as uow:
+        user_quota = None
+        # 仅在配置了并发上限时才做活跃会话计数，避免给未设并发限额的用户
+        # 在会话创建热路径上增加一次多余 COUNT。
+        user_active = 0
+        if user_id is not None:
             user_quota = await uow.quota.get_for_user(user_id)
-            # 仅在配置了并发上限时才做活跃会话计数，避免给未设并发限额的用户
-            # 在会话创建热路径上增加一次多余 COUNT。
-            user_active = 0
             if user_quota is not None and user_quota.max_concurrent_tasks is not None:
                 user_active = await uow.quota.count_active_sessions(user_id=user_id)
-            team_quota = None
-            team_daily_sessions = 0
-            team_monthly_tokens = 0
-            team_active = 0
-            if team_id is not None:
-                team_quota = await uow.quota.get_for_team(team_id)
-                if team_quota is not None:
-                    team_daily_sessions = await uow.quota.team_daily_session_count(
-                        team_id, session_since
-                    )
-                    team_monthly_tokens = await uow.quota.team_monthly_token_sum(
-                        team_id, token_since
-                    )
-                    if team_quota.max_concurrent_tasks is not None:
-                        team_active = await uow.quota.count_active_sessions(team_id=team_id)
+        team_quota = None
+        team_daily_sessions = 0
+        team_monthly_tokens = 0
+        team_active = 0
+        if team_id is not None:
+            team_quota = await uow.quota.get_for_team(team_id)
+            if team_quota is not None:
+                team_daily_sessions = await uow.quota.team_daily_session_count(
+                    team_id, session_since
+                )
+                team_monthly_tokens = await uow.quota.team_monthly_token_sum(team_id, token_since)
+                if team_quota.max_concurrent_tasks is not None:
+                    team_active = await uow.quota.count_active_sessions(team_id=team_id)
 
         if user_quota is not None:
             usage = await self._usage_query.snapshot(

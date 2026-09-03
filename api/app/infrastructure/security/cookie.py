@@ -70,5 +70,14 @@ class AuthCookieManager:
         return csrf_token
 
     def clear_auth_cookies(self, response: Response) -> None:
+        # A `__Host-` deletion must itself satisfy the prefix rules (Secure,
+        # Path=/, no Domain); without Secure the browser rejects the expired
+        # Set-Cookie outright and the session survives sign-out.
         for base_name in (ACCESS_COOKIE, REFRESH_COOKIE, CSRF_COOKIE):
-            response.delete_cookie(self._cookie_name(base_name), domain=self._domain, path="/")
+            response.delete_cookie(
+                self._cookie_name(base_name),
+                domain=self._domain,
+                path="/",
+                secure=self._secure,
+                samesite=self.same_site,
+            )

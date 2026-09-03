@@ -9,7 +9,7 @@ import en from "../../../../../messages/en.json";
 
 const mocks = vi.hoisted(() => ({
   capability: vi.fn(),
-  complianceReportUrl: vi.fn((p: { format?: string }) => `/api/report?format=${p.format ?? "md"}`),
+  downloadComplianceReport: vi.fn(),
   getComplianceReport: vi.fn(),
 }));
 
@@ -18,7 +18,7 @@ vi.mock("@/hooks/use-capabilities", () => ({
 }));
 vi.mock("@/lib/api/compliance", () => ({
   complianceApi: {
-    complianceReportUrl: mocks.complianceReportUrl,
+    downloadComplianceReport: mocks.downloadComplianceReport,
     getComplianceReport: mocks.getComplianceReport,
   },
 }));
@@ -39,27 +39,24 @@ function pdfButton(container: HTMLElement): HTMLButtonElement | undefined {
   );
 }
 
-function pdfAnchor(container: HTMLElement): HTMLAnchorElement | undefined {
-  return [...container.querySelectorAll("a")].find((a) =>
-    a.getAttribute("href")?.includes("format=pdf"),
-  );
-}
-
 afterEach(() => {
   document.body.replaceChildren();
   vi.clearAllMocks();
 });
 
 describe("AdminComplianceReportPage PDF gating", () => {
-  it("offers a real PDF export link when report_pdf capability is available", async () => {
+  it("offers an enabled PDF export button when report_pdf capability is available", async () => {
     mocks.capability.mockImplementation((name: string) =>
       name === "report_pdf" ? { state: "available", details: {} } : undefined,
     );
 
     const { container, unmount } = await renderPage();
 
-    expect(pdfAnchor(container)).toBeTruthy();
-    expect(pdfButton(container)?.disabled ?? false).toBe(false);
+    const button = pdfButton(container);
+    expect(button).toBeTruthy();
+    expect(button?.disabled).toBe(false);
+    // 导出改为 authenticatedFetch + Blob，不再渲染直连后端的 <a href>。
+    expect(container.querySelector('a[href*="format=pdf"]')).toBeNull();
     await unmount();
   });
 
@@ -76,7 +73,6 @@ describe("AdminComplianceReportPage PDF gating", () => {
 
     const { container, unmount } = await renderPage();
 
-    expect(pdfAnchor(container)).toBeUndefined();
     expect(pdfButton(container)?.disabled).toBe(true);
     await unmount();
   });

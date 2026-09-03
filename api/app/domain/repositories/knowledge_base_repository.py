@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
@@ -114,6 +115,10 @@ class KnowledgeBaseRepository(Protocol):
         self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
     ) -> list[KnowledgeBase]:
         """回收站：仅返回已软删（``deleted_at`` 非空）的知识库，owner 作用域内。"""
+        ...
+
+    async def list_deleted_kbs_before(self, cutoff: datetime, *, limit: int = 100) -> list[str]:
+        """保留期清理：跨作用域返回 ``deleted_at`` 早于 cutoff 的知识库 id（需系统授权）。"""
         ...
 
     async def soft_delete(self, kb_id: str, scope: OwnerScope | None = None) -> bool:

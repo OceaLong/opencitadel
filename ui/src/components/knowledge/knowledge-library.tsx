@@ -35,7 +35,16 @@ import { IconAdd, IconDelete, IconKnowledge, IconLoading, IconMore } from "@/lib
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
-const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"]);
+// Statuses with a build actually in flight server-side. `pending` is NOT one:
+// a freshly created KB sits in `pending` until the user uploads documents, and
+// watching its ingest stream (which closes immediately — there is no build)
+// just churns reconnects and polling forever.
+const ACTIVE_BUILD_KB_STATUSES = new Set<KnowledgeBase["status"]>([
+  "parsing",
+  "chunking",
+  "indexing",
+  "graph_building",
+]);
 
 const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -73,7 +82,7 @@ type PendingDelete =
   | null;
 
 function isKbIngesting(kb: KnowledgeBase, ingestingIds: Set<string>): boolean {
-  return ingestingIds.has(kb.id) || !TERMINAL_KB_STATUSES.has(kb.status);
+  return ingestingIds.has(kb.id) || ACTIVE_BUILD_KB_STATUSES.has(kb.status);
 }
 
 // Stable module-level adapter: `knowledgeApi` is itself a stable singleton, so
@@ -212,7 +221,7 @@ export function KnowledgeLibrary() {
 
   useEffect(() => {
     for (const kb of items) {
-      if (!TERMINAL_KB_STATUSES.has(kb.status)) {
+      if (ACTIVE_BUILD_KB_STATUSES.has(kb.status)) {
         watchIngest(kb.id);
       }
     }

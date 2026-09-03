@@ -8,11 +8,11 @@ spec:
   replicas: {{ .Values.executionKernel.replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: execution-kernel
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "execution-kernel") | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/component: execution-kernel
+        {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "execution-kernel") | nindent 8 }}
     spec:
       terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
       {{- if .Values.topologySpread.enabled }}
@@ -22,7 +22,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              app.kubernetes.io/component: execution-kernel
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "execution-kernel") | nindent 14 }}
       {{- end }}
       {{- if .Values.rbac.create }}
       serviceAccountName: {{ include "opencitadel.fullname" . }}-execution-kernel
@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: execution-kernel
-          image: "{{ .Values.image.executionKernel.repository }}:{{ .Values.image.executionKernel.tag }}"
+          image: {{ include "opencitadel.image" (dict "root" $ "image" .Values.image.executionKernel) | quote }}
           imagePullPolicy: {{ .Values.image.executionKernel.pullPolicy }}
           command: ["python", "-m", "app.execution_kernel_main"]
           securityContext:
@@ -74,11 +74,13 @@ spec:
             - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
               value: {{ .Values.shutdown.timeoutSeconds | quote }}
             {{- range $key, $value := .Values.env }}
-            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") (ne $key "SANDBOX_IMAGE") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
             {{- end }}
+            - name: SANDBOX_IMAGE
+              value: {{ include "opencitadel.sandboxImage" . | quote }}
             # Sandbox egress proxy: injected via helper so it resolves to the
             # in-cluster egress-proxy Service when egressProxy.enabled.
             - name: SANDBOX_HTTP_PROXY

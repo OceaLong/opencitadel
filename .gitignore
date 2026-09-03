@@ -42,3 +42,6 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# local docker compose config dumps (may embed resolved env values)
+scratch_config.yml

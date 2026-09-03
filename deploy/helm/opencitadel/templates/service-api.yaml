@@ -3,11 +3,11 @@ kind: Service
 metadata:
   name: {{ include "opencitadel.fullname" . }}-api
   labels:
-    app.kubernetes.io/component: api
+    {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "api") | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/component: api
+    {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "api") | nindent 4 }}
   ports:
     - port: 8000
       targetPort: 8000

@@ -47,9 +47,11 @@ async function uploadFixture(
   const content = readFileSync(path, "utf8");
   const result = await page.evaluate(
     async ({ content, filename, mimeType }) => {
-      const csrf = document.cookie
-        .split("; ")
-        .find((cookie) => cookie.startsWith("csrf_token="))
+      const cookies = document.cookie.split("; ");
+      const csrf = (
+        cookies.find((cookie) => cookie.startsWith("__Host-csrf_token=")) ??
+        cookies.find((cookie) => cookie.startsWith("csrf_token="))
+      )
         ?.split("=")
         .slice(1)
         .join("=");

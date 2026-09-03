@@ -77,6 +77,8 @@ export const patrolsApi = {
   ): Promise<PatrolRemediation> => post(`/patrol-findings/${findingId}/remediations`, params),
   listRemediations: (runId: string): Promise<PatrolRemediationList> =>
     get<PatrolRemediationList>(`/patrol-runs/${runId}/remediations`),
+  getRemediation: (id: string): Promise<PatrolRemediation> =>
+    get<PatrolRemediation>(`/patrol-remediations/${id}`),
   downloadEvidence: async (id: string): Promise<Blob> => {
     const response = await authenticatedFetch(`/patrol-runs/${id}/evidence`);
     if (!response.ok) throw new Error(`Evidence download failed (${response.status})`);

@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Loader2, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
+import { Loader2, Pause, Pencil, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AsyncBoundary } from "@/components/async-boundary";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
@@ -34,6 +35,7 @@ import { useReportPageTitle } from "@/providers/page-title-provider";
 
 export function PatrolPackPageClient({ id }: { id: string }) {
   const t = useTranslations("patrol");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const labels = usePatrolLabels();
   const { loading: capabilityLoading, capability } = useCapabilities();
@@ -47,6 +49,7 @@ export function PatrolPackPageClient({ id }: { id: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   useReportPageTitle(pack?.name);
   const load = useCallback(async () => {
     const [item, history, metricData] = await Promise.all([
@@ -58,11 +61,18 @@ export function PatrolPackPageClient({ id }: { id: string }) {
     setRuns(history.items);
     setMetrics(metricData);
   }, [id]);
-  useEffect(() => {
-    void load().catch((error) =>
-      toast.error(error instanceof Error ? error.message : t("errors.load")),
-    );
+  // 首屏加载失败进入显式错误态（可重试），而不是停留在骨架屏。
+  const initialLoad = useCallback(async () => {
+    setLoadError(null);
+    try {
+      await load();
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : t("errors.load"));
+    }
   }, [load, t]);
+  useEffect(() => {
+    void initialLoad();
+  }, [initialLoad]);
   const action = async (name: "validate" | "activate" | "pause" | "trigger") => {
     if (!pack) return;
     if (name === "trigger" && (capabilityLoading || !runAdmissionAvailable)) {
@@ -106,10 +116,19 @@ export function PatrolPackPageClient({ id }: { id: string }) {
   if (!pack)
     return (
       <ScrollablePageContent>
-        <div className="grid gap-3">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-64" />
-        </div>
+        <AsyncBoundary
+          loading={!loadError}
+          error={loadError}
+          onRetry={() => void initialLoad()}
+          loadingFallback={
+            <div className="grid gap-3">
+              <Skeleton className="h-24" />
+              <Skeleton className="h-64" />
+            </div>
+          }
+        >
+          {null}
+        </AsyncBoundary>
       </ScrollablePageContent>
     );
   return (
@@ -126,6 +145,12 @@ export function PatrolPackPageClient({ id }: { id: string }) {
           actions={
             !readOnly && (
               <>
+                <Button variant="outline" disabled={Boolean(busy)} asChild>
+                  <Link href={`/patrols/${pack.id}/edit`}>
+                    <Pencil className="size-4" />
+                    {tCommon("edit")}
+                  </Link>
+                </Button>
                 <Button
                   variant="outline"
                   disabled={Boolean(busy)}
@@ -218,7 +243,9 @@ export function PatrolPackPageClient({ id }: { id: string }) {
               </p>
               <p>
                 {t("pack.nextRun")}:{" "}
-                {pack.next_run_at ? new Date(pack.next_run_at).toLocaleString(toBcp47(locale)) : t("scheduleOff")}
+                {pack.next_run_at
+                  ? new Date(pack.next_run_at).toLocaleString(toBcp47(locale))
+                  : t("scheduleOff")}
               </p>
               <p>
                 {t("labels.collector")}: {pack.mcp_server_id}

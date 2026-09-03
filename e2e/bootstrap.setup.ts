@@ -107,6 +107,10 @@ test("bootstrap deterministic inference through the public control plane", async
               ...traffic,
               rate_limit_enabled: true,
               requests_per_minute: 100_000,
+              // The auth bucket is tighter than the general one (default
+              // 10/min per IP); parallel workers all share one client IP, so
+              // logins throttle to 429 without this.
+              auth_requests_per_minute: 100_000,
             },
           },
           note: "Acceptance bootstrap: deterministic request budget",

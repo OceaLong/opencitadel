@@ -11,7 +11,6 @@ from app.application.services.agent_service import AgentService
 from app.application.services.audit_service import AuditService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
-from app.application.services.quota_service import QuotaService
 from app.application.services.runtime_policy_reader import RuntimePolicyReader
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
@@ -47,7 +46,6 @@ from app.interfaces.service_dependencies import (
     get_audit_service,
     get_inference_model_service,
     get_llm_token_usage_service,
-    get_quota_service,
     get_runtime_policy_reader,
     get_session_list_stream_factory,
     get_session_service,
@@ -70,12 +68,11 @@ async def create_session(
     ctx: WorkspaceContext = Depends(get_workspace_context),
     _write_guard: Principal = Depends(require_non_auditor),
     session_service: SessionService = Depends(get_session_service),
-    quota_service: QuotaService = Depends(get_quota_service),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[CreateSessionResponse]:
     """创建一个空白的新任务会话"""
-    # 会话准入：日会话数 + 月 Token + 并发任务数（个人配额；team scope 时同时校验团队配额）。
-    await quota_service.check_session_quota(ctx.principal.user_id, scope=ctx.scope)
+    # 会话准入（日会话数 + 月 Token + 并发数）由 SessionService.create_session
+    # 统一执行，所有建会话路径同受配额约束。
     session = await session_service.create_session(
         title=request.title or "新对话",
         model_id=request.model_id,

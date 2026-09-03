@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   AlertCircle,
@@ -94,18 +94,22 @@ export function PatrolRunDetailView({
       setLifecycle(null);
     }
   };
-  const loadRemediations = async () => {
+  const loadRemediations = useCallback(async () => {
     try {
       const list = await patrolsApi.listRemediations(run.id);
       setRemediations(list.items);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("remediation.errors.listLoad"));
     }
-  };
+  }, [run.id, t]);
+  // remediation 列表跟随 run 的轮询节奏刷新：run 处于进行中时每 3s 拉一次，
+  // 状态流转（如 running -> completed）时也会随 run.status 变化重新拉取。
   useEffect(() => {
     void loadRemediations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.id]);
+    if (!["queued", "running"].includes(run.status)) return;
+    const timer = window.setInterval(() => void loadRemediations(), 3000);
+    return () => window.clearInterval(timer);
+  }, [run.status, loadRemediations]);
   const download = async () => {
     try {
       const blob = await patrolsApi.downloadEvidence(run.id);

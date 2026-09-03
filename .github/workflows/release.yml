@@ -12,6 +12,25 @@ env:
   IMAGE_PREFIX: ghcr.io/ocealong/opencitadel
 
 jobs:
+  chart-version-guard:
+    # helm 默认 image tag 为空时回退 Chart.appVersion；appVersion 不随 tag 更新
+    # 会让默认安装拉到旧镜像，这里在发布时强制两者一致。
+    name: Chart appVersion matches release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify appVersion == tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app_version="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' deploy/helm/opencitadel/Chart.yaml)"
+          if [ "$app_version" != "$tag" ]; then
+            echo "Chart appVersion ($app_version) != release tag ($tag)." >&2
+            echo "Bump appVersion in deploy/helm/opencitadel/Chart.yaml before tagging." >&2
+            exit 1
+          fi
+
   build-scan:
     name: Build and scan ${{ matrix.name }}
     runs-on: ubuntu-latest

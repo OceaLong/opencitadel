@@ -26,7 +26,7 @@ class ToolRegistry:
         *,
         sandbox: Sandbox,
         browser: Browser,
-        search_engine: SearchEngine,
+        search_engine: SearchEngine | None,
         llm: LLM,
         mcp_tool: MCPTool,
         a2a_tool: A2ATool,
@@ -37,10 +37,12 @@ class ToolRegistry:
             FileTool(sandbox=sandbox),
             ShellTool(sandbox=sandbox),
             BrowserTool(browser=browser),
-            SearchTool(search_engine=search_engine),
             mcp_tool,
             a2a_tool,
         ]
+        # SEARCH_PROVIDER=none 时不注册搜索工具：显式缺席优于静默空结果。
+        if search_engine is not None:
+            tools.insert(3, SearchTool(search_engine=search_engine))
         if vision_service.vision_enabled(llm):
             tools.extend(
                 [

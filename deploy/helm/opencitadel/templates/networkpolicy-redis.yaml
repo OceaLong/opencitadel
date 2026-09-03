@@ -6,13 +6,15 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/component: redis
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "redis") | nindent 6 }}
   policyTypes: [Ingress]
   # 仅允许 api / execution-kernel 访问 6379。ops-collector 为只读巡检组件，
   # 其 egress 含 6379，启用时一并放行。
   ingress:
     - from:
         - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In

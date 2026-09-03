@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
+import { AsyncBoundary } from "@/components/async-boundary";
 import { MarkdownContent } from "@/components/markdown-content";
 import { Button } from "@/components/ui/button";
 
@@ -57,39 +58,33 @@ export function ShareArtifactPageClient({ token }: { token: string }) {
         <span className="text-muted-foreground text-sm">{t("title")}</span>
       </header>
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col p-6">
-        {loading ? (
-          <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2">
-            <Loader2 className="size-5 animate-spin" />
-            {tCommon("loading")}
-          </div>
-        ) : error ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4">
-            <p className="text-muted-foreground text-sm">{error}</p>
+        <AsyncBoundary
+          loading={loading}
+          error={error}
+          errorAction={
             <Button asChild variant="outline">
               <Link href="/">{tCommon("backHome")}</Link>
             </Button>
-          </div>
-        ) : (
-          <>
-            {contentIncomplete && (
-              <div className="border-warning-subtle bg-warning-subtle text-warning mb-4 rounded-xl border px-4 py-2 text-sm">
-                {t("incompleteContentWarning")}
-              </div>
-            )}
-            {isHtml ? (
-              <iframe
-                title={t("artifactTitle")}
-                srcDoc={content}
-                className="bg-background shadow-panel h-[calc(100vh-120px)] w-full rounded-xl border"
-                sandbox="allow-scripts"
-              />
-            ) : (
-              <div className="bg-card border-border/70 shadow-panel rounded-xl border p-6">
-                <MarkdownContent content={content} />
-              </div>
-            )}
-          </>
-        )}
+          }
+        >
+          {contentIncomplete && (
+            <div className="border-warning-subtle bg-warning-subtle text-warning mb-4 rounded-xl border px-4 py-2 text-sm">
+              {t("incompleteContentWarning")}
+            </div>
+          )}
+          {isHtml ? (
+            <iframe
+              title={t("artifactTitle")}
+              srcDoc={content}
+              className="bg-background shadow-panel h-[calc(100vh-120px)] w-full rounded-xl border"
+              sandbox="allow-scripts"
+            />
+          ) : (
+            <div className="bg-card border-border/70 shadow-panel rounded-xl border p-6">
+              <MarkdownContent content={content} />
+            </div>
+          )}
+        </AsyncBoundary>
       </main>
     </div>
   );

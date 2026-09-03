@@ -635,7 +635,10 @@ services:
       - ./nginx/templates:/etc/nginx/templates-src:ro
       - ./nginx/generate-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
       - nginx_conf:/etc/nginx/conf.d
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # HTTPS 证书目录。默认指向仓库内空目录，避免 docker 在未装 certbot 的
+      # 机器上以 root 创建 /etc/letsencrypt；启用 HTTPS 时在 .env 设
+      # LETSENCRYPT_DIR=/etc/letsencrypt。
+      - ${LETSENCRYPT_DIR:-./nginx/letsencrypt}:/etc/letsencrypt:ro
     depends_on:
       opencitadel-ui:
         condition: service_healthy

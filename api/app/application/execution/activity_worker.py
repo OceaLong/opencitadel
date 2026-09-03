@@ -36,11 +36,8 @@ _tracer = get_tracer("opencitadel.execution.activity")
 # mark-call-started, outcome submit, heartbeats), so unbounded ``gather`` over a
 # 100-row batch stampedes the connection pool (pool_size + overflow == 10 by
 # default) and creates a deadlock vector. Callers should pass
-# ``settings.execution_activity_max_concurrency`` (kept <= pool capacity).
-# TODO(P1-3 wiring): thread ``settings.execution_activity_max_concurrency`` from
-# ``build_execution_kernel_runtime`` (app/infrastructure/adapters/execution_ports.py,
-# out of this change's scope) into ``ActivityWorker(max_concurrency=...)`` so the
-# ceiling is deployment-configurable instead of relying on this default.
+# ``settings.execution_activity_max_concurrency`` (kept <= pool capacity), as
+# ``build_execution_kernel_runtime`` does.
 DEFAULT_ACTIVITY_MAX_CONCURRENCY = 8
 
 

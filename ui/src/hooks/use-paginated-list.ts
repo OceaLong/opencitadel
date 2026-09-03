@@ -1,6 +1,8 @@
 "use client";
 
 import { type Dispatch, type SetStateAction, useCallback, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 /** 管理后台分页列表默认每页条数。 */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -25,6 +27,8 @@ export interface UsePaginatedListResult<T> {
   total: number;
   offset: number;
   loading: boolean;
+  /** 最近一次加载抛错时的错误文案；加载成功或进行中为 null。 */
+  error: string | null;
   pageSize: number;
   totalPages: number;
   currentPage: number;
@@ -42,6 +46,9 @@ export interface UsePaginatedListResult<T> {
  *
  * fetcher 通过 ref 读取最新引用，因此 `load` 的 identity 保持稳定；
  * 需要在筛选条件变化时自动重载的调用方，把 fetcher 放进 effect 依赖即可。
+ *
+ * fetcher 抛出的异常由 hook 兜底：toast 提示并暴露 `error`，列表状态保持不变；
+ * fetcher 返回 `null` 仍视为“已自行处理的失败”，不会触发 hook 的错误提示。
  */
 export function usePaginatedList<T>(
   fetcher: PaginatedFetcher<T>,
@@ -52,13 +59,19 @@ export function usePaginatedList<T>(
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const tCommon = useTranslations("common");
 
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  // 与 fetcherRef 同理：通过 ref 读取最新翻译函数，保持 `load` identity 稳定。
+  const tCommonRef = useRef(tCommon);
+  tCommonRef.current = tCommon;
 
   const load = useCallback(
     async (nextOffset = 0) => {
       setLoading(true);
+      setError(null);
       try {
         const data = await fetcherRef.current({ limit: pageSize, offset: nextOffset });
         if (data) {
@@ -66,6 +79,10 @@ export function usePaginatedList<T>(
           setTotal(data.total);
           setOffset(nextOffset);
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : tCommonRef.current("loadFailed");
+        setError(message);
+        toast.error(message);
       } finally {
         setLoading(false);
       }
@@ -77,7 +94,10 @@ export function usePaginatedList<T>(
   const currentPage = Math.floor(offset / pageSize) + 1;
 
   const nextPage = useCallback(() => load(offset + pageSize), [load, offset, pageSize]);
-  const prevPage = useCallback(() => load(Math.max(0, offset - pageSize)), [load, offset, pageSize]);
+  const prevPage = useCallback(
+    () => load(Math.max(0, offset - pageSize)),
+    [load, offset, pageSize],
+  );
 
   return {
     items,
@@ -85,6 +105,7 @@ export function usePaginatedList<T>(
     total,
     offset,
     loading,
+    error,
     pageSize,
     totalPages,
     currentPage,

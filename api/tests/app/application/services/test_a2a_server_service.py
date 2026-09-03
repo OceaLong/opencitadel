@@ -32,15 +32,33 @@ def test_build_a2a_text_response():
     response = build_a2a_text_response("req-1", "done")
     assert response["id"] == "req-1"
     assert response["result"]["message"]["parts"][0]["text"] == "done"
+    assert "taskId" not in response["result"]["message"]
+
+
+def test_build_a2a_text_response_carries_task_identity():
+    """Without taskId/contextId in the reply, tasks/get + multi-turn are unreachable."""
+    response = build_a2a_text_response("req-1", "done", task_id="session-1")
+    message = response["result"]["message"]
+    assert message["taskId"] == "session-1"
+    assert message["contextId"] == "session-1"
+    assert message["kind"] == "message"
 
 
 class _FakeSessionService:
-    def __init__(self):
+    def __init__(self, existing=None):
         self.scope = None
+        self.create_calls = 0
+        self._existing = existing
 
     async def create_session(self, title: str, scope=None, **_kwargs):
         self.scope = scope
+        self.create_calls += 1
         return Session(id="session-1", title=title, owner_user_id=scope.user_id if scope else None)
+
+    async def get_session(self, session_id: str, scope=None):
+        if self._existing is not None and self._existing.id == session_id:
+            return self._existing
+        return None
 
 
 class _FakeAgentService:
@@ -97,6 +115,66 @@ async def test_a2a_message_send_creates_owned_session():
     assert session_service.scope is not None
     assert session_service.scope.user_id == "owner-1"
     assert session_service.scope.team_id is None
+    # The reply must hand the caller the task identity for get/cancel/multi-turn.
+    assert response["result"]["message"]["taskId"] == "session-1"
+    assert response["result"]["message"]["contextId"] == "session-1"
+
+
+def _send_service(session_service):
+    return A2AServerService(
+        agent_service=_FakeAgentService(),
+        session_service=session_service,
+        skill_service=_FakeSkillService(),
+        inference_model_service=_FakeModelService(),
+        policy_heads=_PolicyHeads(),
+        breaker=FakeCircuitBreaker(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a2a_message_send_reuses_session_for_context_id():
+    existing = Session(id="session-1", title="A2A Request", owner_user_id="owner-1")
+    session_service = _FakeSessionService(existing=existing)
+    service = _send_service(session_service)
+
+    response = await service.handle_message_send(
+        {
+            "id": "req-2",
+            "params": {
+                "message": {
+                    "contextId": "session-1",
+                    "parts": [{"kind": "text", "text": "follow-up"}],
+                },
+            },
+        },
+        principal=Principal(user_id="owner-1", global_role=GlobalRole.USER),
+    )
+
+    assert session_service.create_calls == 0
+    assert response["result"]["message"]["taskId"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_a2a_message_send_unknown_context_id_is_task_not_found():
+    session_service = _FakeSessionService(existing=None)
+    service = _send_service(session_service)
+
+    response = await service.handle_message_send(
+        {
+            "id": "req-3",
+            "params": {
+                "message": {
+                    "contextId": "missing",
+                    "parts": [{"kind": "text", "text": "follow-up"}],
+                },
+            },
+        },
+        principal=Principal(user_id="owner-1", global_role=GlobalRole.USER),
+    )
+
+    assert session_service.create_calls == 0
+    assert response["error"]["code"] == -32001
+    assert response["id"] == "req-3"
 
 
 class _LookupSessionService:
@@ -228,12 +306,14 @@ async def test_tasks_get_missing_params_id_returns_invalid_params():
 
 
 @pytest.mark.asyncio
-async def test_tasks_cancel_triggers_stop_and_returns_canceled():
-    session = SimpleNamespace(id="session-1", active_execution_run_id=uuid4())
+async def test_tasks_cancel_reports_canceled_only_when_run_is_cancelled():
+    run_id = uuid4()
+    session = SimpleNamespace(id="session-1", active_execution_run_id=run_id)
     agent = _CancelAgentService()
     service = _task_service(
         session_service=_LookupSessionService(session),
         agent_service=agent,
+        run_projection=_FakeRunProjection(run_id=run_id, status=RunStatus.CANCELLED),
     )
 
     response = await service.handle_task_cancel(
@@ -244,6 +324,27 @@ async def test_tasks_cancel_triggers_stop_and_returns_canceled():
     assert agent.stop_calls
     assert agent.stop_calls[0][0] == "session-1"
     assert response["result"]["status"]["state"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_tasks_cancel_reports_observed_state_while_cancellation_is_in_flight():
+    """CancelRun travels through the kernel; the response must not fake 'canceled'."""
+    run_id = uuid4()
+    session = SimpleNamespace(id="session-1", active_execution_run_id=run_id)
+    agent = _CancelAgentService()
+    service = _task_service(
+        session_service=_LookupSessionService(session),
+        agent_service=agent,
+        run_projection=_FakeRunProjection(run_id=run_id, status=RunStatus.RUNNING),
+    )
+
+    response = await service.handle_task_cancel(
+        {"id": "req-9", "params": {"id": "session-1"}},
+        principal=_PRINCIPAL,
+    )
+
+    assert agent.stop_calls
+    assert response["result"]["status"]["state"] == "working"
 
 
 @pytest.mark.asyncio

@@ -281,7 +281,9 @@ def test_deployment_settings_read_the_shared_shutdown_timeout(monkeypatch) -> No
 def test_deployment_settings_own_observability_bootstrap() -> None:
     settings = deployment_config.DeploymentSettings()
 
-    assert settings.cors_origins == "*"
+    # Empty by default: with allow_credentials the wildcard is folded to "no
+    # cross-origin allowed" anyway, so the default now states that directly.
+    assert settings.cors_origins == ""
     assert settings.otel_enabled is False
     assert settings.otel_service_name == "opencitadel-api"
     assert settings.otel_exporter_endpoint == ""

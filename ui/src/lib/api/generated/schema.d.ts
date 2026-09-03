@@ -2026,6 +2026,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/service-keys/{key_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Service Key */
+        post: operations["rotate_service_key_api_service_keys__key_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions": {
         parameters: {
             query?: never;
@@ -4771,6 +4788,39 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** NotifyChannel */
+        NotifyChannel: {
+            /**
+             * Address
+             * @default
+             */
+            address: string;
+            /**
+             * Channel Arg
+             * @default
+             */
+            channel_arg: string;
+            /**
+             * Secret
+             * @default
+             */
+            secret: string;
+            /**
+             * Server Id
+             * @default
+             */
+            server_id: string;
+            /**
+             * Type
+             * @default mcp
+             */
+            type: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+        };
         /** NotifyChannelRequest */
         NotifyChannelRequest: {
             /**
@@ -5016,6 +5066,8 @@ export interface components {
             /** Checks */
             checks: components["schemas"]["PatrolCheck"][];
             defaults?: components["schemas"]["PatrolDefaults"];
+            /** Notify Channels */
+            notify_channels?: components["schemas"]["NotifyChannel"][];
             schedule?: components["schemas"]["PatrolSchedule"];
             /**
              * Schema Version
@@ -13679,6 +13731,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_Union_dict__NoneType__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_service_key_api_service_keys__key_id__rotate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_CreatedServiceApiKeyResponse_"];
                 };
             };
             /** @description Validation Error */

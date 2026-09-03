@@ -240,10 +240,15 @@ jobs:
           --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
           --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
           --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
+          --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee
+          --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff
           --set secrets.bootstrapAdminPassword=ci-admin-password-strong
           --set secrets.postgresAdminPassword=ci-postgres-admin-password
+          --set secrets.postgresMigrationPassword=ci-postgres-migration-pw
           --set secrets.postgresPassword=ci-postgres-password-strong
+          --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw
           --set secrets.redisPassword=ci-redis-password-strong
+          --set secrets.minioRootPassword=ci-minio-root-password-strong
       - name: Render Helm manifests
         run: >-
           helm template opencitadel deploy/helm/opencitadel
@@ -251,15 +256,26 @@ jobs:
           --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
           --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
           --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
+          --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee
+          --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff
           --set secrets.bootstrapAdminPassword=ci-admin-password-strong
           --set secrets.postgresAdminPassword=ci-postgres-admin-password
+          --set secrets.postgresMigrationPassword=ci-postgres-migration-pw
           --set secrets.postgresPassword=ci-postgres-password-strong
+          --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw
           --set secrets.redisPassword=ci-redis-password-strong
+          --set secrets.minioRootPassword=ci-minio-root-password-strong
           > /dev/null
       - name: Render least-privilege Ops Collector manifests
         run: |
           helm template opencitadel deploy/helm/opencitadel \
             --set opsCollector.enabled=true \
+            --set opsCollector.token=ci-ops-collector-token-gggggggggggggggg \
+            --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee \
+            --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff \
+            --set secrets.postgresMigrationPassword=ci-postgres-migration-pw \
+            --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw \
+            --set secrets.minioRootPassword=ci-minio-root-password-strong \
             --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
             --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
             --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \
@@ -273,6 +289,12 @@ jobs:
         run: |
           helm template opencitadel deploy/helm/opencitadel \
             --set opsActuator.enabled=true \
+            --set opsActuator.token=ci-ops-actuator-token-hhhhhhhhhhhhhhhhhh \
+            --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee \
+            --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff \
+            --set secrets.postgresMigrationPassword=ci-postgres-migration-pw \
+            --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw \
+            --set secrets.minioRootPassword=ci-minio-root-password-strong \
             --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
             --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
             --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \

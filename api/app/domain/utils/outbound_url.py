@@ -40,6 +40,13 @@ _OPERATOR_ALLOWABLE_PRIVATE_NETWORKS = tuple(
         "10.0.0.0/8",
         "172.16.0.0/12",
         "192.168.0.0/16",
+        # RFC 2544 benchmarking space: newer Docker Desktop allocates container
+        # networks from it, so an explicitly allowlisted internal hostname may
+        # resolve here. It carries no metadata/loopback/link-local semantics
+        # and is not routable on the public internet, so it sits at the same
+        # trust level as the RFC1918 entries — reachable only via the explicit
+        # private-host allowlist, never by default.
+        "198.18.0.0/15",
         "fc00::/7",
     )
 )

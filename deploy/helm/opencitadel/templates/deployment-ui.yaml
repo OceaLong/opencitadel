@@ -9,11 +9,11 @@ spec:
   replicas: {{ .Values.replicaCount.ui }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: ui
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ui") | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/component: ui
+        {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "ui") | nindent 8 }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ui
-          image: "{{ .Values.image.ui.repository }}:{{ .Values.image.ui.tag }}"
+          image: {{ include "opencitadel.image" (dict "root" $ "image" .Values.image.ui) | quote }}
           imagePullPolicy: {{ .Values.image.ui.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -31,6 +31,24 @@ spec:
               drop: ["ALL"]
           ports:
             - containerPort: 3000
+          # 对照 docker-compose.yml opencitadel-ui 的 healthcheck
+          # （GET /healthz，interval 15s / timeout 5s / retries 5 / start 30s）。
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             {{- toYaml .Values.resources.ui | nindent 12 }}
           volumeMounts:

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Download, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
 import { EmptyState } from "@/components/empty-state";
@@ -23,6 +24,7 @@ import { useCapabilities } from "@/hooks/use-capabilities";
 import { type AdminTimeRange, getAdminDateRange } from "@/lib/admin-utils";
 import { isCapabilityAvailable } from "@/lib/api/capabilities";
 import { complianceApi, type ComplianceReport } from "@/lib/api/compliance";
+import { saveBlob } from "@/lib/download";
 
 import { controlStatusVariant } from "./compliance-status";
 
@@ -39,6 +41,26 @@ export default function AdminComplianceReportPage() {
   const [framework, setFramework] = useState<string>("all");
   const [report, setReport] = useState<ComplianceReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<"md" | "pdf" | null>(null);
+
+  // <a href> 直连改为 authenticatedFetch + Blob：403/500 走 toast，而不是浏览器跳 JSON 错误页。
+  const exportReport = async (format: "md" | "pdf") => {
+    setExporting(format);
+    try {
+      const dateParams = getAdminDateRange(range);
+      const blob = await complianceApi.downloadComplianceReport({
+        framework: framework === "all" ? undefined : framework,
+        start: dateParams.start_at,
+        end: dateParams.end_at,
+        format,
+      });
+      saveBlob(blob, `compliance-report.${format}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("exportFailed"));
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const generate = async () => {
     setLoading(true);
@@ -50,12 +72,12 @@ export default function AdminComplianceReportPage() {
         end: dateParams.end_at,
       });
       setReport(res.report);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("generateReportFailed"));
     } finally {
       setLoading(false);
     }
   };
-
-  const dateParams = getAdminDateRange(range);
 
   return (
     <div className="space-y-6">
@@ -78,31 +100,26 @@ export default function AdminComplianceReportPage() {
             {loading && <Loader2 className="mr-1 size-4 animate-spin" />}
             {t("generateReport")}
           </Button>
-          <Button variant="outline" asChild>
-            <a
-              href={complianceApi.complianceReportUrl({
-                framework: framework === "all" ? undefined : framework,
-                start: dateParams.start_at,
-                end: dateParams.end_at,
-                format: "md",
-              })}
-            >
-              {t("exportMd")}
-            </a>
+          <Button
+            variant="outline"
+            disabled={exporting !== null}
+            onClick={() => void exportReport("md")}
+          >
+            {exporting === "md" && <Loader2 className="mr-1 size-4 animate-spin" />}
+            {t("exportMd")}
           </Button>
           {pdfAvailable ? (
-            <Button variant="outline" asChild>
-              <a
-                href={complianceApi.complianceReportUrl({
-                  framework: framework === "all" ? undefined : framework,
-                  start: dateParams.start_at,
-                  end: dateParams.end_at,
-                  format: "pdf",
-                })}
-              >
+            <Button
+              variant="outline"
+              disabled={exporting !== null}
+              onClick={() => void exportReport("pdf")}
+            >
+              {exporting === "pdf" ? (
+                <Loader2 className="mr-1 size-4 animate-spin" />
+              ) : (
                 <Download className="mr-1 size-4" />
-                {t("exportPdf")}
-              </a>
+              )}
+              {t("exportPdf")}
             </Button>
           ) : (
             <Tooltip>

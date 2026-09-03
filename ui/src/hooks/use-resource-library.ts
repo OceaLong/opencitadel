@@ -5,6 +5,11 @@ import { toast } from "sonner";
 
 import type { SSEEventData, SSEEventHandler } from "@/lib/api/types";
 
+// Minimum wait before reopening an ingest stream that ended while its item
+// still looks non-terminal. Keeps a stale/stuck "building" row at a few
+// requests per minute instead of a reconnect storm.
+const INGEST_STREAM_RETRY_COOLDOWN_MS = 15_000;
+
 /** The `"error"` branch of the SSE event union, narrowed for message formatting. */
 type IngestStreamErrorEvent = Extract<SSEEventData, { type: "error" }>;
 
@@ -95,6 +100,13 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
   const [startingId, setStartingId] = useState<string | null>(null);
   const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
+  // Per-resource cooldown for re-opening the ingest stream. A stream that
+  // errors or closes while the item still looks non-terminal (stale status,
+  // transient 429/网络抖动) must NOT be reopened immediately: the caller's
+  // watch effect re-runs on every list update, so without a cooldown one
+  // failure escalates into a zero-backoff reconnect storm that trips the
+  // per-IP rate limit and takes the whole app down with 429s.
+  const ingestRetryAtRef = useRef<Map<string, number>>(new Map());
 
   // Callers commonly pass `onReset`/`onLoaded` as inline arrows (see
   // `knowledge-library.tsx`), which change identity every render. Holding them
@@ -103,10 +115,15 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   // which would otherwise loop: load -> setItems -> render -> new callbacks ->
   // new `load` -> effect -> load. Mirrors `use-session-streams.ts`'s
   // `dependenciesRef` pattern.
-  const latestCallbacksRef = useRef({ onReset, onLoaded });
+  const latestCallbacksRef = useRef({
+    onReset,
+    onLoaded,
+    formatIngestError,
+    onStreamConnectError,
+  });
   useEffect(() => {
-    latestCallbacksRef.current = { onReset, onLoaded };
-  }, [onReset, onLoaded]);
+    latestCallbacksRef.current = { onReset, onLoaded, formatIngestError, onStreamConnectError };
+  }, [onReset, onLoaded, formatIngestError, onStreamConnectError]);
 
   const load = useCallback(async () => {
     if (!enabled) {
@@ -160,8 +177,18 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   const watchIngest = useCallback(
     (id: string) => {
       if (ingestCleanupRef.current.has(id)) return;
+      const retryAt = ingestRetryAtRef.current.get(id);
+      if (retryAt !== undefined && Date.now() < retryAt) return;
       setIngestingIds((prev) => new Set(prev).add(id));
+      // Any stream termination arms the cooldown: if the item turns terminal
+      // on the follow-up load() the cooldown is moot, and if it stays
+      // non-terminal (stale/stuck build) the next reopen waits instead of
+      // hammering the endpoint.
+      const armCooldown = () => {
+        ingestRetryAtRef.current.set(id, Date.now() + INGEST_STREAM_RETRY_COOLDOWN_MS);
+      };
       const finish = () => {
+        armCooldown();
         setIngestingIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
@@ -174,7 +201,7 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
         id,
         (ev) => {
           if (ev.type === "error") {
-            toast.error(formatIngestError(ev));
+            toast.error(latestCallbacksRef.current.formatIngestError(ev));
             finish();
             return;
           }
@@ -183,7 +210,8 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
           }
         },
         () => {
-          onStreamConnectError?.();
+          armCooldown();
+          latestCallbacksRef.current.onStreamConnectError?.();
           setIngestingIds((prev) => {
             const next = new Set(prev);
             next.delete(id);
@@ -196,7 +224,7 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
       );
       ingestCleanupRef.current.set(id, cleanup);
     },
-    [api, load, formatIngestError, onStreamConnectError],
+    [api, load],
   );
 
   const remove = useCallback(

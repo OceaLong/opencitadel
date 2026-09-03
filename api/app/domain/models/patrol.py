@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.models.scheduled_job import NotifyChannel
+
 # Pydantic's recursive JSON alias can exceed schema recursion limits when reused
 # throughout nested Pack models. JSON-serializability is enforced at API/storage
 # boundaries; the domain keeps values opaque for deterministic comparisons.
@@ -244,6 +246,9 @@ class PatrolPackConfig(BaseModel):
     scope: PatrolScope
     defaults: PatrolDefaults = Field(default_factory=PatrolDefaults)
     checks: list[PatrolCheck] = Field(min_length=1, max_length=100)
+    # 巡检完成后的外部通知渠道，复用定时任务的通道定义（mcp/webhook/email）；
+    # 空列表 = 仅站内通知。
+    notify_channels: list[NotifyChannel] = Field(default_factory=list, max_length=10)
 
     @field_validator("timezone")
     @classmethod

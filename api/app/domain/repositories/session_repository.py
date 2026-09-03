@@ -79,6 +79,10 @@ class SessionRepository(Protocol):
         """回收站：仅返回已软删（``deleted_at`` 非空）的会话，owner 作用域内。"""
         ...
 
+    async def list_deleted_before(self, cutoff: datetime, *, limit: int = 100) -> list[str]:
+        """保留期清理：跨作用域返回 ``deleted_at`` 早于 cutoff 的会话 id（需系统授权）。"""
+        ...
+
     async def soft_delete(self, session_id: str, scope: OwnerScope | None = None) -> bool:
         """软删除：设置 ``deleted_at``。仅命中未删除的行；返回是否命中。"""
         ...

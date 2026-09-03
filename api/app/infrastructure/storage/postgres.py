@@ -64,7 +64,9 @@ class Postgres:
                 autoflush=False,
                 bind=self._engine,
                 info={
-                    "database_authorization_signing_secret": self._settings.session_secret,
+                    "database_authorization_signing_secret": (
+                        self._settings.database_authorization_signing_secret
+                    ),
                 },
             )
             logger.info("Postgres会话工厂创建完毕")

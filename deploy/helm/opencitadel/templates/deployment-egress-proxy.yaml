@@ -9,13 +9,13 @@ spec:
   replicas: {{ .Values.egressProxy.replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: egress-proxy
+      {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "egress-proxy") | nindent 6 }}
   template:
     metadata:
       labels:
         # MUST stay in sync with networkpolicy-sandbox.yaml, which只允许沙箱
         # egress 到带此 label 的 Pod:3128。改这里必须同步改 networkpolicy。
-        app.kubernetes.io/component: egress-proxy
+        {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "egress-proxy") | nindent 8 }}
       annotations:
         # Roll the pods when the proxy policy changes.
         checksum/config: {{ .Files.Get "files/squid/squid.conf" | sha256sum }}

@@ -28,6 +28,9 @@ from app.application.services.patrol_collector_validator import (
     MCPPatrolCollectorValidator,
 )
 from app.application.services.patrol_retention_service import PatrolRetentionService
+from app.application.services.recycle_bin_retention_service import (
+    RecycleBinRetentionService,
+)
 from app.application.services.resource_version_gc_service import ResourceVersionGCService
 from app.composition.resources import (
     DEFAULT_RESOURCE_FACTORIES,
@@ -171,6 +174,14 @@ async def open_kernel_runtime(
             redis = resources.general_redis
             leases = RedisLeaseManager(redis)
             activity_registry = _build_activity_registry(shared)
+
+            async def _approval_ttl_minutes(now):
+                active = await shared.runtime_policy_reader.active_operations(
+                    require_fresh=False,
+                    now=now,
+                )
+                return active.revision.policy.approval.ttl_minutes
+
             execution = build_execution_kernel_runtime(
                 session_factory=resources.postgres.session_factory,
                 redis=redis,
@@ -178,6 +189,7 @@ async def open_kernel_runtime(
                 activity_registry=activity_registry,
                 worker_id=_worker_id("activities"),
                 activity_max_concurrency=settings.execution_activity_max_concurrency,
+                approval_ttl_minutes=_approval_ttl_minutes,
             )
             resource_gc = ResourceVersionGCService(
                 uow_factory=shared.uow_factory,
@@ -186,6 +198,12 @@ async def open_kernel_runtime(
             patrol_retention = PatrolRetentionService(
                 SqlAlchemyPatrolRetentionStore(resources.postgres.session_factory),
                 policy_reader=shared.runtime_policy_reader,
+            )
+            recycle_bin_retention = RecycleBinRetentionService(
+                uow_factory=shared.uow_factory,
+                retention_days=settings.recycle_bin_retention_days,
+                batch_size=settings.recycle_bin_purge_batch_size,
+                audit_service=shared.audit_service,
             )
             sandbox_maintenance = SandboxMaintenance(
                 factory=shared.sandbox_factory,
@@ -236,6 +254,7 @@ async def open_kernel_runtime(
                     stop_event=supervisor.stop_event,
                     resource_version_gc_service=resource_gc,
                     patrol_retention_service=patrol_retention,
+                    recycle_bin_retention_service=recycle_bin_retention,
                     mcp_pool=shared.mcp_connection_pool,
                     a2a_pool=shared.a2a_connection_pool,
                 ),
