@@ -1,32 +1,40 @@
-from unittest.mock import MagicMock
+"""Tool assembly is spec-table driven; mode exposure comes from ToolSpec (D10)."""
 
-from app.domain.services.tools.a2a import A2ATool
-from app.domain.services.tools.base import BaseTool
-from app.domain.services.tools.mcp import MCPTool
+from app.application.execution.agent_tool_catalog import _TOOL_ASSEMBLY
+from app.domain.models.session_mode import SessionMode
 from app.domain.services.tools.tool_registry import ToolRegistry
 
 
-class _DummyExtraTool(BaseTool):
-    name: str = "dummy"
+def _pack_names_for(mode: SessionMode) -> set[str]:
+    return {assembly.spec.name for assembly in _TOOL_ASSEMBLY if mode in assembly.spec.modes}
 
 
-def test_build_ask_tools_excludes_shell_file_browser():
-    mcp_tool = MagicMock(spec=MCPTool)
-    mcp_tool.name = "mcp"
-    a2a_tool = MagicMock(spec=A2ATool)
-    a2a_tool.name = "a2a"
-    extra = _DummyExtraTool()
+def test_ask_mode_spec_excludes_shell_file_browser():
+    names = _pack_names_for(SessionMode.ASK)
 
-    tools = ToolRegistry.build_ask_tools(
-        mcp_tool=mcp_tool,
-        a2a_tool=a2a_tool,
-        extra_tools=[extra],
-    )
+    assert "file" not in names
+    assert "shell" not in names
+    assert "browser" not in names
+    assert {"mcp", "a2a", "knowledge_base"} <= names
 
-    tool_names = {tool.name for tool in tools if isinstance(tool, BaseTool)}
-    assert "file" not in tool_names
-    assert "shell" not in tool_names
-    assert "browser" not in tool_names
-    assert "mcp" in tool_names
-    assert "a2a" in tool_names
-    assert "dummy" in tool_names
+
+def test_agent_mode_spec_includes_execution_and_vision_packs():
+    names = _pack_names_for(SessionMode.AGENT)
+
+    assert {"file", "shell", "browser", "search", "vision", "memory", "artifact"} <= names
+
+
+def test_dual_manifest_builders_are_gone():
+    # build_default_tools/build_ask_tools 双清单已删除：唯一装配点是 spec 表。
+    assert not hasattr(ToolRegistry, "build_default_tools")
+    assert not hasattr(ToolRegistry, "build_ask_tools")
+
+
+def test_retrieval_marker_is_declared_on_knowledge_base_spec():
+    retrieval = {
+        assembly.spec.name: assembly.spec.retrieval_tool
+        for assembly in _TOOL_ASSEMBLY
+        if assembly.spec.retrieval_tool is not None
+    }
+
+    assert retrieval == {"knowledge_base": "kb_search"}

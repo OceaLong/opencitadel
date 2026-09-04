@@ -87,8 +87,10 @@ async def update_skill(
         raise ForbiddenError("全局 Skill 仅管理员可修改")
     data = existing.model_dump()
     for k, v in request.model_dump(exclude_unset=True).items():
-        if v is not None:
-            data[k] = v
+        # allowed_tools 的 None 是显式语义（不限制工具，D11），必须允许写回。
+        if v is None and k != "allowed_tools":
+            continue
+        data[k] = v
     updated = Skill(**data)
     result = await skill_service.update_skill(
         skill_id,

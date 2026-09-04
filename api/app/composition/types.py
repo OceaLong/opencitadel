@@ -8,14 +8,15 @@ from typing import TYPE_CHECKING
 from redis.asyncio import Redis
 
 from app.application.ports.coordination import RedisConnectivity
-from app.infrastructure.storage.cos import Cos
-from app.infrastructure.storage.minio import Minio
-from app.infrastructure.storage.postgres import Postgres
-from app.infrastructure.storage.redis import RedisClient
 from app.runtime_role import ProcessRole
 from core.config import DeploymentSettings
 
 if TYPE_CHECKING:
+    # Concrete resource types are annotation-only on purpose: these bundles are
+    # imported by interfaces modules, and a runtime infrastructure import here
+    # would hand every one of them an indirect infrastructure dependency (the
+    # import-linter contracts analyze runtime imports only —
+    # exclude_type_checking_imports).
     from app.application.execution.admission import RunAdmissionService
     from app.application.execution.command_ingress import CommandIngress
     from app.application.execution.run_control import RunControlService
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
         TokenCodecPort,
         VersionedSecretCipher,
     )
+    from app.application.ports.queries import ExecutionProjectionStatusPort
     from app.application.ports.streams import (
         NotificationStreamFactory,
         SessionListStreamFactory,
@@ -84,6 +86,10 @@ if TYPE_CHECKING:
     from app.execution_kernel import ExecutionKernelRuntime
     from app.infrastructure.execution.postgres_run_projection import PostgresRunProjection
     from app.infrastructure.external.sandbox.sandbox_maintenance import SandboxMaintenance
+    from app.infrastructure.storage.cos import Cos
+    from app.infrastructure.storage.minio import Minio
+    from app.infrastructure.storage.postgres import Postgres
+    from app.infrastructure.storage.redis import RedisClient
 
 
 class RuntimeReadiness:
@@ -180,6 +186,7 @@ class ApiRuntime:
     compliance_service: ComplianceService
     governance_profile_service: GovernanceProfileService
     governance_overview_service: GovernanceOverviewService
+    execution_projection_status: ExecutionProjectionStatusPort
 
 
 @dataclass(frozen=True)

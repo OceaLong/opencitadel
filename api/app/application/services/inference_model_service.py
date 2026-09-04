@@ -163,6 +163,13 @@ class InferenceModelService:
                 )
             if existing.visibility == ResourceVisibility.GLOBAL and not allow_global_mutation:
                 raise ForbiddenError("只有管理员可删除全局推理模型")
+            # Fail with a semantic error instead of surfacing the FK violation
+            # as an opaque 500: bindings must be released first.
+            if await uow.inference_binding.count_for_model(model_id):
+                raise BadRequestError(
+                    "仍有推理绑定正在使用该模型，请先解除绑定",
+                    error_key="inference.errors.modelInUse",
+                )
             await uow.inference_model.delete_by_id(model_id)
             await uow.commit()
 

@@ -7,7 +7,12 @@ import pytest
 
 from app.application.execution.decisions import next_command
 from app.application.execution.run_context import run_execution_context
-from app.domain.execution.run import RunFamily, RunState, RunStatus
+from app.domain.execution.run import (
+    RunFamily,
+    RunState,
+    RunStatus,
+    decision_data_digest,
+)
 from app.domain.runtime_policy import AgentExecutionPolicy, ExecutionPolicy
 from tests.app.execution_test_support import run_policy_snapshot_json
 
@@ -39,8 +44,13 @@ def _state(
     return base.model_copy(update=updates)
 
 
-def _next(state: RunState):
-    return next_command(state, run_execution_context(state), now=NOW)
+def _next(state: RunState, outcomes: dict | None = None):
+    return next_command(
+        state,
+        run_execution_context(state),
+        outcomes=outcomes,
+        now=NOW,
+    )
 
 
 def _after_retrieval(state: RunState) -> RunState:
@@ -52,7 +62,7 @@ def _after_retrieval(state: RunState) -> RunState:
         update={
             "stream_version": state.stream_version + 3,
             "settled_activities": ((activity_id, "succeeded", 0),),
-            "activity_results": ((activity_id, 0, "result://retrieval", "found", {}),),
+            "activity_results": ((activity_id, 0, "result://retrieval", "found", None),),
         }
     )
 
@@ -90,6 +100,21 @@ def test_agent_routes_model_tool_intent_through_durable_approval() -> None:
     model_request = _next(running)
     assert model_request is not None
     model_id = UUID(str(model_request.payload["activity_id"]))
+    model_decision = {
+        "tool_calls": [
+            {
+                "call_id": "call-1",
+                "name": "write_file",
+                "arguments": {
+                    "filepath": "/work/a",
+                    "content": "x",
+                },
+                "requires_approval": True,
+                "risk_summary": "Write workspace file",
+            }
+        ]
+    }
+    outcomes = {model_id: model_decision}
     after_model = running.model_copy(
         update={
             "stream_version": 5,
@@ -104,33 +129,22 @@ def test_agent_routes_model_tool_intent_through_durable_approval() -> None:
                     0,
                     "result://model-0",
                     "",
-                    {
-                        "tool_calls": [
-                            {
-                                "call_id": "call-1",
-                                "name": "write_file",
-                                "arguments": {
-                                    "filepath": "/work/a",
-                                    "content": "x",
-                                },
-                                "requires_approval": True,
-                                "risk_summary": "Write workspace file",
-                            }
-                        ]
-                    },
+                    decision_data_digest(model_decision),
                 ),
             ),
         }
     )
 
-    approval = _next(after_model)
+    approval = _next(after_model, outcomes)
 
     assert approval is not None
     assert approval.command_type == "RequestApproval"
     approval_id = UUID(str(approval.payload["approval_id"]))
-    approved = after_model.model_copy(update={"approval_decisions": ((approval_id, "approved"),)})
+    approved = after_model.model_copy(
+        update={"approval_decisions": ((approval_id, "approved", ""),)}
+    )
 
-    tool_request = _next(approved)
+    tool_request = _next(approved, outcomes)
 
     assert tool_request is not None
     assert tool_request.command_type == "RequestActivity"
@@ -143,22 +157,24 @@ def test_agent_feeds_tool_result_into_next_model_round_then_completes() -> None:
     model_request = _next(running)
     assert model_request is not None
     model_id = UUID(str(model_request.payload["activity_id"]))
+    first_decision = {
+        "tool_calls": [
+            {
+                "call_id": "call-1",
+                "name": "search_web",
+                "arguments": {"query": "durable execution"},
+                "requires_approval": False,
+                "risk_summary": "Read web",
+            }
+        ]
+    }
+    outcomes = {model_id: first_decision}
     first_result = (
         model_id,
         0,
         "result://model-0",
         "",
-        {
-            "tool_calls": [
-                {
-                    "call_id": "call-1",
-                    "name": "search_web",
-                    "arguments": {"query": "durable execution"},
-                    "requires_approval": False,
-                    "risk_summary": "Read web",
-                }
-            ]
-        },
+        decision_data_digest(first_decision),
     )
     after_model = running.model_copy(
         update={
@@ -170,7 +186,7 @@ def test_agent_feeds_tool_result_into_next_model_round_then_completes() -> None:
             "activity_results": (*running.activity_results, first_result),
         }
     )
-    tool_request = _next(after_model)
+    tool_request = _next(after_model, outcomes)
     assert tool_request is not None
     tool_id = UUID(str(tool_request.payload["activity_id"]))
     after_tool = after_model.model_copy(
@@ -182,12 +198,12 @@ def test_agent_feeds_tool_result_into_next_model_round_then_completes() -> None:
             ),
             "activity_results": (
                 *after_model.activity_results,
-                (tool_id, 0, "result://tool-0", "ok", {}),
+                (tool_id, 0, "result://tool-0", "ok", None),
             ),
         }
     )
 
-    second_model = _next(after_tool)
+    second_model = _next(after_tool, outcomes)
 
     assert second_model is not None
     assert second_model.payload["activity_type"] == "model.call"
@@ -215,13 +231,14 @@ def test_agent_feeds_tool_result_into_next_model_round_then_completes() -> None:
                     0,
                     "result://model-1",
                     "answer",
-                    {"tool_calls": []},
+                    decision_data_digest({"tool_calls": []}),
                 ),
             ),
         }
     )
 
-    complete = _next(finished)
+    outcomes[second_model_id] = {"tool_calls": []}
+    complete = _next(finished, outcomes)
 
     assert complete is not None
     assert complete.command_type == "CompleteRun"
@@ -246,7 +263,7 @@ def test_ask_retrieves_bound_context_before_model_call() -> None:
         update={
             "stream_version": 5,
             "settled_activities": ((retrieval_id, "succeeded", 0),),
-            "activity_results": ((retrieval_id, 0, "result://retrieval", "found", {}),),
+            "activity_results": ((retrieval_id, 0, "result://retrieval", "found", None),),
         }
     )
 
@@ -344,3 +361,36 @@ def test_repeated_activity_failure_exhausts_run_retries() -> None:
     assert terminal_failure is not None
     assert terminal_failure.command_type == "FailRun"
     assert terminal_failure.payload["retryable"] is False
+
+
+def test_ask_model_result_with_decision_digest_completes_via_outcomes() -> None:
+    """Ask model calls settle with a decision payload (empty tool_calls +
+    catalog snapshot); the hydrated outcomes must reach the ask planner —
+    dropping them wedged every Ask Run in production once."""
+    from app.application.execution.decisions.base import activity_identity
+
+    running = _state(RunFamily.ASK)
+    retrieval = _next(running)
+    assert retrieval is not None
+    retrieval_id = UUID(str(retrieval.payload["activity_id"]))
+    model_id = activity_identity(running, "model:0")
+    model_decision = {"tool_calls": [], "catalog": {"tool_names": [], "fingerprint": "f" * 16}}
+    after_model = running.model_copy(
+        update={
+            "stream_version": 7,
+            "settled_activities": (
+                (retrieval_id, "succeeded", 0),
+                (model_id, "succeeded", 0),
+            ),
+            "activity_results": (
+                (retrieval_id, 0, "result://retrieval", "found", None),
+                (model_id, 0, "result://answer", "answer", decision_data_digest(model_decision)),
+            ),
+        }
+    )
+
+    complete = _next(after_model, {model_id: model_decision})
+
+    assert complete is not None
+    assert complete.command_type == "CompleteRun"
+    assert complete.payload == {"result_ref": "result://answer"}

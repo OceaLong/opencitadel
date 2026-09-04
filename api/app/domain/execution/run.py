@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -18,7 +19,8 @@ from app.domain.execution.commands import (
 )
 from app.domain.execution.events import NewEvent, StoredEvent
 from app.domain.execution.family import RunFamily
-from app.domain.execution.registry import CommandRegistry, EventRegistry
+from app.domain.execution.registry import CommandRegistry, EventPayloads, EventRegistry
+from app.domain.execution.serialization import canonical_json_bytes
 from app.domain.execution.timer import ScheduledCommandRequest
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from app.domain.runtime_policy.snapshot import (
@@ -42,8 +44,17 @@ TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.
 # Default human-approval time-to-live in minutes: the pure aggregate's fallback
 # when the command carries no ttl_minutes. The configurable surface is
 # ``OperationsPolicy.approval.ttl_minutes``, injected into RequestApproval
-# payloads by the kernel DecisionWorker at submit time.
+# payloads by the DecisionWorker at submit time.
 DEFAULT_APPROVAL_TTL_MINUTES = 1440
+
+# Run-level retry backoff (D6): a retryable failure schedules a durable timer
+# that delivers RetryRun after min(base * 2^retry_generation, cap) seconds.
+# No jitter on purpose — decide() is a pure, deterministic function (its output
+# participates in command idempotency and replay), so the same command must
+# always schedule the same timer. Cross-replica thundering-herd concerns do not
+# apply here: the timer row is unique per (run_id, retry_generation).
+RETRY_BACKOFF_BASE_SECONDS = 5
+RETRY_BACKOFF_CAP_SECONDS = 300
 
 
 class InvalidRunTransitionError(ValueError):
@@ -56,6 +67,13 @@ class ExpectedStreamVersionError(ValueError):
 
 class UnknownRunCommandError(ValueError):
     pass
+
+
+def decision_data_digest(decision_data: dict[str, JsonValue]) -> str | None:
+    """Digest binding an off-stream decision payload to its settlement event."""
+    if not decision_data:
+        return None
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(decision_data)).hexdigest()
 
 
 class RunState(BaseModel):
@@ -74,13 +92,16 @@ class RunState(BaseModel):
     settled_activities: tuple[tuple[UUID, str, int], ...] = ()
     activity_failure_codes: tuple[tuple[UUID, int, str], ...] = ()
     requested_activities: tuple[tuple[UUID, str, int], ...] = ()
-    activity_progress_sequences: tuple[tuple[UUID, int], ...] = ()
-    activity_results: tuple[
-        tuple[UUID, int, str | None, str | None, dict[str, JsonValue]], ...
-    ] = ()
+    # (activity_id, generation, result_ref, result_summary, decision_digest).
+    # The full decision payload lives off-stream on the operational activity
+    # task row; the digest here binds it to the hash-chained event history.
+    activity_results: tuple[tuple[UUID, int, str | None, str | None, str | None], ...] = ()
     pending_approval_id: UUID | None = None
     pending_approval_activity_id: UUID | None = None
-    approval_decisions: tuple[tuple[UUID, str], ...] = ()
+    # (approval_id, decision, feedback). feedback carries the reviewer's note —
+    # for clarification approvals it is the option the user picked, which the
+    # planner injects back into the approved tool call.
+    approval_decisions: tuple[tuple[UUID, str, str], ...] = ()
     retry_generation: int = 0
     wait_reason: str | None = None
     failure_code: str | None = None
@@ -129,6 +150,11 @@ class RunCreatedPayload(_Payload):
     input: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class RunCreatedInternalPayload(_Payload):
+    semantic_payload: dict[str, JsonValue] = Field(default_factory=dict)
+    policy_snapshot: dict[str, JsonValue]
+
+
 class WaitRunPayload(_Payload):
     reason: Annotated[str, Field(min_length=1, max_length=128)]
 
@@ -160,6 +186,10 @@ class RequestActivityPayload(_Payload):
     public_data: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class ActivityRequestedInternalPayload(_Payload):
+    input_payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class ActivityResultPayload(_Payload):
     activity_id: UUID
     generation: int = Field(ge=0)
@@ -169,21 +199,14 @@ class ActivityResultPayload(_Payload):
     public_data: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class ActivityCompletedInternalPayload(_Payload):
+    decision_digest: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+
+
 class ActivityFailurePayload(_Payload):
     activity_id: UUID
     generation: int = Field(ge=0)
     failure_code: Annotated[str, Field(min_length=1, max_length=128)]
-
-
-class ActivityProgressPayload(_Payload):
-    activity_id: UUID
-    generation: int = Field(ge=0)
-    sequence: int = Field(ge=1)
-    kind: Literal["step", "message"]
-    phase: Annotated[str, Field(min_length=1, max_length=64)] | None = None
-    status: Literal["started", "completed"] | None = None
-    progress: int = Field(ge=0, le=100)
-    message: Annotated[str, Field(max_length=1024)] = ""
 
 
 class RequestApprovalPayload(_Payload):
@@ -194,6 +217,12 @@ class RequestApprovalPayload(_Payload):
     subject_label: Annotated[str, Field(min_length=1, max_length=128)]
     # Bounds mirror OperationsPolicy.approval.ttl_minutes (1 minute .. 30 days).
     ttl_minutes: Annotated[int, Field(ge=1, le=43_200)] | None = None
+    # Clarification approvals: selectable options the reviewer picks from
+    # (rendered as the clarification card); the pick returns via
+    # DecideApproval.feedback. Greenfield v1 extension (pre-release window).
+    choices: tuple[Annotated[str, Field(min_length=1, max_length=200)], ...] | None = Field(
+        default=None, max_length=6
+    )
 
 
 class DecideApprovalPayload(_Payload):
@@ -218,7 +247,6 @@ _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "CancelRun": CancelRunPayload,
     "RequestActivity": RequestActivityPayload,
     "MarkActivityCallStarted": ActivityResultPayload,
-    "ReportActivityProgress": ActivityProgressPayload,
     "CompleteActivity": ActivityResultPayload,
     "FailActivity": ActivityFailurePayload,
     "MarkActivityOutcomeUnknown": ActivityFailurePayload,
@@ -227,50 +255,89 @@ _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "ExpireApproval": ExpireApprovalPayload,
 }
 
-_EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
-    "RunCreated": RunCreatedPayload,
-    "RunStarted": EmptyPayload,
-    "RunWaiting": WaitRunPayload,
-    "RunResumed": EmptyPayload,
-    "RunRetried": EmptyPayload,
-    "RunCompleted": CompleteRunPayload,
-    "RunFailed": RunFailedPayload,
-    "RunCancelled": CancelRunPayload,
-    "RunAttemptFailed": FailRunPayload,
-    "ActivityRequested": RequestActivityPayload,
-    "ActivityCallStarted": ActivityResultPayload,
-    "ActivityProgressed": ActivityProgressPayload,
-    "ActivityCompleted": ActivityResultPayload,
-    "ActivityFailed": ActivityFailurePayload,
-    "ActivityOutcomeUnknown": ActivityFailurePayload,
-    "ActivityCancelled": ActivityFailurePayload,
-    "ApprovalRequested": RequestApprovalPayload,
-    "ApprovalDecided": DecideApprovalPayload,
-    "ApprovalExpired": ExpireApprovalPayload,
+# name -> (public payload model, internal payload model). The internal model is
+# mandatory: events with no internal data declare EmptyPayload, so accidental
+# internal leakage fails at emit time instead of surfacing on a later replay.
+_EVENT_SPECS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+    "RunCreated": (RunCreatedPayload, RunCreatedInternalPayload),
+    "RunStarted": (EmptyPayload, EmptyPayload),
+    "RunWaiting": (WaitRunPayload, EmptyPayload),
+    "RunResumed": (EmptyPayload, EmptyPayload),
+    "RunRetried": (EmptyPayload, EmptyPayload),
+    "RunCompleted": (CompleteRunPayload, EmptyPayload),
+    "RunFailed": (RunFailedPayload, EmptyPayload),
+    "RunCancelled": (CancelRunPayload, EmptyPayload),
+    "RunAttemptFailed": (FailRunPayload, EmptyPayload),
+    "ActivityRequested": (RequestActivityPayload, ActivityRequestedInternalPayload),
+    "ActivityCallStarted": (ActivityResultPayload, EmptyPayload),
+    "ActivityCompleted": (ActivityResultPayload, ActivityCompletedInternalPayload),
+    "ActivityFailed": (ActivityFailurePayload, EmptyPayload),
+    "ActivityOutcomeUnknown": (ActivityFailurePayload, EmptyPayload),
+    "ActivityCancelled": (ActivityFailurePayload, EmptyPayload),
+    "ApprovalRequested": (RequestApprovalPayload, EmptyPayload),
+    "ApprovalDecided": (DecideApprovalPayload, EmptyPayload),
+    "ApprovalExpired": (ExpireApprovalPayload, EmptyPayload),
 }
+
+# Every event type evolve() handles, maintained by hand next to the if-chain.
+# The registry self-check in __init__ cross-references this set against
+# _EVENT_SPECS, so registering an event without teaching evolve() about it (or
+# vice versa) fails at aggregate construction instead of on a later replay.
+_EVOLVED_EVENT_TYPES = frozenset(
+    {
+        "RunCreated",
+        "RunStarted",
+        "RunWaiting",
+        "RunResumed",
+        "RunRetried",
+        "RunCompleted",
+        "RunFailed",
+        "RunCancelled",
+        "RunAttemptFailed",
+        "ActivityRequested",
+        "ActivityCallStarted",
+        "ActivityCompleted",
+        "ActivityFailed",
+        "ActivityOutcomeUnknown",
+        "ActivityCancelled",
+        "ApprovalRequested",
+        "ApprovalDecided",
+        "ApprovalExpired",
+    }
+)
 
 
 class RunAggregate:
     """One deterministic state machine for all execution lifecycles."""
 
     state_type = RunState
-    snapshot_serializer_version = 3
+    snapshot_serializer_version = 5
 
     def __init__(self) -> None:
         self.command_registry = CommandRegistry()
         for name, payload_type in _COMMAND_PAYLOADS.items():
-            self.command_registry.register(
-                name,
-                2 if name == "CreateRun" else 1,
-                payload_type,
-            )
+            self.command_registry.register(name, 1, payload_type)
         self.event_registry = EventRegistry()
-        for name, payload_type in _EVENT_PAYLOADS.items():
+        for name, (public_model, internal_model) in _EVENT_SPECS.items():
             self.event_registry.register(
                 name,
-                2 if name == "RunCreated" else 1,
-                payload_type,
+                1,
+                public_model,
+                internal_model=internal_model,
             )
+        self._assert_registry_coverage()
+
+    def _assert_registry_coverage(self) -> None:
+        """Fail at construction when a wiring seam is missing, not on replay."""
+        registered_events = self.event_registry.registered_names()
+        if registered_events != _EVOLVED_EVENT_TYPES:
+            raise RuntimeError(
+                "event registry and evolve() coverage diverged: "
+                f"{sorted(registered_events ^ _EVOLVED_EVENT_TYPES)}"
+            )
+        for name in self.command_registry.registered_names():
+            if getattr(self, f"_decide_{name}", None) is None:
+                raise RuntimeError(f"registered command {name} has no _decide_{name} handler")
 
     def initial_state(self, stream_id: str) -> RunState:
         return RunState(run_id=UUID(stream_id))
@@ -355,29 +422,50 @@ class RunAggregate:
             )
         if event.event_type == "ApprovalDecided":
             approval_id = UUID(str(payload["approval_id"]))
-            decisions = dict(state.approval_decisions)
-            decisions[approval_id] = str(payload["decision"])
+            decisions = {
+                decided_id: (decision, feedback)
+                for decided_id, decision, feedback in state.approval_decisions
+            }
+            decisions[approval_id] = (
+                str(payload["decision"]),
+                str(payload.get("feedback") or ""),
+            )
             return state.model_copy(
                 update={
                     **common,
                     "pending_approval_id": None,
                     "pending_approval_activity_id": None,
                     "approval_decisions": tuple(
-                        sorted(decisions.items(), key=lambda item: str(item[0]))
+                        sorted(
+                            (
+                                (decided_id, decision, feedback)
+                                for decided_id, (decision, feedback) in decisions.items()
+                            ),
+                            key=lambda item: str(item[0]),
+                        )
                     ),
                 }
             )
         if event.event_type == "ApprovalExpired":
             approval_id = UUID(str(payload["approval_id"]))
-            decisions = dict(state.approval_decisions)
-            decisions[approval_id] = "expired"
+            decisions = {
+                decided_id: (decision, feedback)
+                for decided_id, decision, feedback in state.approval_decisions
+            }
+            decisions[approval_id] = ("expired", "")
             return state.model_copy(
                 update={
                     **common,
                     "pending_approval_id": None,
                     "pending_approval_activity_id": None,
                     "approval_decisions": tuple(
-                        sorted(decisions.items(), key=lambda item: str(item[0]))
+                        sorted(
+                            (
+                                (decided_id, decision, feedback)
+                                for decided_id, (decision, feedback) in decisions.items()
+                            ),
+                            key=lambda item: str(item[0]),
+                        )
                     ),
                 }
             )
@@ -439,21 +527,6 @@ class RunAggregate:
                     ),
                 }
             )
-        if event.event_type == "ActivityProgressed":
-            activity_id = UUID(str(payload["activity_id"]))
-            sequence = int(payload["sequence"])
-            sequences = dict(state.activity_progress_sequences)
-            if sequence != sequences.get(activity_id, 0) + 1:
-                raise ValueError("Activity progress sequence is not contiguous")
-            sequences[activity_id] = sequence
-            return state.model_copy(
-                update={
-                    **common,
-                    "activity_progress_sequences": tuple(
-                        sorted(sequences.items(), key=lambda item: str(item[0]))
-                    ),
-                }
-            )
         if event.event_type in {
             "ActivityCompleted",
             "ActivityFailed",
@@ -470,9 +543,9 @@ class RunAggregate:
             }[event.event_type]
             activity_results = state.activity_results
             if event.event_type == "ActivityCompleted":
-                decision_data = event.internal_payload.get("decision_data", {})
-                if not isinstance(decision_data, dict):
-                    raise ValueError("Activity decision_data must be an object")
+                decision_digest = event.internal_payload.get("decision_digest")
+                if decision_digest is not None and not isinstance(decision_digest, str):
+                    raise ValueError("Activity decision_digest must be a string")
                 # Result references are rehydrated as provider conversation history.
                 # Preserve their causal event order; UUID order is deterministic but
                 # semantically meaningless and can place a tool result before the
@@ -484,7 +557,7 @@ class RunAggregate:
                         generation,
                         payload.get("result_ref"),
                         payload.get("result_summary"),
-                        decision_data,
+                        decision_digest,
                     ),
                 )
             activity_failure_codes = state.activity_failure_codes
@@ -533,7 +606,7 @@ class RunAggregate:
         self._validate_target(state, command)
         if command.command_type not in _COMMAND_PAYLOADS:
             raise UnknownRunCommandError(command.command_type)
-        expected_schema_version = 2 if command.command_type == "CreateRun" else 1
+        expected_schema_version = self.command_registry.latest_version(command.command_type)
         if command.command_schema_version != expected_schema_version:
             raise ValueError(
                 f"unsupported {command.command_type} schema version: "
@@ -566,19 +639,21 @@ class RunAggregate:
                 f"cannot handle {command.command_type} from terminal {state.status}"
             )
 
-        # RequestApproval schedules a timeout command whose due time is derived
-        # from the issuing command's clock; the handler needs the envelope's
-        # issued_at, so it is dispatched explicitly rather than by name.
+        # RequestApproval and FailRun schedule durable timers whose due times
+        # are derived from the issuing command's clock; the handlers need the
+        # envelope's issued_at, so they are dispatched explicitly rather than
+        # by name.
         if command.command_type == "RequestApproval":
             return self._decide_RequestApproval(state, payload, issued_at=command.issued_at)
+        if command.command_type == "FailRun":
+            return self._decide_FailRun(state, payload, issued_at=command.issued_at)
 
         handler = getattr(self, f"_decide_{command.command_type}", None)
         if handler is None:
             raise UnknownRunCommandError(command.command_type)
         return handler(state, payload)
 
-    @staticmethod
-    def _decide_CreateRun(state: RunState, payload: CreateRunPayload) -> Decision:
+    def _decide_CreateRun(self, state: RunState, payload: CreateRunPayload) -> Decision:
         if state.status != RunStatus.NEW:
             raise InvalidRunTransitionError("Run can only be created once")
         policy_snapshot = validate_run_policy_snapshot(payload.policy_snapshot)
@@ -588,10 +663,9 @@ class RunAggregate:
             )
         return Decision(
             events=(
-                NewEvent(
-                    event_type="RunCreated",
-                    event_schema_version=2,
-                    public_payload=RunCreatedPayload(
+                self._new_event(
+                    "RunCreated",
+                    RunCreatedPayload(
                         family=payload.family,
                         source_entity_type=payload.source_entity_type,
                         source_entity_id=payload.source_entity_id,
@@ -606,37 +680,33 @@ class RunAggregate:
             )
         )
 
-    @staticmethod
-    def _decide_StartRun(state: RunState, payload: EmptyPayload) -> Decision:
+    def _decide_StartRun(self, state: RunState, payload: EmptyPayload) -> Decision:
         del payload
         if state.status != RunStatus.QUEUED:
             raise InvalidRunTransitionError("Run can only start from queued")
-        return RunAggregate._event("RunStarted", {})
+        return self._event("RunStarted", {})
 
-    @staticmethod
-    def _decide_WaitRun(state: RunState, payload: WaitRunPayload) -> Decision:
+    def _decide_WaitRun(self, state: RunState, payload: WaitRunPayload) -> Decision:
         if state.status != RunStatus.RUNNING:
             raise InvalidRunTransitionError("Run can only wait from running")
-        return RunAggregate._event("RunWaiting", payload.model_dump(mode="json"))
+        return self._event("RunWaiting", payload.model_dump(mode="json"))
 
-    @staticmethod
-    def _decide_ResumeRun(state: RunState, payload: EmptyPayload) -> Decision:
+    def _decide_ResumeRun(self, state: RunState, payload: EmptyPayload) -> Decision:
         del payload
         if state.status != RunStatus.WAITING or state.wait_reason == "retry":
             raise InvalidRunTransitionError("Run is not resumable")
-        return RunAggregate._event("RunResumed", {})
+        return self._event("RunResumed", {})
 
-    @staticmethod
-    def _decide_RetryRun(state: RunState, payload: EmptyPayload) -> Decision:
+    def _decide_RetryRun(self, state: RunState, payload: EmptyPayload) -> Decision:
         del payload
         if state.status != RunStatus.WAITING or state.wait_reason != "retry":
             raise InvalidRunTransitionError("Run has no retryable failure")
         if state.active_activity_ids:
             raise InvalidRunTransitionError("active Activities must settle before retry")
-        return RunAggregate._event("RunRetried", {})
+        return self._event("RunRetried", {})
 
-    @staticmethod
     def _decide_RequestApproval(
+        self,
         state: RunState,
         payload: RequestApprovalPayload,
         *,
@@ -644,7 +714,14 @@ class RunAggregate:
     ) -> Decision:
         if state.status != RunStatus.RUNNING or state.active_activity_ids:
             raise InvalidRunTransitionError("approval requires an idle running Run")
-        prior = dict(state.approval_decisions).get(payload.approval_id)
+        prior = next(
+            (
+                decision
+                for decided_id, decision, _ in state.approval_decisions
+                if decided_id == payload.approval_id
+            ),
+            None,
+        )
         if prior is not None:
             raise InvalidRunTransitionError("approval identity was already decided")
         # Mirror the Activity-request timeout: a durable, self-cancelling command
@@ -685,18 +762,16 @@ class RunAggregate:
         )
         return Decision(
             events=(
-                NewEvent(
-                    event_type="ApprovalRequested",
-                    event_schema_version=1,
-                    public_payload=payload.model_dump(mode="json"),
-                    internal_payload={},
+                self._new_event(
+                    "ApprovalRequested",
+                    payload.model_dump(mode="json"),
                 ),
             ),
             scheduled_commands=(timeout,),
         )
 
-    @staticmethod
     def _decide_ExpireApproval(
+        self,
         state: RunState,
         payload: ExpireApprovalPayload,
     ) -> Decision:
@@ -712,22 +787,12 @@ class RunAggregate:
         # TODO(E3): escalation/reassignment. For now an expired approval follows
         # "rejected" semantics -- it advances the Run to a terminal CANCELLED
         # state so it is no longer stuck WAITING.
-        expired = NewEvent(
-            event_type="ApprovalExpired",
-            event_schema_version=1,
-            public_payload=payload.model_dump(mode="json"),
-            internal_payload={},
-        )
-        cancelled = NewEvent(
-            event_type="RunCancelled",
-            event_schema_version=1,
-            public_payload={"reason": "approval_expired"},
-            internal_payload={},
-        )
+        expired = self._new_event("ApprovalExpired", payload.model_dump(mode="json"))
+        cancelled = self._new_event("RunCancelled", {"reason": "approval_expired"})
         return Decision(events=(expired, cancelled))
 
-    @staticmethod
     def _decide_DecideApproval(
+        self,
         state: RunState,
         payload: DecideApprovalPayload,
     ) -> Decision:
@@ -737,77 +802,109 @@ class RunAggregate:
             or state.pending_approval_id != payload.approval_id
         ):
             raise InvalidRunTransitionError("approval is not pending")
-        decided = NewEvent(
-            event_type="ApprovalDecided",
-            event_schema_version=1,
-            public_payload=payload.model_dump(mode="json"),
-            internal_payload={},
-        )
+        decided = self._new_event("ApprovalDecided", payload.model_dump(mode="json"))
         if payload.decision == "approved":
-            continuation = NewEvent(
-                event_type="RunResumed",
-                event_schema_version=1,
-                public_payload={},
-                internal_payload={},
-            )
+            continuation = self._new_event("RunResumed", {})
         else:
-            continuation = NewEvent(
-                event_type="RunCancelled",
-                event_schema_version=1,
-                public_payload={"reason": "approval_rejected"},
-                internal_payload={},
-            )
+            continuation = self._new_event("RunCancelled", {"reason": "approval_rejected"})
         return Decision(events=(decided, continuation))
 
-    @staticmethod
-    def _decide_CompleteRun(state: RunState, payload: CompleteRunPayload) -> Decision:
+    def _decide_CompleteRun(self, state: RunState, payload: CompleteRunPayload) -> Decision:
         if state.status != RunStatus.RUNNING or state.active_activity_ids:
             raise InvalidRunTransitionError("Run is not ready to complete")
-        return RunAggregate._event("RunCompleted", payload.model_dump(mode="json"))
+        return self._event("RunCompleted", payload.model_dump(mode="json"))
 
-    @staticmethod
-    def _decide_FailRun(state: RunState, payload: FailRunPayload) -> Decision:
+    def _decide_FailRun(
+        self,
+        state: RunState,
+        payload: FailRunPayload,
+        *,
+        issued_at: datetime,
+    ) -> Decision:
         if state.status not in {RunStatus.RUNNING, RunStatus.WAITING}:
             raise InvalidRunTransitionError("Run cannot fail from its current state")
         if payload.retryable:
-            return RunAggregate._event("RunAttemptFailed", payload.model_dump(mode="json"))
+            # D6: the retry is timer-driven instead of decision-loop-driven. A
+            # durable, deterministic timer delivers RetryRun after exponential
+            # backoff; the decision loop treats WAITING(retry) as idle (see
+            # decisions/base.py lifecycle_command), which prevents the old
+            # zero-delay retry storm. The timer cancels itself if the Run is
+            # retried (this timer fired), cancelled, or otherwise terminated
+            # before it fires.
+            delay_seconds = min(
+                RETRY_BACKOFF_BASE_SECONDS * (2**state.retry_generation),
+                RETRY_BACKOFF_CAP_SECONDS,
+            )
+            due_at = issued_at + timedelta(seconds=delay_seconds)
+            timer_id = uuid5(
+                NAMESPACE_URL,
+                f"opencitadel:run-retry:{state.run_id}:{state.retry_generation}",
+            )
+            retry = ScheduledCommandRequest(
+                timer_id=timer_id,
+                due_at=due_at,
+                command=CommandEnvelope(
+                    command_id=timer_id,
+                    command_type="RetryRun",
+                    command_schema_version=1,
+                    stream_type="run",
+                    stream_id=str(state.run_id),
+                    expected_stream_version=None,
+                    owner_user_id=state.owner_user_id,
+                    team_id=state.team_id,
+                    correlation_id=state.correlation_id or state.run_id,
+                    causation_id=None,
+                    issued_at=due_at,
+                    payload={},
+                ),
+                cancellation_event_types=frozenset(
+                    {
+                        "RunRetried",
+                        "RunCancelled",
+                        "RunCompleted",
+                        "RunFailed",
+                    }
+                ),
+                cancellation_activity_id=None,
+            )
+            return Decision(
+                events=(
+                    self._new_event(
+                        "RunAttemptFailed",
+                        payload.model_dump(mode="json"),
+                    ),
+                ),
+                scheduled_commands=(retry,),
+            )
         event_payload: dict[str, JsonValue] = {
             "failure_code": payload.failure_code,
         }
-        return RunAggregate._event("RunFailed", event_payload)
+        return self._event("RunFailed", event_payload)
 
-    @staticmethod
-    def _decide_CancelRun(state: RunState, payload: CancelRunPayload) -> Decision:
+    def _decide_CancelRun(self, state: RunState, payload: CancelRunPayload) -> Decision:
         if state.status == RunStatus.NEW:
             raise InvalidRunTransitionError("uncreated Run cannot be cancelled")
         generations = dict(state.activity_generations)
         cancelled_activities = tuple(
-            NewEvent(
-                event_type="ActivityCancelled",
-                event_schema_version=1,
-                public_payload={
+            self._new_event(
+                "ActivityCancelled",
+                {
                     "activity_id": str(activity_id),
                     "generation": generations[activity_id],
                     "failure_code": "ACTIVITY_CANCELLED",
                 },
-                internal_payload={},
             )
             for activity_id in state.active_activity_ids
         )
         return Decision(
             events=(
                 *cancelled_activities,
-                NewEvent(
-                    event_type="RunCancelled",
-                    event_schema_version=1,
-                    public_payload=payload.model_dump(mode="json"),
-                    internal_payload={},
-                ),
+                self._new_event("RunCancelled", payload.model_dump(mode="json")),
             )
         )
 
-    @staticmethod
     def _decide_RequestActivity(
+        self,
         state: RunState,
         payload: RequestActivityPayload,
     ) -> Decision:
@@ -870,10 +967,9 @@ class RunAggregate:
         )
         return Decision(
             events=(
-                NewEvent(
-                    event_type="ActivityRequested",
-                    event_schema_version=1,
-                    public_payload=payload.model_dump(
+                self._new_event(
+                    "ActivityRequested",
+                    payload.model_dump(
                         mode="json",
                         exclude={"input_payload"},
                     ),
@@ -884,84 +980,66 @@ class RunAggregate:
             scheduled_commands=(timeout,),
         )
 
-    @staticmethod
     def _decide_MarkActivityCallStarted(
+        self,
         state: RunState,
         payload: ActivityResultPayload,
     ) -> Decision:
         RunAggregate._validate_active_generation(state, payload)
         if payload.activity_id in state.started_activity_ids:
             return Decision(events=())
-        return RunAggregate._event("ActivityCallStarted", payload.model_dump(mode="json"))
+        return self._event("ActivityCallStarted", payload.model_dump(mode="json"))
 
-    @staticmethod
-    def _decide_ReportActivityProgress(
-        state: RunState,
-        payload: ActivityProgressPayload,
-    ) -> Decision:
-        RunAggregate._validate_active_generation(state, payload)
-        expected = (
-            dict(state.activity_progress_sequences).get(
-                payload.activity_id,
-                0,
-            )
-            + 1
-        )
-        if payload.sequence != expected:
-            raise InvalidRunTransitionError("Activity progress must be strictly ordered")
-        return RunAggregate._event(
-            "ActivityProgressed",
-            payload.model_dump(mode="json"),
-        )
-
-    @staticmethod
     def _decide_CompleteActivity(
+        self,
         state: RunState,
         payload: ActivityResultPayload,
     ) -> Decision:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="succeeded"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
+        # The decision payload itself stays off-stream (on the operational
+        # activity task row, written in the same transaction); the event only
+        # carries a digest that binds that row to the hash-chained history.
         return Decision(
             events=(
-                NewEvent(
-                    event_type="ActivityCompleted",
-                    event_schema_version=1,
-                    public_payload=payload.model_dump(
+                self._new_event(
+                    "ActivityCompleted",
+                    payload.model_dump(
                         mode="json",
                         exclude={"decision_data"},
                     ),
                     internal_payload={
-                        "decision_data": payload.decision_data,
+                        "decision_digest": decision_data_digest(payload.decision_data),
                     },
                 ),
             )
         )
 
-    @staticmethod
     def _decide_FailActivity(
+        self,
         state: RunState,
         payload: ActivityFailurePayload,
     ) -> Decision:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="failed"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
-        return RunAggregate._event("ActivityFailed", payload.model_dump(mode="json"))
+        return self._event("ActivityFailed", payload.model_dump(mode="json"))
 
-    @staticmethod
     def _decide_MarkActivityOutcomeUnknown(
+        self,
         state: RunState,
         payload: ActivityFailurePayload,
     ) -> Decision:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="unknown"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
-        return RunAggregate._event("ActivityOutcomeUnknown", payload.model_dump(mode="json"))
+        return self._event("ActivityOutcomeUnknown", payload.model_dump(mode="json"))
 
     @staticmethod
     def _validate_active_generation(
         state: RunState,
-        payload: (ActivityResultPayload | ActivityFailurePayload | ActivityProgressPayload),
+        payload: ActivityResultPayload | ActivityFailurePayload,
     ) -> None:
         if payload.activity_id not in state.active_activity_ids:
             raise InvalidRunTransitionError("Activity is not active")
@@ -986,18 +1064,34 @@ class RunAggregate:
             return True
         raise InvalidRunTransitionError("Activity has a different settled outcome")
 
-    @staticmethod
-    def _event(event_type: str, payload: dict[str, JsonValue]) -> Decision:
-        return Decision(
-            events=(
-                NewEvent(
-                    event_type=event_type,
-                    event_schema_version=1,
-                    public_payload=payload,
-                    internal_payload={},
-                ),
-            )
+    def _new_event(
+        self,
+        event_type: str,
+        public_payload: dict[str, JsonValue],
+        internal_payload: dict[str, JsonValue] | None = None,
+    ) -> NewEvent:
+        """Emit one event, write-side validated against the registry.
+
+        A typo'd event type or a payload that no longer matches the registered
+        model fails here — before anything is persisted — instead of surfacing
+        as an unreplayable stream later.
+        """
+        version = self.event_registry.latest_version(event_type)
+        internal = internal_payload or {}
+        self.event_registry.validate_new(
+            event_type,
+            version,
+            EventPayloads(public=dict(public_payload), internal=dict(internal)),
         )
+        return NewEvent(
+            event_type=event_type,
+            event_schema_version=version,
+            public_payload=public_payload,
+            internal_payload=internal,
+        )
+
+    def _event(self, event_type: str, payload: dict[str, JsonValue]) -> Decision:
+        return Decision(events=(self._new_event(event_type, payload),))
 
     @staticmethod
     def _validate_target(state: RunState, command: CommandEnvelope) -> None:
@@ -1006,13 +1100,12 @@ class RunAggregate:
         if command.stream_id != str(state.run_id):
             raise ValueError("command belongs to a different Run")
 
-    @staticmethod
-    def _validate_event(state: RunState, event: StoredEvent) -> None:
+    def _validate_event(self, state: RunState, event: StoredEvent) -> None:
         if event.stream_type != "run" or event.stream_id != str(state.run_id):
             raise ValueError("event belongs to a different Run")
         if event.stream_version != state.stream_version + 1:
             raise ValueError("Run event versions must be contiguous")
-        expected_schema_version = 2 if event.event_type == "RunCreated" else 1
+        expected_schema_version = self.event_registry.latest_version(event.event_type)
         if event.event_schema_version != expected_schema_version:
             raise ValueError(
                 f"unsupported {event.event_type} schema version: {event.event_schema_version}"
@@ -1046,5 +1139,6 @@ __all__ = [
     "RunState",
     "RunStatus",
     "UnknownRunCommandError",
+    "decision_data_digest",
     "validated_run_policy_snapshot",
 ]

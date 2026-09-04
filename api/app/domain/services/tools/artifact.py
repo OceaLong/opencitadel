@@ -18,6 +18,8 @@ def _normalize_artifact_id(artifact_id: str | None, *, required: bool = False) -
     try:
         uuid.UUID(normalized)
     except ValueError as exc:
+        # 该 ValueError 在 artifact_write/finalize 内部即被归一化为失败的
+        # ToolResult（面向模型的纠错提示），无需升格为 ToolInvocationError。
         raise ValueError(
             f"无效的 artifact_id[{normalized}]；创建新交付物请留空 artifact_id，"
             f"更新已有交付物请使用 artifact_write 返回的 id"

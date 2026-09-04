@@ -6,6 +6,7 @@ import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
+import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +59,39 @@ type Props = {
   isAdmin?: boolean;
   userId?: string;
 };
+
+/**
+ * 三态渲染 Skill 的工具限制状态（后端 D11 语义）：
+ * - null  → 未限制工具（警示色，提示可使用全部已启用工具）
+ * - []    → 已禁用全部工具
+ * - 非空  → 白名单生效，保持现有展示（不渲染徽标）
+ */
+export function SkillToolAccessBadge({ allowedTools }: { allowedTools: string[] | null }) {
+  const t = useTranslations("settingsSkills");
+  if (allowedTools === null) {
+    return (
+      <StatusBadge
+        variant="warning"
+        title={t("toolsUnrestrictedHint")}
+        data-testid="skill-tools-unrestricted"
+      >
+        {t("toolsUnrestricted")}
+      </StatusBadge>
+    );
+  }
+  if (allowedTools.length === 0) {
+    return (
+      <StatusBadge
+        variant="secondary"
+        title={t("toolsAllDisabledHint")}
+        data-testid="skill-tools-all-disabled"
+      >
+        {t("toolsAllDisabled")}
+      </StatusBadge>
+    );
+  }
+  return null;
+}
 
 function canManageSkill(
   skill: {
@@ -133,7 +167,9 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
     }
   }, []);
 
-  const resetToolGroupState = (allowedTools: string[] = []) => {
+  const resetToolGroupState = (allowedTools: string[] | null = []) => {
+    // null = 未限制工具（后端 D11 语义），编辑表单按空清单展示
+    allowedTools = allowedTools ?? [];
     setAllowMcpTools(allowedTools.includes("mcp_*"));
     setAllowA2aTools(allowedTools.includes("a2a"));
     const manualTools = allowedTools.filter((tool) => tool !== "mcp_*" && tool !== "a2a");
@@ -160,7 +196,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
       icon: s.icon,
       category: s.category,
       system_prompt: s.system_prompt,
-      allowed_tools: s.allowed_tools,
+      allowed_tools: s.allowed_tools ?? undefined,
       mcp_server_refs: s.mcp_server_refs ?? [],
       a2a_server_refs: s.a2a_server_refs ?? [],
       recommended_model_id: s.recommended_model_id,
@@ -336,6 +372,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
                       <span>{s.icon}</span>
                       {s.name}
                       {s.is_builtin && <Badge variant="outline">{tCommon("builtin")}</Badge>}
+                      <SkillToolAccessBadge allowedTools={s.allowed_tools} />
                     </CardTitle>
                     <CardDescription>{s.description || s.category}</CardDescription>
                   </div>

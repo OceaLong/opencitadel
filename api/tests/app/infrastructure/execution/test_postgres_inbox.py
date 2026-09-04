@@ -307,3 +307,198 @@ async def test_expired_processing_claim_advances_generation(inbox_database) -> N
         assert reclaimed.status == "claimed"
         assert reclaimed.generation == 2
         await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_command_exceeding_claim_attempts_is_dead_lettered(inbox_database) -> None:
+    """K2-5: a poison command stops being retried once the claim cap is hit and
+    settles as a rejected COMMAND_DEAD_LETTERED result."""
+    session_factory, command_ids = inbox_database
+    candidate = command()
+    command_ids.append(candidate.command_id)
+
+    for attempt in range(1, 3):
+        async with session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("inbox-deadletter-test"),
+            )
+            claim = await PostgresInbox(session, max_claim_attempts=2).claim(
+                candidate,
+                now=NOW + timedelta(seconds=attempt * 10),
+                claim_ttl=timedelta(seconds=1),
+            )
+            assert claim.status == "claimed"
+            await session.commit()  # crash-before-complete: claim lease expires
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-deadletter-test"),
+        )
+        final = await PostgresInbox(session, max_claim_attempts=2).claim(
+            candidate,
+            now=NOW + timedelta(minutes=5),
+            claim_ttl=timedelta(seconds=30),
+        )
+        await session.commit()
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result.status == "rejected"
+    assert final.result.rejection_code == "COMMAND_DEAD_LETTERED"
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-deadletter-test"),
+        )
+        record = await session.scalar(
+            select(ExecutionCommandInboxORM).where(
+                ExecutionCommandInboxORM.command_id == candidate.command_id
+            )
+        )
+        assert record is not None
+        assert record.status == "dead_lettered"
+        assert record.rejection_code == "COMMAND_DEAD_LETTERED"
+
+        # Dead-lettered rows are terminal: a later claim never reprocesses them.
+        again = await PostgresInbox(session, max_claim_attempts=2).claim(
+            candidate,
+            now=NOW + timedelta(minutes=10),
+            claim_ttl=timedelta(seconds=30),
+        )
+        assert again.status == "completed"
+        assert again.result is not None
+        assert again.result.rejection_code == "COMMAND_DEAD_LETTERED"
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_purge_completed_deletes_only_old_settled_rows(inbox_database) -> None:
+    """K2-5 GC: settled rows older than the cutoff go; pending and fresh stay."""
+    session_factory, command_ids = inbox_database
+    old_settled = command()
+    fresh_settled = command()
+    still_pending = command()
+    command_ids.extend([old_settled.command_id, fresh_settled.command_id, still_pending.command_id])
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-purge-test"),
+        )
+        inbox = PostgresInbox(session)
+        for candidate in (old_settled, fresh_settled, still_pending):
+            await inbox.receive(candidate)
+        for candidate, processed_at in (
+            (old_settled, NOW - timedelta(days=10)),
+            (fresh_settled, NOW - timedelta(hours=1)),
+        ):
+            claim = await inbox.claim(candidate, now=NOW, claim_ttl=timedelta(seconds=30))
+            assert claim.status == "claimed"
+            await inbox.complete(
+                CommandResult(
+                    command_id=candidate.command_id,
+                    status="accepted",
+                    first_event_position=None,
+                    last_event_position=None,
+                    rejection_code=None,
+                ),
+                now=processed_at,
+            )
+        await session.commit()
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-purge-test"),
+        )
+        purged = await PostgresInbox(session).purge_completed(
+            before=NOW - timedelta(days=7),
+            limit=100,
+        )
+        await session.commit()
+        assert purged == 1
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-purge-test"),
+        )
+        remaining = set(
+            (
+                await session.scalars(
+                    select(ExecutionCommandInboxORM.command_id).where(
+                        ExecutionCommandInboxORM.command_id.in_(
+                            [
+                                old_settled.command_id,
+                                fresh_settled.command_id,
+                                still_pending.command_id,
+                            ]
+                        )
+                    )
+                )
+            ).all()
+        )
+        assert remaining == {fresh_settled.command_id, still_pending.command_id}
+
+
+@pytest.mark.asyncio
+async def test_batch_preclaim_generations_do_not_consume_the_delivery_budget(
+    inbox_database,
+) -> None:
+    """claim_generation also climbs on the kernel's batch pre-claim; the
+    dead-letter cap must count real deliveries (delivery_attempts) only, or
+    every kernel delivery would burn two attempts and halve the budget."""
+    session_factory, command_ids = inbox_database
+    candidate = command()
+    command_ids.append(candidate.command_id)
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-budget-test"),
+        )
+        await PostgresInbox(session).receive(candidate)
+        # Simulate five batch pre-claims (PostgresInboxSource): lease fencing
+        # only, no processing delivery.
+        record = await session.scalar(
+            select(ExecutionCommandInboxORM).where(
+                ExecutionCommandInboxORM.command_id == candidate.command_id
+            )
+        )
+        assert record is not None
+        record.claim_generation += 5
+        await session.commit()
+
+    for attempt in range(1, 3):
+        async with session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("inbox-budget-test"),
+            )
+            claim = await PostgresInbox(session, max_claim_attempts=2).claim(
+                candidate,
+                now=NOW + timedelta(seconds=attempt * 10),
+                claim_ttl=timedelta(seconds=1),
+            )
+            # Both real deliveries fit the budget despite claim_generation
+            # already sitting far above the cap.
+            assert claim.status == "claimed"
+            await session.commit()
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("inbox-budget-test"),
+        )
+        final = await PostgresInbox(session, max_claim_attempts=2).claim(
+            candidate,
+            now=NOW + timedelta(minutes=5),
+            claim_ttl=timedelta(seconds=30),
+        )
+        await session.commit()
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result.rejection_code == "COMMAND_DEAD_LETTERED"

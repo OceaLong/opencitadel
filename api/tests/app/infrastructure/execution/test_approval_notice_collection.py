@@ -55,9 +55,7 @@ def _event(
 
 
 def _collect(event: StoredEvent) -> list[ApprovalWaitingNotice]:
-    notices: list[ApprovalWaitingNotice] = []
-    PostgresFormalProjector._collect_approval_notice(event, _STATE, notices)
-    return notices
+    return list(PostgresFormalProjector._collect_approval_notice(event, _STATE, "tool_effect"))
 
 
 def test_personal_scope_notifies_the_owner() -> None:
@@ -87,3 +85,29 @@ def test_expired_approval_produces_expiry_notice() -> None:
 
 def test_other_events_produce_no_notice() -> None:
     assert _collect(_event(event_type="ApprovalDecided")) == []
+
+
+def test_clarification_gets_its_own_notice_kinds_and_question_subject() -> None:
+    """澄清不是审批：通知种类与措辞独立，subject 用问题文本而非工具名。"""
+    from uuid import UUID as _UUID
+
+    approval_id = _UUID(int=71)
+    requested = _event(
+        "ApprovalRequested",
+        payload={
+            "approval_id": str(approval_id),
+            "subject_activity_id": str(_UUID(int=72)),
+            "approval_kind": "clarification",
+            "risk_summary": "部署到哪个环境？",
+            "subject_label": "ask_user",
+        },
+    )
+    (waiting,) = PostgresFormalProjector._collect_approval_notice(
+        requested, _STATE, "clarification"
+    )
+    assert waiting.kind == "clarification_waiting"
+    assert waiting.subject_label == "部署到哪个环境？"
+
+    expired = _event("ApprovalExpired", payload={"approval_id": str(approval_id)})
+    (expiry,) = PostgresFormalProjector._collect_approval_notice(expired, _STATE, "clarification")
+    assert expiry.kind == "clarification_expired"

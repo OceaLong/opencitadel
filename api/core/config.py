@@ -59,6 +59,11 @@ class DeploymentSettings(BaseSettings):
     api_key_secret: str = "opencitadel-api-key-secret-change-in-production"
     api_key_secret_id: str = "primary"
     api_key_previous_secrets: dict[str, str] = Field(default_factory=dict)
+    # 公共事件游标（SSE cursor）HMAC 密钥（K4-5，建议级）。留空时回退为
+    # sha256(api_key_secret) 派生值（与历史部署行为一致）；显式配置后游标签名
+    # 与 API key 加密的信任域分离。解码兼容双密钥（新配置值 + 派生回退值），
+    # 用于运行期密钥轮换窗口内旧游标的平滑失效。
+    public_cursor_secret: str = ""
     audit_signing_key: str = "opencitadel-audit-signing-key-change-in-production"
     audit_signing_key_id: str = "primary"
     audit_previous_signing_keys: dict[str, str] = Field(default_factory=dict)
@@ -106,8 +111,10 @@ class DeploymentSettings(BaseSettings):
     sandbox_k8s_pod_label: str = "app=opencitadel-sandbox"
     policy_head_refresh_interval_seconds: float = 5.0
     policy_max_staleness_seconds: float = 30.0
+    # 三段式优雅关停的排水窗口（K2-3）：先停新 claim，再等在途 handler 自然完成
+    # 至多这么多秒（覆盖典型模型调用时长），超时才 cancel。
     shutdown_timeout_seconds: float = Field(
-        default=30.0,
+        default=90.0,
         validation_alias=AliasChoices(
             "OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS",
             "shutdown_timeout_seconds",
@@ -167,6 +174,28 @@ class DeploymentSettings(BaseSettings):
     execution_activity_batch_size: int = 100
     execution_activity_max_concurrency: int = 8
     execution_idle_poll_seconds: float = 1.0
+    # Activity 毒丸防护（K2-2）：单个 activity task 行被 claim 的总次数上限
+    # （含租约过期后的重捞）。超限转 dead_lettered，不再被 claim；对应 Run 由
+    # 活动超时 timer（FailActivity/ACTIVITY_TIMEOUT）兜底收敛。
+    execution_activity_max_claim_attempts: int = 5
+    # Inbox 毒丸防护（K2-5）：单条命令被 claim 的总次数上限，超限转 dead_lettered
+    # 终态（不再投递），命令以 COMMAND_DEAD_LETTERED 拒绝码结算。
+    execution_inbox_max_claim_attempts: int = 10
+    # 执行队列生命周期（K2-5，D7）：调度器 leader tick 分批清理已完成的
+    # inbox/outbox 行（默认 7 天）与 timer/activity 终态行（默认 30 天）。
+    # activity 终态行仅在所属 Run 已终态后才可清理（活跃 Run 的决策水合依赖
+    # decision_payload 列，这是硬约束）。0 = 关闭该队列的自动清理。
+    execution_inbox_retention_days: int = 7
+    # Dead-lettered inbox rows are operator diagnostics: kept longer than
+    # settled rows, but not forever. 0 disables the purge.
+    execution_inbox_dead_letter_retention_days: int = 30
+    execution_outbox_retention_days: int = 7
+    execution_timer_retention_days: int = 30
+    execution_activity_retention_days: int = 30
+    execution_queue_purge_batch_size: int = 500
+    # 准入背压（K2-8）：单个 owner scope（用户或团队）的活跃（非终态）Run 上限，
+    # 超限以 ADMISSION_LIMIT_EXCEEDED 拒绝新 Run。0 = 不限制。
+    execution_max_active_runs_per_scope: int = 200
 
     # 回收站保留期：软删的会话/知识库超期后由调度器 leader tick 自动物理清除
     # （每 tick 限一批，清除动作写审计）。0 = 关闭自动清理，仅保留手动 purge。

@@ -179,8 +179,13 @@ class A2AClientManager:
                 data={"text": text, "raw": result} if text else result,
             )
         except (OSError, RuntimeError, ValueError) as e:
+            # failure_kind=transport 供连接池统计连续失败并强制重建（P2-9）。
             logger.error("调用远程Agent[%s:%s]出错: %s", agent_id, url, e)
-            return ToolResult(success=False, message=f"调用远程Agent[{agent_id}:{url}]出错: {e!s}")
+            return ToolResult(
+                success=False,
+                message=f"调用远程Agent[{agent_id}:{url}]出错: {e!s}",
+                failure_kind="transport",
+            )
 
     @staticmethod
     def _build_message_payload(query: str) -> dict[str, Any]:

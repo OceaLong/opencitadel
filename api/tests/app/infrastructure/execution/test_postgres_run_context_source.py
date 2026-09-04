@@ -100,3 +100,58 @@ async def test_source_verifies_state_hash_policy_metadata_and_owner_scope() -> N
                 delete(ExecutionRunProjectionORM).where(ExecutionRunProjectionORM.run_id == run_id)
             )
             await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_db_schema")
+async def test_missing_record_during_rebuild_is_retryable_not_permanent() -> None:
+    """K4-1/P2-14: a rebuild-window context miss defers, it never poisons.
+
+    With a ``rebuilding`` marker present, a missing Run projection row raises
+    the retryable ``RunContextUnavailableError`` (the activity worker defers);
+    without any marker the historical permanent failure is preserved.
+    """
+    from app.application.execution.run_context import RunContextUnavailableError
+    from app.infrastructure.execution.models import ExecutionPoisonedScopeORM
+
+    missing_run_id = uuid4()
+    scope_key = f"user:rebuild-user-{uuid4()}"
+    engine = create_async_engine(execution_kernel_database_uri())
+    sessions = authenticated_session_factory(
+        engine,
+        signing_secret=load_deployment_settings().session_secret,
+    )
+    source = PostgresRunContextSource(
+        session_factory=sessions,
+        authorization=AuthorizationContext.system("run-context-rebuild-test"),
+    )
+    try:
+        # No rebuild in flight -> permanent policy failure, as before.
+        with pytest.raises(RuntimePolicyIntegrityError, match="POLICY_SNAPSHOT_INVALID"):
+            await source.load(missing_run_id)
+
+        async with execution_admin_session() as session:
+            session.add(
+                ExecutionPoisonedScopeORM(
+                    owner_scope_key=scope_key,
+                    owner_user_id=scope_key.removeprefix("user:"),
+                    team_id=None,
+                    reason="rebuilding",
+                    last_error="operator-driven projection rebuild in flight",
+                    failure_count=0,
+                    rebuilding=True,
+                )
+            )
+            await session.commit()
+
+        with pytest.raises(RunContextUnavailableError):
+            await source.load(missing_run_id)
+    finally:
+        await engine.dispose()
+        async with execution_admin_session() as session:
+            await session.execute(
+                delete(ExecutionPoisonedScopeORM).where(
+                    ExecutionPoisonedScopeORM.owner_scope_key == scope_key
+                )
+            )
+            await session.commit()

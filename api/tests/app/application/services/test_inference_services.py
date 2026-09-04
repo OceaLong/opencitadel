@@ -45,6 +45,9 @@ class _ModelRepo:
     async def get_all(self, scope=None):
         return list(self.items.values())
 
+    async def delete_by_id(self, model_id: str) -> None:
+        self.items.pop(model_id, None)
+
 
 class _BindingRepo:
     def __init__(self, bindings: list[InferenceBinding] = ()) -> None:
@@ -66,6 +69,9 @@ class _BindingRepo:
 
     async def delete_scoped_binding(self, purpose, scope):
         self.items.pop(purpose, None)
+
+    async def count_for_model(self, model_id: str) -> int:
+        return sum(1 for binding in self.items.values() if binding.model_id == model_id)
 
 
 @dataclass
@@ -324,3 +330,36 @@ async def test_embedding_probe_rejects_wrong_dimensions() -> None:
 
     assert result.status is InferenceProbeStatus.ERROR
     assert result.error_key == "inference.errors.embeddingDimensionMismatch"
+
+
+@pytest.mark.asyncio
+async def test_delete_model_with_live_binding_fails_semantically_not_with_a_500() -> None:
+    """Acceptance cleanup regression: deleting a model still referenced by a
+    workspace binding used to surface the FK violation as an opaque 500."""
+    factory = _UoWFactory(
+        endpoints=[_endpoint()],
+        models=[_chat_model()],
+        bindings=[
+            InferenceBinding(
+                purpose=InferencePurpose.CHAT,
+                model_id="chat-1",
+            )
+        ],
+    )
+    service = _model_service(factory)
+
+    with pytest.raises(BadRequestError, match="解除绑定"):
+        await service.delete_model("chat-1", allow_global_mutation=True)
+
+    assert "chat-1" in factory.uow.inference_model.items  # nothing deleted
+
+
+@pytest.mark.asyncio
+async def test_delete_model_without_bindings_succeeds() -> None:
+    factory = _UoWFactory(endpoints=[_endpoint()], models=[_chat_model()])
+    service = _model_service(factory)
+
+    await service.delete_model("chat-1", allow_global_mutation=True)
+
+    assert factory.uow.inference_model.items == {}
+    assert factory.uow.committed is True

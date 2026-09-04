@@ -13,6 +13,7 @@ from app.application.ports.crypto import (
     ServiceKeyPort,
     TokenCodecPort,
 )
+from app.application.ports.queries import ExecutionProjectionStatusPort
 from app.application.ports.streams import (
     NotificationStreamFactory,
     SessionListStreamFactory,
@@ -218,6 +219,12 @@ def get_llm_token_usage_service(
 
 def get_status_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> StatusService:
     return runtime.status_service
+
+
+def get_execution_projection_status(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ExecutionProjectionStatusPort:
+    return runtime.execution_projection_status
 
 
 def get_object_storage(

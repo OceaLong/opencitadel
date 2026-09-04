@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.tool_catalog import ExecutionToolCatalog, ToolDefinition
 from app.application.services.file_service import FileService
@@ -31,12 +33,14 @@ from app.domain.services.vision_service import (
     prepare_media_attachments_from_files,
 )
 
+logger = logging.getLogger(__name__)
+
 _MAX_TOOL_CALLS = 16
 _MAX_ARGUMENT_BYTES = 64 * 1024
 
 
 class ModelCallActivityHandler:
-    activity_type = "model.call"
+    activity_type = activity_types.MODEL_CALL
     # Provider calls are not assumed idempotent or queryable after a crash.
     idempotent = False
 
@@ -116,9 +120,10 @@ class ModelCallActivityHandler:
             except TooManyRequestsError:
                 return ActivityOutcome.failed(failure_code="MODEL_CALL_BUDGET_EXCEEDED")
         allow_tools = request.input_payload.get("allow_tools") is True
-        definitions = await self._tools.definitions(payload, context) if allow_tools else ()
+        snapshot = await self._tools.definitions(payload, context) if allow_tools else None
+        definitions = snapshot.definitions if snapshot is not None else ()
         schemas = [definition.tool_schema for definition in definitions]
-        messages = await self._messages(
+        messages, skill_disabled = await self._messages(
             payload=payload,
             prompt=prompt,
             history=history,
@@ -137,6 +142,7 @@ class ModelCallActivityHandler:
             client=client,
             fallback_model=model,
         )
+        await self._report_usage_progress(context=context, response=response)
         content = response.get("content")
         if not isinstance(content, str):
             content = "" if content is None else str(content)
@@ -171,16 +177,28 @@ class ModelCallActivityHandler:
             request.activity_id,
             {"kind": "model", "message": message},
         )
+        decision_data: dict[str, JsonValue] = {"tool_calls": normalized}
+        if snapshot is not None:
+            # 目录快照摘要（D9）：只落工具名单与指纹，避免撑大 decision payload。
+            decision_data["catalog"] = {
+                "tool_names": list(snapshot.tool_names),
+                "fingerprint": snapshot.fingerprint,
+            }
+        public_data: dict[str, JsonValue] = {
+            "kind": "message",
+            "role": "assistant",
+            "message": content[:65_536],
+            "resource_bindings": _public_bindings(payload),
+        }
+        if skill_disabled:
+            # Skill 被禁用时降级为"无 skill 继续"（P2-10）；通过 public_data
+            # 提示而非通知链，保持实现最小。
+            public_data["skill_disabled"] = True
         return ActivityOutcome.succeeded(
             result_ref=result_ref,
             result_summary=content[:4096],
-            decision_data={"tool_calls": normalized},
-            public_data={
-                "kind": "message",
-                "role": "assistant",
-                "message": content[:65_536],
-                "resource_bindings": _public_bindings(payload),
-            },
+            decision_data=decision_data,
+            public_data=public_data,
         )
 
     async def _record_usage(
@@ -257,7 +275,7 @@ class ModelCallActivityHandler:
         history: list[dict[str, Any]],
         scope: OwnerScope,
         client: LLM,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         mode = str(payload.get("mode") or "agent")
         system = (
             "You are OpenCitadel. Answer from durable context and tool results. "
@@ -265,11 +283,26 @@ class ModelCallActivityHandler:
         )
         if mode == "ask":
             system += " Use only the supplied read-only evidence and cite sources."
+        else:
+            system += (
+                " When the request is ambiguous, missing key information, or has "
+                "several reasonable approaches, call the ask_user tool FIRST with a "
+                "concrete question and 2-4 recommended options, then continue with "
+                "the user's choice. Do not ask_user when the request is already clear."
+            )
+        skill_disabled = False
         skill_id = payload.get("skill_id")
         if self._skills is not None and isinstance(skill_id, str) and skill_id:
             skill = await self._skills.get_skill(skill_id, scope=scope)
             if skill.enabled:
                 system = f"{system}\n\n{render_active(skill)}"
+            else:
+                # 与 agent_tool_catalog 的降级语义一致（P2-10）：无 skill 继续。
+                skill_disabled = True
+                logger.warning(
+                    "skill %s is disabled; model call continues without it",
+                    skill_id,
+                )
         conversation = payload.get("conversation", [])
         if not isinstance(conversation, list):
             raise TypeError("conversation must be a list")
@@ -297,7 +330,30 @@ class ModelCallActivityHandler:
             *prior,
             build_user_message(user_prompt, media, client),
             *history,
-        ]
+        ], skill_disabled
+
+    async def _report_usage_progress(
+        self,
+        *,
+        context: ActivityContext,
+        response: dict[str, Any],
+    ) -> None:
+        """model.call 进度最小接线（P2-12）：上报 token 计数，供进度表/SSE 消费。
+
+        非流式调用只有一次终局用量；未注入 report_progress 时跳过。
+        """
+        if context.report_progress is None:
+            return
+        usage = response.get("_usage")
+        if not isinstance(usage, dict):
+            return
+        await context.report_progress(
+            {
+                "kind": "model_usage",
+                "prompt_tokens": _usage_integer(usage.get("prompt_tokens")),
+                "completion_tokens": _usage_integer(usage.get("completion_tokens")),
+            }
+        )
 
     async def _attachment_context(
         self,
@@ -416,15 +472,32 @@ def _normalize_tool_calls(
         if not isinstance(call_id, str) or not call_id.strip():
             call_id = hashlib.sha256(f"{index}:{name}:".encode() + encoded).hexdigest()[:32]
         definition = by_name[name]
-        normalized.append(
-            {
-                "call_id": call_id,
-                "name": name,
-                "arguments": arguments,
-                "requires_approval": definition.requires_approval,
-                "risk_summary": definition.risk_summary,
-            }
-        )
+        entry: dict[str, JsonValue] = {
+            "call_id": call_id,
+            "name": name,
+            "arguments": arguments,
+            "requires_approval": definition.requires_approval,
+            "risk_summary": definition.risk_summary,
+            "approval_kind": definition.approval_kind,
+        }
+        # Declarative approval-card metadata (clarification tools): the card's
+        # prompt text and selectable options come from the tool's own
+        # arguments, per the parameters the tool declared — never keyed on
+        # tool names.
+        if definition.approval_prompt_param:
+            prompt = arguments.get(definition.approval_prompt_param)
+            if isinstance(prompt, str) and prompt.strip():
+                entry["risk_summary"] = prompt.strip()[:1024]
+        if definition.approval_choices_param:
+            raw_choices = arguments.get(definition.approval_choices_param)
+            choices = [
+                choice.strip()[:200]
+                for choice in (raw_choices if isinstance(raw_choices, list) else [])
+                if isinstance(choice, str) and choice.strip()
+            ]
+            if choices:
+                entry["approval_choices"] = choices[:6]
+        normalized.append(entry)
     return normalized
 
 

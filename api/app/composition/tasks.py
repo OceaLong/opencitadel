@@ -171,6 +171,17 @@ class TaskSupervisor:
         return await self._critical_failures.get()
 
     async def stop(self) -> Mapping[str, TaskReport]:
+        """Three-phase graceful drain (D5/K2-3).
+
+        1. Set the stop event: cooperative workers stop claiming new work and
+           exit their loops after finishing in-flight handlers.
+        2. Wait up to ``shutdown_timeout_seconds`` for tasks to complete on
+           their own — an in-flight model call finishes instead of being
+           aborted, so its Run is not spuriously failed by a rollout.
+        3. Only then cancel whatever is still running, with a short bounded
+           grace for the cancellation to land; stragglers that also ignore
+           cancellation are reported as TIMED_OUT.
+        """
         if self._stop_reports is not None:
             return self._stop_reports
 
@@ -183,18 +194,24 @@ class TaskSupervisor:
             for record in self._records.values()
             if record.task is not None and not record.task.done()
         ]
-        for task in active:
-            task.cancel()
-
         if active:
             _, pending = await asyncio.wait(
                 active,
                 timeout=self._shutdown_timeout_seconds,
             )
             for task in pending:
-                record = self._record_for_task(task)
-                record.state = TaskState.TIMED_OUT
-                record.error = TimeoutError(f"task[{record.name}] exceeded the shutdown timeout")
+                task.cancel()
+            if pending:
+                _, stuck = await asyncio.wait(
+                    pending,
+                    timeout=min(self._shutdown_timeout_seconds, 5.0),
+                )
+                for task in stuck:
+                    record = self._record_for_task(task)
+                    record.state = TaskState.TIMED_OUT
+                    record.error = TimeoutError(
+                        f"task[{record.name}] exceeded the shutdown timeout"
+                    )
 
         self._stop_reports = {name: record.report() for name, record in self._records.items()}
         return self._stop_reports

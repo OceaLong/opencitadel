@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/inference";
 import { loadInferenceSnapshot } from "@/lib/api/inference-cache";
 import { clientDataScopeKey } from "@/lib/data/client-data-scope";
+import { CAPABILITIES_CHANGED_EVENT, dispatchAppEvent } from "@/lib/events";
 import { useClientDataScope } from "@/providers/client-data-provider";
 
 export const inferenceProviders = [
@@ -126,6 +127,12 @@ export function useInferenceSettings() {
     await load();
   }, [invalidateResource, load]);
 
+  /** 写操作成功后的统一刷新：广播能力变化（顶栏模型状态芯片立即重拉）再重载列表。 */
+  const refreshAfterMutation = useCallback(async () => {
+    dispatchAppEvent(CAPABILITIES_CHANGED_EVENT);
+    await refresh();
+  }, [refresh]);
+
   const openEndpointCreate = () => {
     setEditingEndpoint(null);
     setEndpointInput(emptyEndpointInput);
@@ -157,7 +164,7 @@ export function useInferenceSettings() {
         await inferenceApi.createEndpoint(endpointInput);
       }
       setEndpointDialogOpen(false);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     } finally {
@@ -168,7 +175,7 @@ export function useInferenceSettings() {
   const deleteEndpoint = async (id: string) => {
     try {
       await inferenceApi.deleteEndpoint(id);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     }
@@ -216,7 +223,7 @@ export function useInferenceSettings() {
         await inferenceApi.createModel(modelInput);
       }
       setModelDialogOpen(false);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     } finally {
@@ -227,7 +234,7 @@ export function useInferenceSettings() {
   const deleteModel = async (id: string) => {
     try {
       await inferenceApi.deleteModel(id);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     }
@@ -256,7 +263,7 @@ export function useInferenceSettings() {
         model_id: modelId,
         binding_scope: bindingScope,
       });
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     }
@@ -265,7 +272,7 @@ export function useInferenceSettings() {
   const deleteBinding = async (purpose: InferencePurpose, bindingScope: InferenceBindingScope) => {
     try {
       await inferenceApi.deleteBinding(purpose, bindingScope);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("operationFailed"));
     }

@@ -10,7 +10,11 @@ from app.domain.runtime_policy import (
     RuntimePolicyStaleError,
     SandboxOperationsPolicy,
 )
-from app.infrastructure.external.sandbox.factory import SandboxFactory
+from app.infrastructure.external.sandbox.factory import (
+    AttachOnlySandboxFactory,
+    PooledSandboxFactory,
+    SandboxFactory,
+)
 from app.infrastructure.external.sandbox.settings import SandboxDeployment
 from tests.runtime_policy_support import MutablePolicyReader
 
@@ -104,7 +108,7 @@ async def test_fresh_policy_failure_blocks_sandbox_settings() -> None:
 @pytest.mark.asyncio
 async def test_allocation_uses_current_resource_limit_and_owner_scope() -> None:
     reader = MutablePolicyReader()
-    factory = SandboxFactory(
+    factory = PooledSandboxFactory(
         deployment=_deployment(image="sandbox:first", network="net-a"),
         operations=reader,
         **_coordination(),
@@ -121,3 +125,26 @@ async def test_allocation_uses_current_resource_limit_and_owner_scope() -> None:
     effective = factory.pool.acquire.await_args.args[0]
     assert effective.policy.memory_limit == "512m"
     assert reader.operations_calls[-1][0] is True
+
+
+@pytest.mark.asyncio
+async def test_attach_only_factory_refuses_to_create_sandboxes() -> None:
+    """P2-16②: the API-process factory must fail loudly instead of cold-starting."""
+    factory = AttachOnlySandboxFactory(
+        deployment=_deployment(image="sandbox:first", network="net-a"),
+        operations=MutablePolicyReader(),
+        **_coordination(),
+    )
+
+    with pytest.raises(RuntimeError, match="execution-kernel-only"):
+        await factory.create(owner_scope=OwnerScope.personal("user-1"))
+
+
+def test_base_factory_has_no_pool_and_cannot_create() -> None:
+    factory = SandboxFactory(
+        deployment=_deployment(image="sandbox:first", network="net-a"),
+        operations=MutablePolicyReader(),
+        **_coordination(),
+    )
+
+    assert not hasattr(factory, "pool")

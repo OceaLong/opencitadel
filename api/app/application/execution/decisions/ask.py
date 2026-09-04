@@ -1,7 +1,10 @@
 """Pure retrieval-then-answer decisions for Ask Runs."""
 
+from collections.abc import Mapping
 from datetime import datetime
+from uuid import UUID
 
+from app.application.execution import activity_types
 from app.application.execution.decisions.base import (
     activity_identity,
     activity_result,
@@ -12,6 +15,7 @@ from app.application.execution.decisions.base import (
     result_refs,
     settled_status,
 )
+from app.domain.execution.commands import JsonValue
 from app.domain.execution.context import RunExecutionContext
 from app.domain.execution.run import RunState
 
@@ -20,6 +24,7 @@ def next_ask_command(
     state: RunState,
     context: RunExecutionContext,
     *,
+    outcomes: Mapping[UUID, dict[str, JsonValue]],
     now: datetime,
 ):
     handled, lifecycle = lifecycle_command(state)
@@ -46,7 +51,7 @@ def next_ask_command(
         return request_activity(
             state,
             activity_id=retrieval_id,
-            activity_type="retrieval.search",
+            activity_type=activity_types.RETRIEVAL_SEARCH,
             now=now,
             timeout_seconds=timeout,
             input_ref=input_ref,
@@ -67,7 +72,7 @@ def next_ask_command(
         return request_activity(
             state,
             activity_id=model_id,
-            activity_type="model.call",
+            activity_type=activity_types.MODEL_CALL,
             now=now,
             timeout_seconds=timeout,
             input_ref=input_ref,
@@ -85,7 +90,7 @@ def next_ask_command(
             activity_id=model_id,
             max_retries=max_retries,
         )
-    result = activity_result(state, model_id)
+    result = activity_result(state, model_id, outcomes=outcomes)
     if result is None:
         return command(
             state,

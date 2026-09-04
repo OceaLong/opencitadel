@@ -13,6 +13,7 @@ from app.application.services.runtime_policy_reader import PolicyHeadReader
 from app.domain.errors import BadRequestError, ConflictError
 from app.domain.models.inference import InferencePurpose
 from app.domain.models.scope import OwnerScope
+from app.domain.models.search import SearchCapability, SearchProviderAvailability
 from app.domain.runtime_policy import (
     PatrolAdmissionMode,
     PatrolRemediationMode,
@@ -73,12 +74,18 @@ class CapabilityService:
         *,
         policy_heads: PolicyHeadReader,
         pdf_probe: Callable[[], bool] | None = None,
-        search_provider: str = "bing_html",
+        search_capability: SearchCapability | None = None,
     ) -> None:
         self._bindings = bindings
         self._policy_heads = policy_heads
         self._pdf_probe = pdf_probe or _default_pdf_probe
-        self._search_provider = (search_provider or "none").strip().lower()
+        # 可用性判定单源（P2-11）：组合根用 search/providers.py 的
+        # resolve_search_capability 产出判定，这里只做状态映射，不再对
+        # provider 名做字符串特判。
+        self._search_capability = search_capability or SearchCapability(
+            provider="none",
+            availability=SearchProviderAvailability.NOT_CONFIGURED,
+        )
 
     async def get_capabilities(
         self,
@@ -178,25 +185,21 @@ class CapabilityService:
                 details={"engine": "weasyprint"},
             )
         )
-        if self._search_provider == "none":
-            web_search = CapabilityState(
+        web_search = {
+            SearchProviderAvailability.NOT_CONFIGURED: CapabilityState(
                 state=CapabilityStateValue.NOT_CONFIGURED,
                 reason_key="capabilities.reason.searchProviderNotConfigured",
-            )
-        elif self._search_provider == "bing_html":
-            # HTML scraping works until the target changes markup or challenges
-            # the bot; report it as degraded so operators know to configure an
-            # API-based provider.
-            web_search = CapabilityState(
+            ),
+            SearchProviderAvailability.DEGRADED: CapabilityState(
                 state=CapabilityStateValue.DEGRADED,
                 reason_key="capabilities.reason.searchHtmlScrapingFragile",
-                details={"provider": self._search_provider},
-            )
-        else:
-            web_search = CapabilityState(
+                details={"provider": self._search_capability.provider},
+            ),
+            SearchProviderAvailability.AVAILABLE: CapabilityState(
                 state=CapabilityStateValue.AVAILABLE,
-                details={"provider": self._search_provider},
-            )
+                details={"provider": self._search_capability.provider},
+            ),
+        }[self._search_capability.availability]
         return CapabilitySnapshot(
             items={
                 "chat": chat,

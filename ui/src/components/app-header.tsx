@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 
 import { ApprovalsIndicator } from "@/components/approvals-indicator";
 import { NotificationInbox } from "@/components/notification-inbox";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -23,6 +23,7 @@ import { useNavModules } from "@/hooks/use-nav-modules";
 import { matchAdminNav } from "@/lib/admin-nav";
 import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/providers/page-title-provider";
+import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 function AppHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -44,12 +45,22 @@ export function AppHeader() {
   const showActiveModule = moduleVisible && (activeModule?.key !== "admin" || adminVisible);
   const pageTitle = usePageTitle();
   const adminItem = activeModule?.key === "admin" ? matchAdminNav(pathname) : undefined;
-  const { capability } = useCapabilities();
+  const { capability, loading: capabilitiesLoading } = useCapabilities();
+  const { openSettings } = useSettingsDialog();
   const chatState = capability("chat")?.state;
   const modelUnavailable = Boolean(chatState && chatState !== "available");
 
   const modelStatusKey =
     chatState === undefined ? "unknown" : modelUnavailable ? "unavailable" : "ok";
+  const modelStatusLabel = t("modelStatus", { status: modelStatusKey });
+  const modelStatusTitle = `${modelStatusLabel} · ${t("modelStatusTooltip")}`;
+  // unknown 且加载中：中性灰点 + 呼吸动画，绝不闪红。
+  const modelStatusDotClass =
+    modelStatusKey === "unavailable"
+      ? "bg-destructive"
+      : modelStatusKey === "ok"
+        ? "bg-success"
+        : cn("bg-muted-foreground", capabilitiesLoading && "animate-pulse");
 
   const crumbs: { label: string; href?: string }[] = [];
   if (activeModule && showActiveModule) {
@@ -93,21 +104,33 @@ export function AppHeader() {
         )}
       </div>
       <div className="flex items-center gap-1">
-        <Badge
-          variant={modelUnavailable ? "destructive" : "secondary"}
-          className="text-2xs hidden sm:inline-flex"
+        {/* 模型状态芯片：圆点 + 文案，点击直达推理设置（模型不可用时的修复入口）。 */}
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center"
+          onClick={() => openSettings("inference-setting")}
+          title={modelStatusTitle}
+          aria-label={modelStatusTitle}
         >
-          {t("modelStatus", { status: modelStatusKey })}
-        </Badge>
-        <span
-          className={cn(
-            "inline-flex size-2.5 shrink-0 rounded-full sm:hidden",
-            modelUnavailable ? "bg-destructive" : "bg-success",
-            chatState === undefined && "bg-muted-foreground",
-          )}
-          title={t("modelStatus", { status: modelStatusKey })}
-          aria-label={t("modelStatus", { status: modelStatusKey })}
-        />
+          <StatusBadge
+            variant={modelUnavailable ? "destructive" : "secondary"}
+            className="hidden gap-1.5 sm:inline-flex"
+          >
+            <span
+              className={cn("size-1.5 shrink-0 rounded-full", modelStatusDotClass)}
+              aria-hidden
+            />
+            {modelStatusLabel}
+          </StatusBadge>
+          {/* 移动端（sm 以下）保留纯圆点 */}
+          <span
+            className={cn(
+              "inline-flex size-2.5 shrink-0 rounded-full sm:hidden",
+              modelStatusDotClass,
+            )}
+            aria-hidden
+          />
+        </button>
         <ApprovalsIndicator />
         <NotificationInbox />
       </div>

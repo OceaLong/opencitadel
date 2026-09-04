@@ -40,7 +40,9 @@ class Skill(BaseModel):
     system_prompt: str = ""
     body: str = ""
     resources: list[SkillResource] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
+    # 工具白名单语义显式化（D11/P1-12）：None=不限制工具；[]=禁用全部工具。
+    # 导入/创建路径必须显式选择，不再用空列表暗示"未声明"。
+    allowed_tools: list[str] | None = None
     mcp_server_refs: list[str] = Field(default_factory=list)
     a2a_server_refs: list[str] = Field(default_factory=list)
     recommended_model_id: str | None = None

@@ -132,8 +132,15 @@ from app.infrastructure.external.image_generation.provider import ProviderImageG
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 from app.infrastructure.external.knowledge.web_connector import HttpWebDocumentGateway
 from app.infrastructure.external.llm.circuit_breaker import LLMCircuitBreaker
-from app.infrastructure.external.sandbox.factory import SandboxFactory
-from app.infrastructure.external.search.providers import build_search_engine
+from app.infrastructure.external.sandbox.factory import (
+    AttachOnlySandboxFactory,
+    PooledSandboxFactory,
+    SandboxFactory,
+)
+from app.infrastructure.external.search.providers import (
+    build_search_engine,
+    resolve_search_capability,
+)
 from app.infrastructure.external.session_list_notifier import DebouncedSessionListPublisher
 from app.infrastructure.observability.otel_adapter import OtelObservabilityAdapter
 from app.infrastructure.repositories.postgres_runtime_policy_repository import (
@@ -143,6 +150,7 @@ from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
+from app.runtime_role import ProcessRole
 
 RuntimePolicyRepositoryFactory = Callable[[ResourceBundle], RuntimePolicyRepository]
 
@@ -367,7 +375,15 @@ def build_shared_services(
     rate_limit_store = RedisRateLimitStore(redis)
     sandbox_quota_store = RedisSandboxQuotaStore(redis)
     sandbox_activity_store = RedisSandboxActivityStore(redis)
-    sandbox_factory = SandboxFactory.from_settings(
+    # Sandbox factory split (D14/P2-16②): only the execution kernel owns the
+    # warm pool and may create sandboxes; the API graph gets an attach-only
+    # factory whose create() fails loudly instead of cold-starting containers.
+    sandbox_factory_class = (
+        PooledSandboxFactory
+        if resources.role is ProcessRole.EXECUTION_KERNEL
+        else AttachOnlySandboxFactory
+    )
+    sandbox_factory = sandbox_factory_class.from_settings(
         settings=settings,
         operations=runtime_policy_reader,
         quota_store=sandbox_quota_store,
@@ -438,30 +454,59 @@ def build_shared_services(
     object_storage = _object_storage(resources)
     file_storage = _file_storage(resources, uow_factory=uow_factory)
     activity_objects = ActivityObjectStore(object_storage)
+    # Dual-process identity (D14/P2-16①): the execution kernel graph carries an
+    # explicit system authorization for its execution-store adapters — no
+    # ``None`` → request-contextvar fallback may ever enter the kernel graph
+    # (the kernel has no request identity to fall back to). The API graph keeps
+    # ``None`` on purpose: its adapters must run under each request's identity.
+    execution_authorization = (
+        AuthorizationContext.system("execution-kernel")
+        if resources.role is ProcessRole.EXECUTION_KERNEL
+        else None
+    )
     command_ingress = CommandIngress(
         writer=SqlAlchemyCommandEnvelopeWriter(
             session_factory=resources.postgres.session_factory,
-            authorization=None,
+            authorization=execution_authorization,
         )
+    )
+    # Public-event cursor signing (K4-5): an explicitly configured secret wins;
+    # the historical sha256(api_key_secret) derivation stays as fallback and as
+    # a decode-only previous key so cursors issued before the rotation keep
+    # working through the rotation window.
+    derived_cursor_secret = hashlib.sha256(settings.api_key_secret.encode()).digest()
+    if settings.public_cursor_secret:
+        cursor = PublicEventCursor(
+            secret=hashlib.sha256(settings.public_cursor_secret.encode()).digest(),
+            previous_secrets=(derived_cursor_secret,),
+        )
+    else:
+        cursor = PublicEventCursor(secret=derived_cursor_secret)
+    public_projection = PostgresPublicProjection(
+        session_factory=resources.postgres.session_factory,
+        authorization=execution_authorization,
+        cursor=cursor,
+    )
+    run_projection = PostgresRunProjection(
+        session_factory=resources.postgres.session_factory,
+        authorization=execution_authorization,
     )
     run_admission_service = RunAdmissionService(
         command_ingress=command_ingress,
         activity_objects=activity_objects,
         policy_heads=runtime_policy_reader,
-    )
-    public_projection = PostgresPublicProjection(
-        session_factory=resources.postgres.session_factory,
-        authorization=None,
-        cursor=PublicEventCursor(secret=hashlib.sha256(settings.api_key_secret.encode()).digest()),
-    )
-    run_projection = PostgresRunProjection(
-        session_factory=resources.postgres.session_factory,
-        authorization=None,
+        # Per-scope backpressure (K2-8): refuse new Runs once a scope's
+        # non-terminal Run count reaches the ceiling (0 disables).
+        active_run_counter=run_projection,
+        max_active_runs_per_scope=settings.execution_max_active_runs_per_scope,
     )
     run_control_service = RunControlService(
         commands=command_ingress,
         run_projection=run_projection,
         public_projection=public_projection,
+        # Event-driven SSE wakeup (broadcast mode — the kernel's consumer
+        # group is untouched); the poll interval stays as the no-hint fallback.
+        events_wakeup=RedisWakeupAdapter(redis),
     )
     web_documents = HttpWebDocumentGateway(policy_reader=runtime_policy_reader)
 
@@ -543,7 +588,7 @@ def build_shared_services(
     capability_service = CapabilityService(
         bindings=inference_binding_service,
         policy_heads=runtime_policy_reader,
-        search_provider=settings.search_provider,
+        search_capability=resolve_search_capability(settings.search_provider),
     )
     inference_status_service = InferenceStatusService(
         models=inference_model_service,

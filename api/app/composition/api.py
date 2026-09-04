@@ -21,6 +21,9 @@ from app.composition.types import ApiRuntime, RuntimeReadiness
 from app.infrastructure.adapters.redis_capabilities import (
     RedisRuntimePolicyHintStreamFactory,
 )
+from app.infrastructure.execution.postgres_projection_status import (
+    PostgresProjectionStatusQuery,
+)
 from app.infrastructure.external.runtime_policy_notifier import (
     RuntimePolicyHintListener,
     RuntimePolicyHintPublisher,
@@ -152,6 +155,11 @@ async def open_api_runtime(
                 compliance_service=shared.compliance_service,
                 governance_profile_service=shared.governance_profile_service,
                 governance_overview_service=shared.governance_overview_service,
+                execution_projection_status=PostgresProjectionStatusQuery(
+                    session_factory=resources.postgres.session_factory,
+                    # None: the per-request identity (admin) drives RLS.
+                    authorization=None,
+                ),
             )
             readiness.mark_ready()
             yield runtime

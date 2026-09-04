@@ -22,6 +22,11 @@ class RunExecutionContext(BaseModel):
     owner_scope: OwnerScope
     policy_snapshot: RunPolicySnapshot
     correlation_id: UUID
+    # Product anchor of the Run (session, patrol_run, knowledge base build...).
+    # Off-stream telemetry (activity progress) needs it to address the public
+    # event feed without a projection lookup per report.
+    source_entity_type: str | None = None
+    source_entity_id: str | None = None
 
     @model_validator(mode="after")
     def validate_policy_family(self) -> RunExecutionContext:

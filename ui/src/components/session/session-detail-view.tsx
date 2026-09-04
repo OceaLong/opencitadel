@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { ApprovalActionsBar } from "@/components/session/approval-actions-bar";
 import { ChatInput } from "@/components/session/chat-input";
+import { ClarificationCard } from "@/components/session/clarification-card";
 import { FilePreviewPanel } from "@/components/session/file-preview-panel";
 import { OperatorScopeDialog } from "@/components/session/operator-scope-dialog";
 import { SessionHeader } from "@/components/session/session-header";
@@ -73,6 +74,7 @@ export function SessionDetailView({
     timeline,
     sessionArtifacts,
     latestApproval,
+    latestAsk,
     observationSummary,
     fileListOpen,
     setFileListOpen,
@@ -84,6 +86,7 @@ export function SessionDetailView({
     scrollContainerRef,
     handleSend,
     handleApprovalSend,
+    handleAskSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,
@@ -354,7 +357,17 @@ export function SessionDetailView({
                   ))}
                 </div>
               )}
-              {latestApproval && (
+              {latestAsk ? (
+                <ClarificationCard
+                  key={latestAsk.ask_id}
+                  className="mb-2"
+                  question={latestAsk.question}
+                  choices={latestAsk.choices}
+                  onChoose={(choice) => handleAskSend(choice)}
+                  onDecline={() => handleAskSend(null)}
+                  disabled={streaming}
+                />
+              ) : latestApproval ? (
                 <ApprovalActionsBar
                   key={latestApproval.approval_id}
                   className="mb-2"
@@ -362,7 +375,7 @@ export function SessionDetailView({
                   onSend={handleApprovalSend}
                   disabled={streaming}
                 />
-              )}
+              ) : null}
               <ChatInput
                 ref={chatInputRef}
                 onSend={handleSend}

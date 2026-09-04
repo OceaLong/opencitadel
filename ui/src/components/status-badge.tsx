@@ -26,6 +26,7 @@ type StatusBadgeProps = {
   children: ReactNode;
   variant?: StatusBadgeVariant;
   className?: string;
+  title?: string;
   "data-testid"?: string;
 };
 

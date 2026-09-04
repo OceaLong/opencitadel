@@ -41,12 +41,44 @@ class OutboxClaim:
     dedupe_key: str
     generation: int
     attempt: int
+    # Destination-specific message body (K4-2); None for plain wakeup hints.
+    payload: dict | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalWaitingNotice:
+    """One approval lifecycle fact that needs to reach reviewers.
+
+    ``user_id`` targets a single recipient; a purely team-owned Run sets it to
+    None and carries ``team_id`` instead, and the notifier fans out to the
+    team's reviewers. ``kind`` is "approval_waiting" (pending, needs a
+    decision) or "approval_expired" (TTL elapsed, Run was cancelled).
+    """
+
+    user_id: str | None
+    approval_id: UUID
+    run_id: UUID
+    session_id: str | None
+    subject_label: str
+    team_id: str | None = None
+    kind: str = "approval_waiting"
+
+
+@runtime_checkable
+class ApprovalNotifierPort(Protocol):
+    """Collaborator that turns a durable approval fact into a reviewer ping."""
+
+    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None: ...
 
 
 @dataclass(frozen=True)
 class FormalProjectorResult:
     processed: int
     last_position: int
+    # True when the scope's projection lock was held elsewhere and this pass
+    # skipped without doing (or attempting) any work (P2-18). Callers that must
+    # make progress (rebuild) retry; the pending-scope loop just moves on.
+    busy: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,3 +159,14 @@ class FormalProjectorPort(Protocol):
 @runtime_checkable
 class OwnerScopeSourcePort(Protocol):
     async def list_pending(self, *, limit: int) -> tuple[OwnerScope, ...]: ...
+
+    async def quarantine(
+        self,
+        owner_scope: OwnerScope,
+        *,
+        reason: str,
+        error: str,
+        failure_count: int,
+    ) -> None:
+        """Durably exclude one owner scope from pending-projection discovery."""
+        ...

@@ -14,7 +14,8 @@ class SkillCreateRequest(BaseModel):
     system_prompt: str = ""
     body: str = ""
     resources: list[SkillResource] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
+    # None=不限制 / []=禁全部（D11）
+    allowed_tools: list[str] | None = None
     mcp_server_refs: list[str] = Field(default_factory=list)
     a2a_server_refs: list[str] = Field(default_factory=list)
     recommended_model_id: str | None = None
@@ -55,7 +56,8 @@ class SkillResponse(BaseModel):
     system_prompt: str
     body: str = ""
     resources: list[SkillResource] = Field(default_factory=list)
-    allowed_tools: list[str]
+    # None=不限制 / []=禁全部（D11）；UI 据此提示"未限制工具"。
+    allowed_tools: list[str] | None = None
     mcp_server_refs: list[str] = Field(default_factory=list)
     a2a_server_refs: list[str] = Field(default_factory=list)
     recommended_model_id: str | None

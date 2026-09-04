@@ -43,6 +43,8 @@ dependencies = [
     "python-docx>=1.2.0",
     "weasyprint>=63.0",
     "psutil>=6.1.0",
+    # skill_import 的 SKILL.md frontmatter 解析（K3-5，真 YAML 解析支持列表）
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +77,10 @@ testpaths = ["tests"]
 
 [tool.importlinter]
 root_package = "app"
+# Type-annotation-only imports create no runtime coupling; excluding them lets
+# the DI runtime bundles (app.composition.types) annotate fields with concrete
+# resource types while the layering contracts still bite on real imports.
+exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
 name = "domain must not import application"
@@ -101,11 +107,14 @@ source_modules = ["app.application"]
 forbidden_modules = ["app.infrastructure"]
 
 [[tool.importlinter.contracts]]
+# Indirect imports count too (K4-5 遗留已闭环): the runtime bundles in
+# app.composition.types now hold their concrete resource types as
+# annotation-only imports, so interfaces modules referencing ApiRuntime no
+# longer inherit an infrastructure chain.
 name = "interfaces must not import infrastructure"
 type = "forbidden"
 source_modules = ["app.interfaces"]
 forbidden_modules = ["app.infrastructure"]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "execution domain is isolated from upper layers"
@@ -114,10 +123,15 @@ source_modules = ["app.domain.execution.**"]
 forbidden_modules = ["app.application", "app.infrastructure", "app.interfaces"]
 
 [[tool.importlinter.contracts]]
-name = "execution projectors cannot invoke activities"
+# D14/K4-5: infrastructure adapters must not reach up into process/composition
+# modules (kernel entrypoints, composition roots) or the app-level
+# observability shim (whose implementation lives in core.otel).
+name = "infrastructure must not import composition or process modules"
 type = "forbidden"
-source_modules = ["app.application.execution.formal_projector"]
+source_modules = ["app.infrastructure"]
 forbidden_modules = [
-    "app.application.execution.activity_registry",
-    "app.application.execution.activities",
+    "app.composition",
+    "app.execution_kernel",
+    "app.execution_kernel_main",
+    "app.observability",
 ]

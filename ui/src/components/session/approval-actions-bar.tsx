@@ -13,7 +13,7 @@ import type { ApprovalEventData } from "@/lib/api/types";
 
 export type ApprovalActionsBarProps = {
   approval: ApprovalEventData;
-  onSend: (decision: "approve" | `reject: ${string}`) => Promise<void> | void;
+  onSend: (decision: "approve" | `reject: ${string}`, feedback?: string) => Promise<void> | void;
   disabled?: boolean;
   className?: string;
 };
@@ -29,12 +29,12 @@ export function ApprovalActionsBar({
   const [rejectOpen, setRejectOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const payload = approval.payload as { tool_name?: string; note?: string };
+  const payload = approval.payload;
 
-  const send = async (decision: "approve" | `reject: ${string}`) => {
+  const send = async (decision: "approve" | `reject: ${string}`, choiceFeedback?: string) => {
     setSubmitting(true);
     try {
-      await onSend(decision);
+      await onSend(decision, choiceFeedback);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {

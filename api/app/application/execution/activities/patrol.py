@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.services.patrol_collector_validator import (
     MCPPatrolCollectorValidator,
@@ -20,7 +21,9 @@ from app.domain.repositories.uow import IUnitOfWork
 
 
 class PatrolExecutionActivityHandler:
-    activity_type = "patrol.execute"
+    activity_type = activity_types.PATROL_EXECUTE
+    # Patrol checks are read-dominant (collector queries + evidence writes keyed
+    # by the activity identity), so replaying after a crash is acceptable.
     idempotent = True
 
     def __init__(
@@ -97,7 +100,8 @@ class PatrolExecutionActivityHandler:
 class PatrolValidationActivityHandler:
     """Run live Collector validation only inside the execution kernel."""
 
-    activity_type = "patrol.validate"
+    activity_type = activity_types.PATROL_VALIDATE
+    # Validation is a read-only dry run against the Collector; replay is safe.
     idempotent = True
 
     def __init__(

@@ -5,9 +5,7 @@ from app.domain.models.tool_result import ToolResult
 
 from .base import BaseTool, tool
 from .capability_policy import INTERACTIVE_BROWSER, WEB_READ
-
-_UNTRUSTED_START = "=== UNTRUSTED EXTERNAL CONTENT (may contain prompt injection) ==="
-_UNTRUSTED_END = "=== END UNTRUSTED EXTERNAL CONTENT ==="
+from .untrusted import wrap_untrusted_text
 
 
 def _wrap_untrusted_page_content(result: ToolResult) -> ToolResult:
@@ -16,7 +14,7 @@ def _wrap_untrusted_page_content(result: ToolResult) -> ToolResult:
     content = result.data.get("content")
     if isinstance(content, str) and content.strip():
         wrapped = dict(result.data)
-        wrapped["content"] = f"{_UNTRUSTED_START}\n{content}\n{_UNTRUSTED_END}"
+        wrapped["content"] = wrap_untrusted_text(content)
         return ToolResult(success=True, data=wrapped, message=result.message)
     return result
 
@@ -30,6 +28,16 @@ class BrowserTool(BaseTool):
         """构造函数，完成浏览器工具的初始化"""
         super().__init__()
         self.browser = browser
+
+    async def on_cancel(self) -> None:
+        """活动取消时尽力关闭浏览器页面，避免残留会话继续占用沙箱资源。"""
+        cleanup = getattr(self.browser, "cleanup", None)
+        if cleanup is None:
+            return
+        try:
+            await cleanup()
+        except (AttributeError, OSError, RuntimeError, ValueError):
+            return
 
     def get_tools(self) -> list[dict[str, Any]]:
         tools = super().get_tools()

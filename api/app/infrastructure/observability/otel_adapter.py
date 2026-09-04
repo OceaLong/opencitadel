@@ -1,11 +1,11 @@
 from app.domain.external.observability import ObservabilityPort
 from app.infrastructure.observability.agent_tracer import AgentTracer
-from app.observability.otel import (
+from core.config import DeploymentSettings
+from core.otel import (
     record_agent_cancel,
     record_agent_step,
     record_llm_tokens,
 )
-from core.config import DeploymentSettings
 
 
 class OtelObservabilityAdapter(ObservabilityPort):

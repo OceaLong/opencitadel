@@ -1,5 +1,5 @@
 from app.infrastructure.observability.agent_tracer import AgentTracer
-from app.observability import otel
+from core import otel
 from core.config import DeploymentSettings
 
 

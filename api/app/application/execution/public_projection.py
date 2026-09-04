@@ -12,10 +12,21 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 
 
 class PublicEventCursor:
-    def __init__(self, *, secret: bytes) -> None:
+    def __init__(self, *, secret: bytes, previous_secrets: tuple[bytes, ...] = ()) -> None:
+        """Integrity-protected cursor codec.
+
+        ``previous_secrets`` supports runtime key rotation (K4-5): new cursors
+        are always signed with ``secret``, while decoding also accepts cursors
+        signed with any previous secret so in-flight clients survive the
+        rotation window.
+        """
         if len(secret) < 16:
             raise ValueError("cursor secret must be at least 16 bytes")
+        for previous in previous_secrets:
+            if len(previous) < 16:
+                raise ValueError("cursor secret must be at least 16 bytes")
         self._secret = secret
+        self._decode_secrets = (secret, *previous_secrets)
 
     def encode(self, position: int) -> str:
         if position < 1:
@@ -33,8 +44,13 @@ class PublicEventCursor:
         if len(decoded) != 24:
             raise ValueError("invalid public event cursor")
         payload, candidate = decoded[:8], decoded[8:]
-        expected = hmac.new(self._secret, payload, hashlib.sha256).digest()[:16]
-        if not hmac.compare_digest(candidate, expected):
+        if not any(
+            hmac.compare_digest(
+                candidate,
+                hmac.new(secret, payload, hashlib.sha256).digest()[:16],
+            )
+            for secret in self._decode_secrets
+        ):
             raise ValueError("invalid public event cursor")
         position = int.from_bytes(payload, "big", signed=False)
         if position < 1:

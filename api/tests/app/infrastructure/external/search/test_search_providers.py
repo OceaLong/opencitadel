@@ -11,7 +11,6 @@ import asyncio
 import httpx
 import pytest
 
-from app.domain.services.tools.tool_registry import ToolRegistry
 from app.infrastructure.external.search import providers
 from app.infrastructure.external.search.bing_search import (
     BingSearchEngine,
@@ -130,28 +129,35 @@ def test_bing_html_empty_parse_is_a_failure_not_empty_success():
     assert "layout change" in (result.message or "")
 
 
-def test_tool_registry_omits_search_tool_without_engine():
-    class _Llm:
-        model_name = "m"
+async def test_catalog_assembly_omits_search_tool_without_engine():
+    from types import SimpleNamespace
 
-    tools_without = ToolRegistry.build_default_tools(
-        sandbox=object(),
-        browser=object(),
-        search_engine=None,
-        llm=_Llm(),
-        mcp_tool=_named_tool("mcp"),
-        a2a_tool=_named_tool("a2a"),
+    from app.application.execution.agent_tool_catalog import _assemble_search
+
+    without_engine = await _assemble_search(SimpleNamespace(_search_engine=None), object())
+    assert without_engine == []
+
+    with_engine = await _assemble_search(
+        SimpleNamespace(_search_engine=object()),
+        object(),
     )
-    names = [getattr(tool, "name", "") for tool in tools_without]
-    assert "search" not in names
+    assert [tool.name for tool in with_engine] == ["search"]
 
 
-def _named_tool(name):
-    from app.domain.services.tools.base import BaseTool
+def test_search_capability_single_source_resolution():
+    from app.domain.models.search import SearchProviderAvailability
+    from app.infrastructure.external.search.providers import (
+        available_providers,
+        resolve_search_capability,
+    )
 
-    class _Tool(BaseTool):
-        pass
-
-    tool = _Tool()
-    tool.name = name
-    return tool
+    assert available_providers() == ("bing_api", "bing_html", "none", "searxng", "tavily")
+    assert (
+        resolve_search_capability("none").availability is SearchProviderAvailability.NOT_CONFIGURED
+    )
+    assert (
+        resolve_search_capability("Bing_HTML").availability is SearchProviderAvailability.DEGRADED
+    )
+    assert resolve_search_capability("tavily").availability is SearchProviderAvailability.AVAILABLE
+    with pytest.raises(ValueError, match="unknown SEARCH_PROVIDER"):
+        resolve_search_capability("altavista")

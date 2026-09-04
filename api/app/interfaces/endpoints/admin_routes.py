@@ -7,6 +7,7 @@ from pydantic import AfterValidator
 from starlette.responses import StreamingResponse
 
 from app.application.ports.crypto import ApplicationUrls
+from app.application.ports.queries import ExecutionProjectionStatusPort
 from app.application.services.audit_service import AuditService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
@@ -54,6 +55,7 @@ from app.interfaces.schemas.team import (
 from app.interfaces.service_dependencies import (
     get_application_urls,
     get_audit_service,
+    get_execution_projection_status,
     get_team_service,
     get_uow_factory,
     get_usage_stats_service,
@@ -674,3 +676,47 @@ async def update_team_member_role_admin(
         metadata={"team_id": team_id, "user_id": user_id, "role": request_body.role.value},
     )
     return Response.success(data=TeamMemberResponse.from_domain(member))
+
+
+@router.get(
+    "/execution/projection-status",
+    response_model=Response[dict],
+    dependencies=[Depends(require_admin)],
+    summary="执行投影状态（每 scope 滞后 + 隔离清单）",
+)
+async def get_execution_projection_status_admin(
+    lag_limit: int = Query(100, ge=1, le=1000),
+    projection_status: ExecutionProjectionStatusPort = Depends(get_execution_projection_status),
+) -> Response[dict]:
+    """D13/K4-3: 管理员可见的正式投影运行状况。
+
+    - ``scope_lags``：scope head 水位 − formal checkpoint 的每 scope 滞后（仅列出滞后 > 0 的 scope，按滞后降序）。
+    - ``poisoned_scopes``：连续失败被隔离或正在重建中的 scope 清单。
+    """
+    lags = await projection_status.scope_lags(limit=lag_limit)
+    poisoned = await projection_status.poisoned_scopes()
+    return Response.success(
+        data={
+            "scope_lags": [
+                {
+                    "owner_scope_key": item.owner_scope_key,
+                    "head_position": item.head_position,
+                    "checkpoint_position": item.checkpoint_position,
+                    "lag": item.lag,
+                }
+                for item in lags
+            ],
+            "poisoned_scopes": [
+                {
+                    "owner_scope_key": item.owner_scope_key,
+                    "reason": item.reason,
+                    "last_error": item.last_error,
+                    "failure_count": item.failure_count,
+                    "rebuilding": item.rebuilding,
+                    "first_seen_at": item.first_seen_at.isoformat(),
+                    "last_seen_at": item.last_seen_at.isoformat(),
+                }
+                for item in poisoned
+            ],
+        }
+    )

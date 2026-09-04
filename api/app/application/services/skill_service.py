@@ -10,6 +10,7 @@ from app.domain.models.skill import (
     SkillSummary,
 )
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.tools.tool_names import references_a2a_tools
 from app.domain.utils.slug import slugify
 
 logger = logging.getLogger(__name__)
@@ -180,15 +181,12 @@ class SkillService:
             raise BadRequestError("Skill MCP server refs 不得重复")
         if len(set(skill.a2a_server_refs)) != len(skill.a2a_server_refs):
             raise BadRequestError("Skill A2A server refs 不得重复")
-        if (
-            any(name.startswith("mcp_") for name in skill.allowed_tools)
-            and not skill.mcp_server_refs
-        ):
+        # allowed_tools=None（不限制）不构成显式声明，不强制绑定 server refs。
+        declared_tools = skill.allowed_tools or []
+        if any(name.startswith("mcp_") for name in declared_tools) and not skill.mcp_server_refs:
             raise BadRequestError("允许 MCP 工具的 Skill 必须绑定 MCP server refs")
-        if (
-            any(name.startswith("a2a_") for name in skill.allowed_tools)
-            and not skill.a2a_server_refs
-        ):
+        # A2A 组标识单源展开（D11）：组 token 与真实工具名统一经 tool_names 判定。
+        if references_a2a_tools(skill.allowed_tools) and not skill.a2a_server_refs:
             raise BadRequestError("允许 A2A 工具的 Skill 必须绑定 A2A server refs")
         global_skill = skill.visibility == ResourceVisibility.GLOBAL
         for server_id in skill.mcp_server_refs:

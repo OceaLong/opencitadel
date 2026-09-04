@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 import uuid
@@ -382,10 +383,24 @@ class RedisSandboxActivityStore:
 
 
 class RedisWakeupAdapter:
-    STREAM_KEY = "execution:wakeup"
+    """Wake-up hints over one Redis stream, consumed via a consumer group.
 
-    def __init__(self, redis: Redis) -> None:
+    Thundering-herd治理 (K2-6/P2-5): with plain XREAD every kernel replica woke
+    on every hint and stampeded the same PostgreSQL claim scan. A single fixed
+    consumer group delivers each hint to exactly one consumer (replica), so one
+    replica wakes and the rest keep sleeping on their block timeout. Hints are
+    best-effort nudges over a durable PostgreSQL poll: entries are XACKed
+    immediately after read, and pending entries of a crashed consumer are never
+    XAUTOCLAIMed — a lost hint costs at most one idle-poll interval.
+    """
+
+    STREAM_KEY = "execution:wakeup"
+    GROUP_NAME = "execution-kernel"
+
+    def __init__(self, redis: Redis, *, consumer_name: str | None = None) -> None:
         self._redis = redis
+        self._consumer_name = consumer_name or f"wakeup:{uuid.uuid4().hex[:12]}"
+        self._group_ready = False
 
     async def publish(self, message: WakeupMessage) -> None:
         await self._redis.xadd(
@@ -397,12 +412,72 @@ class RedisWakeupAdapter:
             },
         )
 
+    async def _ensure_group(self) -> None:
+        if self._group_ready:
+            return
+        try:
+            # id="0": the single kernel group also consumes hints published
+            # before the group existed (first boot), instead of silently
+            # skipping them until the durable poll catches up.
+            await self._redis.xgroup_create(
+                self.STREAM_KEY,
+                self.GROUP_NAME,
+                id="0",
+                mkstream=True,
+            )
+        except RedisError as exc:
+            # BUSYGROUP: the group already exists (another replica created it).
+            if "BUSYGROUP" not in str(exc):
+                raise
+        self._group_ready = True
+
     async def read(
         self,
         cursor: str,
         *,
         block_milliseconds: int,
     ) -> WakeupBatch:
+        """Read a hint batch for this consumer; ``cursor`` is kept for API shape.
+
+        The consumer group tracks delivery server-side, so the caller-visible
+        cursor no longer advances; it is returned unchanged.
+        """
+        if block_milliseconds < 0:
+            raise ValueError("block_milliseconds must not be negative")
+        try:
+            await self._ensure_group()
+            streams = await self._redis.xreadgroup(
+                self.GROUP_NAME,
+                self._consumer_name,
+                {self.STREAM_KEY: ">"},
+                count=100,
+                block=block_milliseconds,
+            )
+        except (OSError, RedisError, RuntimeError, ValueError):
+            self._group_ready = False
+            return WakeupBatch(cursor, (), _REDIS_UNAVAILABLE)
+        messages, entry_ids = self._parse_entries(streams)
+        if entry_ids:
+            # Ack everything read (malformed entries included) so the pending
+            # entries list never grows without bound. A failed ack is ignored:
+            # un-acked hints are advisory and never re-claimed.
+            with contextlib.suppress(OSError, RedisError, RuntimeError, ValueError):
+                await self._redis.xack(self.STREAM_KEY, self.GROUP_NAME, *entry_ids)
+        return WakeupBatch(cursor, tuple(messages), _REDIS_AVAILABLE)
+
+    async def read_broadcast(
+        self,
+        cursor: str,
+        *,
+        block_milliseconds: int,
+    ) -> WakeupBatch:
+        """Broadcast read for SSE listeners: every listener sees every hint.
+
+        Plain XREAD with a per-listener cursor — deliberately NOT the consumer
+        group: a group read here would steal each hint from the kernel replicas
+        (and from other listeners), degrading both back to their idle polls.
+        The advanced cursor is returned for the caller to hold.
+        """
         if block_milliseconds < 0:
             raise ValueError("block_milliseconds must not be negative")
         try:
@@ -413,10 +488,17 @@ class RedisWakeupAdapter:
             )
         except (OSError, RedisError, RuntimeError, ValueError):
             return WakeupBatch(cursor, (), _REDIS_UNAVAILABLE)
+        messages, entry_ids = self._parse_entries(streams)
+        next_cursor = entry_ids[-1] if entry_ids else cursor
+        return WakeupBatch(next_cursor, tuple(messages), _REDIS_AVAILABLE)
+
+    @staticmethod
+    def _parse_entries(streams) -> tuple[list[WakeupMessage], list[str]]:
         messages: list[WakeupMessage] = []
-        next_cursor = cursor
+        entry_ids: list[str] = []
         for _stream, entries in streams:
             for entry_id, raw in entries:
+                entry_ids.append(_text(entry_id))
                 fields = {_text(key): _text(value) for key, value in raw.items()}
                 try:
                     messages.append(
@@ -428,8 +510,7 @@ class RedisWakeupAdapter:
                     )
                 except (KeyError, ValueError):
                     continue
-                next_cursor = _text(entry_id)
-        return WakeupBatch(next_cursor, tuple(messages), _REDIS_AVAILABLE)
+        return messages, entry_ids
 
 
 class RedisRateLimitStore(RateLimitStorePort):

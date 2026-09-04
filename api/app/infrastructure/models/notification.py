@@ -21,6 +21,7 @@ class NotificationModel(Base):
     )
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approval_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     artifact_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     job_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
@@ -37,6 +38,7 @@ class NotificationModel(Base):
                 "user_id": self.user_id,
                 "type": self.type,
                 "session_id": self.session_id,
+                "approval_id": self.approval_id,
                 "artifact_id": self.artifact_id,
                 "job_id": self.job_id,
                 "message": message,

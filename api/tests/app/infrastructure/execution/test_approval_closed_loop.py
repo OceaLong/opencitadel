@@ -11,17 +11,22 @@ Exercises the three halves the loop was missing:
   paginated, honouring owner scope.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.application.execution.outbox_dispatcher import (
+    APPROVAL_NOTICE_DESTINATION,
+    OutboxDispatcher,
+)
 from app.domain.execution.events import NewEvent
 from app.domain.execution.store import AppendContext, StreamRef
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import OwnerScope
+from app.infrastructure.adapters.execution_ports import SqlAlchemyOutboxStore
 from app.infrastructure.execution.postgres_event_store import PostgresEventStore
 from app.infrastructure.execution.postgres_formal_projector import (
     ApprovalWaitingNotice,
@@ -50,6 +55,40 @@ class _RecordingNotifier:
         self.notices.append(notice)
 
 
+class _NoopWakeupPublisher:
+    async def publish(self, message) -> None:
+        del message
+
+
+async def _dispatch_notices(kernel_factory, notifier, *, now=None) -> None:
+    """Drain the durable outbox through the given approval notifier (K4-2)."""
+    dispatcher = OutboxDispatcher(
+        store=SqlAlchemyOutboxStore(
+            session_factory=kernel_factory,
+            authorization=AuthorizationContext.system("approval-outbox-test"),
+        ),
+        publisher=_NoopWakeupPublisher(),
+        approval_notifier=notifier,
+    )
+    await dispatcher.dispatch_batch(limit=100, now=now or datetime.now(UTC))
+
+
+async def _notice_outbox_rows(owner: str) -> list:
+    async with execution_admin_session() as session:
+        return list(
+            (
+                await session.execute(
+                    text(
+                        "SELECT dedupe_key, delivered_at, payload FROM execution_outbox "
+                        "WHERE owner_user_id = :owner AND destination = :destination "
+                        "ORDER BY created_at"
+                    ),
+                    {"owner": owner, "destination": APPROVAL_NOTICE_DESTINATION},
+                )
+            ).all()
+        )
+
+
 def _context(owner_user_id: str) -> AppendContext:
     return AppendContext(
         owner_user_id=owner_user_id,
@@ -63,7 +102,7 @@ def _context(owner_user_id: str) -> AppendContext:
 def _run_created(source_entity_id: str) -> NewEvent:
     return NewEvent(
         event_type="RunCreated",
-        event_schema_version=2,
+        event_schema_version=1,
         public_payload={
             "family": "agent",
             "source_entity_type": "session",
@@ -105,6 +144,10 @@ def _approval_requested(approval_id: str, subject_label: str) -> NewEvent:
 async def _cleanup(owner_user_ids: list[str]) -> None:
     async with execution_admin_session() as session:
         for owner in owner_user_ids:
+            await session.execute(
+                text("DELETE FROM execution_outbox WHERE owner_user_id = :owner"),
+                {"owner": owner},
+            )
             for table, trigger in (
                 ("execution_events", "execution_events_immutable"),
                 ("execution_stream_owners", "execution_stream_owners_immutable"),
@@ -175,7 +218,6 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
     projector = PostgresFormalProjector(
         session_factory=kernel_factory,
         authorization=AuthorizationContext.system("approval-projector"),
-        notifier=notifier,
     )
     projection = PostgresRunProjection(
         session_factory=kernel_factory,
@@ -199,10 +241,13 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
             )
             await session.commit()
 
-        # ApprovalRequested -> the reviewer is pinged exactly once, and the
-        # approval is projected as pending.
+        # ApprovalRequested -> one durable approval.notice outbox row is
+        # written in the projection transaction; dispatching it pings the
+        # reviewer exactly once, and the approval is projected as pending.
         first = await projector.run_once(scope, limit=100)
         assert first.processed == 3
+        assert len(await _notice_outbox_rows(owner)) == 1
+        await _dispatch_notices(kernel_factory, notifier)
         assert len(notifier.notices) == 1
         notice = notifier.notices[0]
         assert notice.user_id == owner
@@ -246,6 +291,7 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
         assert second.processed == 2
         # The expiry itself pings once more so the initiator learns the Run was
         # cancelled by timeout, instead of it failing silently.
+        await _dispatch_notices(kernel_factory, notifier)
         assert len(notifier.notices) == 2
         assert notifier.notices[1].kind == "approval_expired"
         assert notifier.notices[1].user_id == owner
@@ -263,8 +309,11 @@ async def test_approval_request_pings_reviewer_and_expiry_marks_projection_expir
         assert expired[0].status == "expired"
         assert expired[0].decision == "expired"
 
-        # Rebuild replays every event but must NOT re-ping the reviewer.
+        # Rebuild replays every event but must NOT write new notice rows
+        # (and therefore never re-pings the reviewer).
         await projector.rebuild(scope)
+        assert len(await _notice_outbox_rows(owner)) == 2
+        await _dispatch_notices(kernel_factory, notifier)
         assert len(notifier.notices) == 2
     finally:
         await _cleanup([owner])
@@ -286,7 +335,6 @@ async def test_postgres_notifier_persists_an_approval_waiting_notification(
     projector = PostgresFormalProjector(
         session_factory=kernel_factory,
         authorization=AuthorizationContext.system("approval-projector"),
-        notifier=notifier,
     )
     try:
         await _seed_user(owner)
@@ -308,6 +356,33 @@ async def test_postgres_notifier_persists_an_approval_waiting_notification(
 
         await projector.run_once(scope := OwnerScope.personal(owner), limit=100)
         assert scope.user_id == owner
+
+        # Crash before delivery: the notifier blows up, the outbox row stays
+        # undelivered, and a later dispatcher pass redelivers it (K4-2).
+        class _CrashingNotifier:
+            async def approval_waiting(self, notice) -> None:
+                del notice
+                raise RuntimeError("injected notifier crash")
+
+        await _dispatch_notices(kernel_factory, _CrashingNotifier())
+        undelivered = await _notice_outbox_rows(owner)
+        assert len(undelivered) == 1
+        assert undelivered[0].delivered_at is None
+
+        # The failed attempt armed a retry backoff on available_at; a later
+        # dispatcher pass (simulated with a future ``now``) redelivers it.
+        await _dispatch_notices(
+            kernel_factory,
+            notifier,
+            now=datetime.now(UTC) + timedelta(seconds=30),
+        )
+        redelivered = await _notice_outbox_rows(owner)
+        assert redelivered[0].delivered_at is not None
+
+        # Re-projecting the same history (rebuild) must not create a second
+        # notice row: the deterministic dedupe_key absorbs the replay.
+        await projector.rebuild(scope)
+        assert len(await _notice_outbox_rows(owner)) == 1
 
         # The reviewer really has a durable approval_waiting notification.
         async with kernel_factory() as session:
@@ -385,3 +460,110 @@ async def test_inbox_lists_own_pending_approvals_scoped_and_paginated(
         assert first[0].approval_id != second[0].approval_id
     finally:
         await _cleanup([mine, other])
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_db_schema")
+async def test_settled_approval_marks_its_waiting_notification_read(
+    kernel_factory,
+) -> None:
+    """处理了还是有提示的根治：审批被决定后，等待通知同事务自动已读。"""
+    from sqlalchemy import select as _select
+
+    from app.infrastructure.models.notification import NotificationModel
+    from app.infrastructure.models.user import UserORM
+
+    owner = f"approval-read-{uuid4()}"
+    scope = OwnerScope.personal(owner)
+    run_id = uuid4()
+    approval_id = uuid4()
+    stream = StreamRef(stream_type="run", stream_id=str(run_id))
+    projector = PostgresFormalProjector(
+        session_factory=kernel_factory,
+        authorization=AuthorizationContext.system("approval-read-projector"),
+    )
+
+    async with kernel_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("approval-read-seed")
+        )
+        session.add(
+            UserORM(
+                id=owner,
+                email=f"{owner}@example.com",
+                username=owner[:32],
+                password_hash="x",
+            )
+        )
+        await session.commit()
+
+    async with kernel_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("approval-read-seed")
+        )
+        # 模拟 notifier 已投递的等待通知（带 approval_id 关联）。
+        session.add(
+            NotificationModel(
+                user_id=owner,
+                type="approval_waiting",
+                approval_id=str(approval_id),
+                message="审批等待处理",
+            )
+        )
+        await PostgresEventStore(session).append(
+            stream,
+            0,
+            (
+                _run_created("session-read"),
+                _run_started(),
+                _approval_requested(str(approval_id), "write_external"),
+                NewEvent(
+                    event_type="ApprovalDecided",
+                    event_schema_version=1,
+                    public_payload={
+                        "approval_id": str(approval_id),
+                        "decision": "approved",
+                        "actor_user_id": owner,
+                        "feedback": "",
+                    },
+                    internal_payload={},
+                ),
+                NewEvent(
+                    event_type="RunResumed",
+                    event_schema_version=1,
+                    public_payload={},
+                    internal_payload={},
+                ),
+            ),
+            _context(owner),
+        )
+        await session.commit()
+
+    try:
+        result = await projector.run_once(scope, limit=100)
+        assert result.processed == 5
+
+        async with kernel_factory() as session:
+            await configure_session_authorization(
+                session, AuthorizationContext.system("approval-read-verify")
+            )
+            row = await session.scalar(
+                _select(NotificationModel).where(NotificationModel.approval_id == str(approval_id))
+            )
+            assert row is not None
+            assert row.read is True
+    finally:
+        async with kernel_factory() as session:
+            await configure_session_authorization(
+                session, AuthorizationContext.system("approval-read-cleanup")
+            )
+            from sqlalchemy import delete as _delete
+
+            await session.execute(
+                _delete(NotificationModel).where(NotificationModel.approval_id == str(approval_id))
+            )
+            await session.execute(_delete(UserORM).where(UserORM.id == owner))
+            await session.commit()
+        # 清掉本测试产生的事件/投影/检查点等（决策源测试做全局 load_ready，
+        # 残留的武装投影行会污染它们）。
+        await _cleanup([owner])

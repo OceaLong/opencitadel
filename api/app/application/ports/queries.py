@@ -305,3 +305,35 @@ class PublicProjectionPort(Protocol):
         latest: bool = False,
         limit: int = 100,
     ) -> PublicEventPage: ...
+
+
+@dataclass(frozen=True)
+class ProjectionScopeLag:
+    """Per owner-scope formal-projection lag (D13/K4-3 status endpoint)."""
+
+    owner_scope_key: str
+    head_position: int
+    checkpoint_position: int
+    lag: int
+
+
+@dataclass(frozen=True)
+class PoisonedScopeEntry:
+    """One quarantined (or rebuilding) projection scope for operators."""
+
+    owner_scope_key: str
+    reason: str
+    last_error: str
+    failure_count: int
+    rebuilding: bool
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
+@runtime_checkable
+class ExecutionProjectionStatusPort(Protocol):
+    """Admin observability over the formal projection (lag + quarantine)."""
+
+    async def scope_lags(self, *, limit: int = 100) -> tuple[ProjectionScopeLag, ...]: ...
+
+    async def poisoned_scopes(self) -> tuple[PoisonedScopeEntry, ...]: ...

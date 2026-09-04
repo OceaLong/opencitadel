@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.admission import RunAdmissionService
 from app.application.ports.queries import RunProjectionPort
@@ -15,7 +16,7 @@ from app.domain.models.scope import OwnerScope
 
 
 class ChildRunActivityHandler:
-    activity_type = "child_run.start"
+    activity_type = activity_types.CHILD_RUN_START
     idempotent = True
 
     def __init__(

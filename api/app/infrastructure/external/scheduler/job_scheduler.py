@@ -17,6 +17,9 @@ from app.domain.runtime_policy import (
 from app.domain.utils.time_utils import utc_now
 
 if TYPE_CHECKING:
+    from app.application.services.execution_queue_retention_service import (
+        ExecutionQueueRetentionService,
+    )
     from app.application.services.patrol_retention_service import (
         PatrolRetentionService,
     )
@@ -194,6 +197,7 @@ async def run_scheduler_loop(
     resource_version_gc_service: Optional["ResourceVersionGCService"] = None,
     patrol_retention_service: Optional["PatrolRetentionService"] = None,
     recycle_bin_retention_service: Optional["RecycleBinRetentionService"] = None,
+    execution_queue_retention_service: Optional["ExecutionQueueRetentionService"] = None,
     mcp_pool: Optional["MCPConnectionPoolPort"] = None,
     a2a_pool: Optional["A2AConnectionPoolPort"] = None,
 ) -> None:
@@ -268,6 +272,7 @@ async def run_scheduler_loop(
                     resource_version_gc_service=resource_version_gc_service,
                     patrol_retention_service=patrol_retention_service,
                     recycle_bin_retention_service=recycle_bin_retention_service,
+                    execution_queue_retention_service=execution_queue_retention_service,
                 ),
                 leases=leases,
                 key=SCHEDULER_LEADER_KEY,
@@ -294,6 +299,7 @@ async def _run_scheduler_leader_tick(
     resource_version_gc_service: Optional["ResourceVersionGCService"],
     patrol_retention_service: Optional["PatrolRetentionService"],
     recycle_bin_retention_service: Optional["RecycleBinRetentionService"],
+    execution_queue_retention_service: Optional["ExecutionQueueRetentionService"] = None,
 ) -> None:
     """One leader-only tick: reconcile, GC/retention ticks, and job triggers.
 
@@ -344,6 +350,19 @@ async def _run_scheduler_leader_tick(
                 logger.info("Recycle-bin retention tick purged=%s", purge_result)
         except (OSError, RuntimeError, ValueError):
             logger.exception("Recycle-bin retention tick failed")
+
+    # Execution queue lifecycle (K2-5/D7): settled inbox/outbox/timer/activity
+    # rows are deleted in bounded batches once they age past their retention
+    # windows, keeping claim scans flat over time.
+    if execution_queue_retention_service is not None and execution_queue_retention_service.enabled:
+        try:
+            queue_purge = await execution_queue_retention_service.purge_expired(
+                now=datetime.now(UTC)
+            )
+            if any(queue_purge.values()):
+                logger.info("Execution queue retention tick purged=%s", queue_purge)
+        except (OSError, RuntimeError, ValueError):
+            logger.exception("Execution queue retention tick failed")
 
     try:
         async with uow_factory() as uow:

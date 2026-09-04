@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { Bell } from "lucide-react";
+import {
+  Bell,
+  CalendarClock,
+  ClipboardCheck,
+  ClipboardX,
+  FileCheck,
+  type LucideIcon,
+  MessageCircleQuestion,
+  MessageCircleX,
+  ShieldCheck,
+} from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +30,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { notificationsApi } from "@/lib/api/notifications";
 import type { Notification } from "@/lib/api/types";
+import { APPROVALS_CHANGED_EVENT, dispatchAppEvent, subscribeAppEvent } from "@/lib/events";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -47,6 +58,27 @@ function notificationHref(item: Notification): string | null {
   if (item.session_id) return `/sessions/${item.session_id}`;
   if (item.job_id) return "/automation";
   return null;
+}
+
+/**
+ * 通知类型 → 图标映射（对齐后端 NotificationType）。
+ * 审批/澄清共用"待处理 / 已过期"两种视觉：clarification_* 用对话气泡系
+ * 对照 approval_* 的剪贴板系；未知类型回落到铃铛。
+ */
+const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
+  approval_waiting: ClipboardCheck,
+  approval_expired: ClipboardX,
+  clarification_waiting: MessageCircleQuestion,
+  clarification_expired: MessageCircleX,
+  job_started: CalendarClock,
+  job_complete: CalendarClock,
+  job_failed: CalendarClock,
+  patrol_complete: ShieldCheck,
+  artifact_final: FileCheck,
+};
+
+function notificationIcon(item: Notification): LucideIcon {
+  return NOTIFICATION_TYPE_ICONS[item.type] ?? Bell;
 }
 
 export function NotificationInbox({ className }: { className?: string }) {
@@ -114,6 +146,10 @@ export function NotificationInbox({ className }: { className?: string }) {
           const eventType = event.type as string;
           if (eventType === "notification" || eventType === "connected") {
             void refresh();
+            // 通知变化往往意味着审批集合变化（新审批到达 / 审批被处理），
+            // 广播给审批角标立即重拉。触发源只有流事件，下方的事件监听回调
+            // 只 refresh 不再 dispatch，避免自触发循环。
+            dispatchAppEvent(APPROVALS_CHANGED_EVENT);
           }
         },
         // 连接出错：稍后重连（对齐 EventSource 的自动重连语义）
@@ -131,6 +167,13 @@ export function NotificationInbox({ className }: { className?: string }) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       cleanup?.();
     };
+  }, [authLoading, refresh, userId]);
+
+  // 本人决策审批后（后端已把关联通知标记已读），立即刷新未读数使其回落。
+  // 注意：这里只 refresh，不 dispatch，避免与上方流事件处的 dispatch 成环。
+  useEffect(() => {
+    if (authLoading || !userId) return;
+    return subscribeAppEvent(APPROVALS_CHANGED_EVENT, () => void refresh());
   }, [authLoading, refresh, userId]);
 
   const handleMarkRead = async (item: Notification) => {
@@ -177,14 +220,24 @@ export function NotificationInbox({ className }: { className?: string }) {
           ) : (
             items.map((item) => {
               const href = notificationHref(item);
+              const Icon = notificationIcon(item);
               const content = (
-                <div className="flex flex-col gap-0.5">
-                  <span className={cn("text-sm", !item.read && "font-medium")}>
-                    {notificationMessage(item)}
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {formatTime(item.created_at, locale)}
-                  </span>
+                <div className="flex items-start gap-2">
+                  <Icon
+                    className={cn(
+                      "mt-0.5 size-4 shrink-0",
+                      item.read ? "text-muted-foreground" : "text-foreground",
+                    )}
+                    aria-hidden
+                  />
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className={cn("text-sm", !item.read && "font-medium")}>
+                      {notificationMessage(item)}
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      {formatTime(item.created_at, locale)}
+                    </span>
+                  </div>
                 </div>
               );
               return (

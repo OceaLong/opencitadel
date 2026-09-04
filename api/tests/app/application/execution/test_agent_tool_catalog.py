@@ -21,6 +21,7 @@ from app.domain.models.inference import (
 from app.domain.models.integration_runtime import A2ARuntime, MCPRuntime
 from app.domain.models.skill import Skill
 from app.domain.models.tool_policy import CONSERVATIVE_TOOL_POLICY
+from app.domain.services.tools.errors import ToolInvocationError
 from tests.app.execution_test_support import run_execution_context_for
 
 CONTEXT = ActivityContext(
@@ -189,12 +190,13 @@ async def test_skill_filters_tool_exposure_and_execution() -> None:
     )
     catalog, mcp_servers, a2a_servers = _catalog(skill)
 
-    definitions = await catalog.definitions(_payload(skill.id), CONTEXT)
+    snapshot = await catalog.definitions(_payload(skill.id), CONTEXT)
 
-    assert [item.name for item in definitions] == ["search_web"]
+    assert list(snapshot.tool_names) == ["search_web"]
+    assert snapshot.fingerprint
     assert mcp_servers.refs == ("collector",)
     assert a2a_servers.refs == ("agent-1",)
-    with pytest.raises(ValueError, match="absent"):
+    with pytest.raises(ToolInvocationError, match="不可用"):
         await catalog.invoke(
             _payload(skill.id),
             CONTEXT,
@@ -204,7 +206,9 @@ async def test_skill_filters_tool_exposure_and_execution() -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_skill_is_rejected_before_tools_are_built() -> None:
+async def test_disabled_skill_degrades_to_no_skill_and_run_continues() -> None:
+    # P2-10：运行中 Run 引用的 skill 被禁用时降级为"无 skill 继续"，
+    # 不再击穿为 Run 失败；工具面回到无白名单的默认目录。
     skill = Skill(
         id="skill-1",
         name="disabled",
@@ -214,8 +218,10 @@ async def test_disabled_skill_is_rejected_before_tools_are_built() -> None:
     )
     catalog, _, _ = _catalog(skill)
 
-    with pytest.raises(ValueError, match="disabled"):
-        await catalog.definitions(_payload(skill.id), CONTEXT)
+    snapshot = await catalog.definitions(_payload(skill.id), CONTEXT)
+
+    assert "search_web" in snapshot.tool_names
+    assert len(snapshot.tool_names) > 1
 
 
 @pytest.mark.asyncio
@@ -229,10 +235,10 @@ async def test_image_generation_is_a_governed_formal_tool() -> None:
     model = _resolved_model(image_generation=True)
     catalog, _, _ = _catalog(skill, model=model)
 
-    definitions = await catalog.definitions(_payload(skill.id), CONTEXT)
+    snapshot = await catalog.definitions(_payload(skill.id), CONTEXT)
 
-    assert [item.name for item in definitions] == ["generate_image"]
-    assert definitions[0].requires_approval is True
+    assert list(snapshot.tool_names) == ["generate_image"]
+    assert snapshot.definitions[0].requires_approval is True
     result = await catalog.invoke(
         _payload(skill.id),
         CONTEXT,
@@ -314,3 +320,130 @@ async def test_rerank_llm_is_wired_when_kb_bound() -> None:
 
     assert len(calls) == 1
     assert calls[0]["thinking_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_catalog_drift_after_definitions_yields_not_found_tool_error() -> None:
+    # 快照漂移（D9）：definitions 之后 skill 白名单收紧（禁全部工具），
+    # invoke 得到 not_found tool error 喂回模型，而不是击穿 Run。
+    skill = Skill(
+        id="skill-1",
+        name="restricted",
+        slug="restricted",
+        allowed_tools=["search_web"],
+    )
+    catalog, _, _ = _catalog(skill)
+
+    snapshot = await catalog.definitions(_payload(skill.id), CONTEXT)
+    assert "search_web" in snapshot.tool_names
+
+    skill.allowed_tools = []  # 禁全部：目录相对快照发生漂移
+    with pytest.raises(ToolInvocationError) as exc_info:
+        await catalog.invoke(
+            _payload(skill.id),
+            CONTEXT,
+            name="search_web",
+            arguments={"query": "q"},
+            expected_fingerprint=snapshot.fingerprint,
+        )
+    assert exc_info.value.kind == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_removed_search_engine_yields_not_found_instead_of_run_failure() -> None:
+    skill = Skill(id="skill-1", name="s", slug="s", allowed_tools=["search_web"])
+    catalog, _, _ = _catalog(skill)
+    snapshot = await catalog.definitions(_payload(skill.id), CONTEXT)
+
+    catalog._search_engine = None  # 部署侧移除了搜索工具
+    with pytest.raises(ToolInvocationError) as exc_info:
+        await catalog.invoke(
+            _payload(skill.id),
+            CONTEXT,
+            name="search_web",
+            arguments={"query": "q"},
+            expected_fingerprint=snapshot.fingerprint,
+        )
+    assert exc_info.value.kind == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_vision_tools_join_agent_catalog_when_model_has_vision() -> None:
+    # D10：Vision 两工具正式接入生产目录（AGENT mode，READ_ONLY policy）。
+    model = _resolved_model()
+    model = model.model_copy(
+        update={
+            "model": model.model.model_copy(
+                update={
+                    "capabilities": model.model.capabilities.model_copy(update={"vision": True})
+                }
+            )
+        }
+    )
+
+    def _factory(resolved, **kwargs):
+        return SimpleNamespace(capabilities=resolved.model.capabilities)
+
+    catalog, _, _ = _catalog(None, model=model, llm_factory=_factory)
+    payload = {"session_id": "session-1", "mode": "agent", "resource_bindings": []}
+
+    snapshot = await catalog.definitions(payload, CONTEXT)
+
+    assert "analyze_image" in snapshot.tool_names
+    assert "inspect_image_region" in snapshot.tool_names
+    by_name = {item.name: item for item in snapshot.definitions}
+    assert by_name["analyze_image"].requires_approval is False
+
+
+@pytest.mark.asyncio
+async def test_vision_tools_absent_without_vision_capability() -> None:
+    catalog, _, _ = _catalog(None, llm_factory=lambda *a, **k: SimpleNamespace())
+    payload = {"session_id": "session-1", "mode": "agent", "resource_bindings": []}
+
+    snapshot = await catalog.definitions(payload, CONTEXT)
+
+    assert "analyze_image" not in snapshot.tool_names
+    assert "inspect_image_region" not in snapshot.tool_names
+
+
+@pytest.mark.asyncio
+async def test_invoke_runs_on_cancel_hook_before_propagating(monkeypatch) -> None:
+    import asyncio
+
+    from app.application.execution.agent_tool_catalog import _BuiltCatalog
+    from app.domain.models.tool_result import ToolResult as _ToolResult
+    from app.domain.services.tools.base import BaseTool, tool
+    from app.domain.services.tools.capability_policy import READ_SAFE
+
+    class _HangingPack(BaseTool):
+        name = "hanging"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancelled = False
+
+        @tool(
+            name="hang_forever",
+            description="hang",
+            parameters={},
+            required=[],
+            policy=READ_SAFE,
+        )
+        async def hang_forever(self) -> _ToolResult:
+            raise asyncio.CancelledError
+
+        async def on_cancel(self) -> None:
+            self.cancelled = True
+
+    pack = _HangingPack()
+    catalog, _, _ = _catalog(None)
+
+    async def fake_build(payload, context):
+        return _BuiltCatalog(packs=[pack], retrieval=[], fingerprint="fp")
+
+    monkeypatch.setattr(catalog, "_build", fake_build)
+
+    with pytest.raises(asyncio.CancelledError):
+        await catalog.invoke({}, CONTEXT, name="hang_forever", arguments={})
+
+    assert pack.cancelled is True

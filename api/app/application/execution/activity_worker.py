@@ -16,7 +16,8 @@ from app.application.execution.activity_registry import (
     UnknownActivityTypeError,
 )
 from app.application.execution.orchestrator import CommandResult
-from app.application.execution.run_context import RunContextSource
+from app.application.execution.progress import ActivityProgressRecord, ActivityProgressSink
+from app.application.execution.run_context import RunContextSource, RunContextUnavailableError
 from app.domain.execution.activity import (
     ActivityClaim,
     ActivityContext,
@@ -26,10 +27,17 @@ from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.context import RunExecutionContext
 from app.domain.models.scope import OwnerScopeType
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
-from app.observability.otel import get_tracer
+from core.otel import get_tracer
 
 logger = logging.getLogger(__name__)
 _tracer = get_tracer("opencitadel.execution.activity")
+
+# Exception types treated as transient worker infrastructure faults (K2-2/D5):
+# a claim hitting one of these is deferred with backoff instead of settling the
+# activity as failed. The persistence adapter extends this tuple with its own
+# driver exceptions (e.g. SQLAlchemy's) at wiring time — the application layer
+# deliberately does not import persistence libraries.
+DEFAULT_INFRASTRUCTURE_ERRORS: tuple[type[Exception], ...] = (OSError, TimeoutError)
 
 # Default per-process concurrency ceiling for executing claims (P1-3 backpressure).
 # Each ``_execute_claim`` checks out several DB connections (run-context load,
@@ -105,6 +113,8 @@ class ActivityWorker:
         worker_id: str,
         claim_ttl: timedelta = timedelta(seconds=30),
         max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
+        progress_sink: ActivityProgressSink | None = None,
+        infrastructure_errors: tuple[type[Exception], ...] = DEFAULT_INFRASTRUCTURE_ERRORS,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("worker_id must not be empty")
@@ -119,6 +129,8 @@ class ActivityWorker:
         self._worker_id = worker_id
         self._claim_ttl = claim_ttl
         self._max_concurrency = max_concurrency
+        self._progress_sink = progress_sink
+        self._infrastructure_errors = infrastructure_errors
         # Bounds concurrent claim execution (and therefore concurrent connection
         # demand) regardless of the claim batch size. See module docstring above.
         self._semaphore = asyncio.Semaphore(max_concurrency)
@@ -145,10 +157,72 @@ class ActivityWorker:
             "stale": 0,
             "deferred": 0,
         }
-        statuses = await asyncio.gather(*(self._execute_claim(claim, now=now) for claim in claims))
-        for status in statuses:
+        # Worker resilience (D5): one claim raising must never abort its batch
+        # siblings or tear down the activity lane. Exceptions are collected per
+        # claim and classified below instead of propagating out of the batch.
+        statuses = await asyncio.gather(
+            *(self._execute_claim(claim, now=now) for claim in claims),
+            return_exceptions=True,
+        )
+        for claim, status in zip(claims, statuses, strict=True):
+            if isinstance(status, BaseException):
+                counts[await self._absorb_claim_failure(claim, status)] += 1
+                continue
             counts[status] += 1
         return ActivityBatchStats(**counts)
+
+    async def _absorb_claim_failure(self, claim: ActivityClaim, error: BaseException) -> str:
+        """Classify one claim's escaped exception; never re-raise (except cancel).
+
+        Infrastructure faults (database, network, timeouts) and unknown bugs
+        both defer the claim with a claim-generation backoff: the lease-fenced
+        row becomes claimable again later, and the store's claim-attempt cap
+        eventually dead-letters a genuine poison pill.
+        """
+        if isinstance(error, asyncio.CancelledError):
+            # Process shutdown cancellation must keep propagating.
+            raise error
+        if isinstance(error, RunContextUnavailableError):
+            # The scope's formal projection is being rebuilt (K4-1): the Run
+            # context row will reappear once the rebuild completes, so this is
+            # a transient wait, not a policy failure.
+            logger.warning(
+                "Activity claim deferred: Run context unavailable during projection "
+                "rebuild activity_id=%s activity_type=%s",
+                claim.request.activity_id,
+                claim.request.activity_type,
+            )
+        elif isinstance(error, self._infrastructure_errors):
+            logger.warning(
+                "Activity claim infrastructure failure activity_id=%s activity_type=%s: %s",
+                claim.request.activity_id,
+                claim.request.activity_type,
+                error,
+            )
+        else:
+            logger.error(
+                "Activity claim unexpected failure activity_id=%s activity_type=%s",
+                claim.request.activity_id,
+                claim.request.activity_type,
+                exc_info=error,
+            )
+        retry_after = timedelta(seconds=min(5.0 * max(1, claim.claim_generation), 60.0))
+        try:
+            deferred = await self._store.defer(
+                claim,
+                now=datetime.now(UTC),
+                retry_after=retry_after,
+            )
+        except Exception as defer_error:  # noqa: BLE001 - absorbing boundary
+            # The defer itself failed (e.g. database still down). The claim
+            # lease will expire and the row becomes claimable again anyway.
+            logger.warning(
+                "Activity claim defer failed activity_id=%s: %s",
+                claim.request.activity_id,
+                defer_error,
+            )
+            return "stale"
+        return "deferred" if deferred else "stale"
 
     async def _execute_claim(
         self,
@@ -238,7 +312,7 @@ class ActivityWorker:
                 now=datetime.now(UTC),
                 claim_ttl=self._claim_ttl,
             ),
-            report_progress=self._progress_reporter(claim),
+            report_progress=self._progress_reporter(claim, run_context),
         )
         stop_heartbeat = asyncio.Event()
         claim_lost = asyncio.Event()
@@ -271,7 +345,13 @@ class ActivityWorker:
             if claim_lost.is_set():
                 return "stale"
             raise
-        except Exception:
+        except Exception as error:
+            if isinstance(error, self._infrastructure_errors):
+                # A persistence/infrastructure fault during execution is not a
+                # handler bug: let it escape to run_once's per-claim
+                # classification, which defers the lease-fenced claim with
+                # backoff instead of settling the activity as failed (D5).
+                raise
             logger.exception(
                 "Activity handler failed activity_id=%s activity_type=%s",
                 claim.request.activity_id,
@@ -283,17 +363,19 @@ class ActivityWorker:
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
 
+        # The handler may have run for minutes: settlement uses a fresh clock,
+        # not the stale batch-entry ``now`` (P2 幂等复核 / K2-8).
         if outcome.status == "deferred":
             retry_after = timedelta(seconds=outcome.retry_after_seconds or 1.0)
             if not await self._store.defer(
                 claim,
-                now=now,
+                now=datetime.now(UTC),
                 retry_after=retry_after,
             ):
                 return "stale"
             return "deferred"
 
-        result = await self._submit_outcome(claim, outcome, now=now)
+        result = await self._submit_outcome(claim, outcome, now=datetime.now(UTC))
         if result.status != "accepted":
             return "stale"
         return outcome.status
@@ -372,25 +454,43 @@ class ActivityWorker:
             now=now,
         )
 
-    def _progress_reporter(self, claim: ActivityClaim):
+    def _progress_reporter(self, claim: ActivityClaim, run_context: RunExecutionContext):
+        """Off-stream telemetry: progress never touches the aggregate stream.
+
+        Reports go straight to the progress sink (public feed + build
+        projection). A sink failure is swallowed into ``False`` — progress is
+        display-only and must never fail or slow the activity itself.
+        """
+        sink = self._progress_sink
+        if sink is None:
+            return None
         sequence = 0
 
         async def report(payload: dict) -> bool:
             nonlocal sequence
             sequence += 1
-            result = await self._submit(
-                claim,
-                command_type="ReportActivityProgress",
-                payload={
-                    "activity_id": str(claim.request.activity_id),
-                    "generation": claim.request.generation,
-                    "sequence": sequence,
+            try:
+                record = ActivityProgressRecord(
+                    run_id=run_context.run_id,
+                    activity_id=claim.request.activity_id,
+                    generation=claim.request.generation,
+                    claim_generation=claim.claim_generation,
+                    sequence=sequence,
+                    owner_user_id=claim.owner_user_id,
+                    team_id=claim.team_id,
+                    source_entity_type=run_context.source_entity_type,
+                    source_entity_id=run_context.source_entity_id,
+                    occurred_at=datetime.now(UTC),
                     **payload,
-                },
-                now=datetime.now(UTC),
-                dedupe_suffix=str(sequence),
-            )
-            return result.status == "accepted"
+                )
+            except (TypeError, ValueError):
+                logger.warning(
+                    "拒绝无效进度上报 activity_id=%s payload_keys=%s",
+                    claim.request.activity_id,
+                    sorted(payload),
+                )
+                return False
+            return await sink.record(record)
 
         return report
 

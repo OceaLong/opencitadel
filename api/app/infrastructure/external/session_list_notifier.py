@@ -4,15 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Protocol, runtime_checkable
 
 from app.application.ports.coordination import RedisConnectivity
 from app.application.ports.streams import (
     SESSION_LIST_HINT_CHANNEL,
     HintPublisherPort,
 )
-from app.composition.tasks import TaskSupervisor
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class TransientTaskStarter(Protocol):
+    """Structural slice of the composition TaskSupervisor this adapter needs.
+
+    Declared here (instead of importing ``app.composition.tasks``) so the
+    infrastructure layer depends only on the shape it uses — composition wires
+    the real supervisor in (D14/P2-13).
+    """
+
+    async def start_transient(
+        self,
+        name: str,
+        factory: Callable[[], Awaitable[None]],
+    ) -> object: ...
 
 
 class DebouncedSessionListPublisher:
@@ -20,7 +37,7 @@ class DebouncedSessionListPublisher:
         self,
         *,
         publisher: HintPublisherPort,
-        supervisor: TaskSupervisor,
+        supervisor: TransientTaskStarter,
         delay_seconds: float = 0.2,
     ) -> None:
         if delay_seconds < 0:

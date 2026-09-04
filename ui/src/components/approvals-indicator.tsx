@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import { approvalsApi } from "@/lib/api/approvals";
+import { APPROVALS_CHANGED_EVENT, subscribeAppEvent } from "@/lib/events";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -19,8 +20,9 @@ const POLL_INTERVAL_MS = 60_000;
 const COUNT_FETCH_LIMIT = 10;
 
 /**
- * 顶栏"待我审批"入口：铃铛旁的图标按钮，带待审批数量角标（60s 轮询），
- * 点击进入 /approvals 收件箱。路由变化时立即刷新一次，保证决策后角标及时回落。
+ * 顶栏"待我审批"入口：铃铛旁的图标按钮，带待审批数量角标，点击进入 /approvals
+ * 收件箱。刷新时机：APPROVALS_CHANGED_EVENT（决策成功 / 新审批通知到达时立即
+ * 刷新）+ 路由变化 + 60s 轮询兜底。
  */
 export function ApprovalsIndicator({ className }: { className?: string }) {
   const t = useTranslations("approvals");
@@ -45,9 +47,11 @@ export function ApprovalsIndicator({ className }: { className?: string }) {
     };
     void poll();
     const timer = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
+    const unsubscribe = subscribeAppEvent(APPROVALS_CHANGED_EVENT, () => void poll());
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      unsubscribe();
     };
   }, [authLoading, user, pathname]);
 

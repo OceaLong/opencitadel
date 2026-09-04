@@ -2,6 +2,7 @@
 
 from typing import Protocol
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.services.runtime_policy_reader import OperationsPolicyReader
 from app.domain.execution.activity import (
@@ -27,8 +28,12 @@ class RemediationExecutor(Protocol):
 
 
 class RemediationActivityHandler:
-    activity_type = "remediation.execute"
-    idempotent = True
+    activity_type = activity_types.REMEDIATION_EXECUTE
+    # A remediation performs external side effects (actuator writes). After a
+    # crash the outcome of an already-started call is unknowable, so recovery
+    # must NOT blindly replay it: the worker settles the activity as
+    # outcome-unknown instead (K2-8 幂等复核).
+    idempotent = False
 
     def __init__(
         self,

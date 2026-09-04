@@ -9,7 +9,7 @@ import pytest
 from app.application.execution.activities.model_call import ModelCallActivityHandler
 from app.application.execution.activities.retrieval import RetrievalActivityHandler
 from app.application.execution.activities.tool_call import ToolCallActivityHandler
-from app.application.execution.tool_catalog import ToolDefinition
+from app.application.execution.tool_catalog import CatalogSnapshot, ToolDefinition
 from app.domain.execution.activity import ActivityContext, ActivityRequest
 from app.domain.models.inference import (
     ChatModelSettings,
@@ -130,22 +130,34 @@ class Catalog:
 
     async def definitions(self, payload, context):
         assert payload["session_id"] == "session-1"
-        return (
-            ToolDefinition(
-                name="write_file",
-                tool_schema={
-                    "type": "function",
-                    "function": {
-                        "name": "write_file",
-                        "parameters": {"type": "object"},
+        return CatalogSnapshot(
+            definitions=(
+                ToolDefinition(
+                    name="write_file",
+                    tool_schema={
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "parameters": {"type": "object"},
+                        },
                     },
-                },
-                requires_approval=True,
-                risk_summary="Write workspace file",
+                    requires_approval=True,
+                    risk_summary="Write workspace file",
+                ),
             ),
+            fingerprint="catalog-fp-1",
         )
 
-    async def invoke(self, payload, context, *, name, arguments):
+    async def invoke(
+        self,
+        payload,
+        context,
+        *,
+        name,
+        arguments,
+        expected_fingerprint=None,
+        approval_feedback=None,
+    ):
         self.invocations.append((payload, context, name, arguments))
         return {
             "success": True,
@@ -231,8 +243,11 @@ async def test_model_activity_rehydrates_history_and_governs_tool_intent() -> No
                 },
                 "requires_approval": True,
                 "risk_summary": "Write workspace file",
+                "approval_kind": "tool_effect",
             }
-        ]
+        ],
+        # 目录快照摘要随决策落库（D9）
+        "catalog": {"tool_names": ["write_file"], "fingerprint": "catalog-fp-1"},
     }
     messages, schemas = client.calls[0]
     assert [message["role"] for message in messages] == [
@@ -419,3 +434,71 @@ async def test_retrieval_activity_persists_citable_context() -> None:
             ),
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_disabled_skill_degrades_model_call_and_flags_public_data() -> None:
+    # P2-10：skill 被禁用时 model.call 与工具目录一致地降级为"无 skill 继续"，
+    # 并通过 public_data 提示（实现取 warning 日志 + 提示字段，未走通知链）。
+    from types import SimpleNamespace
+
+    objects = Objects()
+    objects.input["skill_id"] = "skill-9"
+    client = Client()
+
+    class _Skills:
+        async def get_skill(self, skill_id, *, scope):
+            assert skill_id == "skill-9"
+            return SimpleNamespace(enabled=False)
+
+    handler = ModelCallActivityHandler(
+        objects=objects,
+        models=Models(),
+        tools=Catalog(),
+        skills=_Skills(),
+        client_factory=lambda *args, **kwargs: client,
+    )
+
+    outcome = await handler.execute(
+        request(
+            "model.call",
+            input_payload={"allow_tools": True, "history_refs": [], "round": 0},
+        ),
+        CONTEXT,
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.public_data["skill_disabled"] is True
+    system_prompt = client.calls[0][0][0]["content"]
+    assert "skill" not in system_prompt.lower() or "OpenCitadel" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_model_call_reports_token_usage_progress_when_sink_present() -> None:
+    # P2-12 最小接线：非流式调用完成后按终局用量上报一次 token 计数。
+    objects = Objects()
+    client = Client(usage={"prompt_tokens": 11, "completion_tokens": 7})
+    reports: list[dict] = []
+
+    async def report_progress(payload):
+        reports.append(payload)
+        return True
+
+    context = CONTEXT.model_copy(update={"report_progress": report_progress})
+    handler = ModelCallActivityHandler(
+        objects=objects,
+        models=Models(),
+        tools=Catalog(),
+        client_factory=lambda *args, **kwargs: client,
+    )
+
+    outcome = await handler.execute(
+        request(
+            "model.call",
+            input_payload={"allow_tools": True, "history_refs": [], "round": 0},
+        ),
+        context,
+    )
+
+    assert outcome.status == "succeeded"
+    assert reports == [{"kind": "model_usage", "prompt_tokens": 11, "completion_tokens": 7}]

@@ -12,6 +12,8 @@ NotificationType = Literal[
     "job_failed",
     "approval_waiting",
     "approval_expired",
+    "clarification_waiting",
+    "clarification_expired",
     "artifact_final",
     "patrol_complete",
 ]
@@ -22,6 +24,9 @@ class Notification(BaseModel):
     user_id: str
     type: NotificationType
     session_id: str | None = None
+    # 关联的审批/澄清 id：审批被决定、过期或随 Run 取消时，据此把等待通知
+    # 自动标记为已读（"处理了还是有提示"的根治点）。
+    approval_id: str | None = None
     artifact_id: str | None = None
     job_id: str | None = None
     message: str = ""

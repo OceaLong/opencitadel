@@ -67,15 +67,17 @@ export function SessionList() {
     if (!pendingDeleteSession) return;
 
     const sessionTitle = pendingDeleteSession.title || tCommon("newTask");
-    const success = await deleteSession(pendingDeleteSession.session_id);
+    const result = await deleteSession(pendingDeleteSession.session_id);
 
-    if (success) {
+    if (result.success) {
       toast.success(t("deleteSuccess", { title: sessionTitle }));
       if (params?.id === pendingDeleteSession.session_id) {
         router.push("/");
       }
     } else {
-      toast.error(t("deleteFailed", { title: sessionTitle }));
+      // 服务端给了具体原因（如活动 Run 未终态）就原样展示，比笼统的
+      // "请重试" 可诊断得多。
+      toast.error(result.message || t("deleteFailed", { title: sessionTitle }));
     }
 
     setPendingDeleteSession(null);

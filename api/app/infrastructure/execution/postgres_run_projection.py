@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.execution import activity_types
 from app.application.ports.queries import (
     ApprovalInboxEntry,
     ResourceBuildView,
@@ -65,6 +66,22 @@ class PostgresRunProjection:
                 .limit(1)
             )
 
+    async def count_active_runs(self, *, owner_scope: OwnerScope) -> int:
+        """Non-terminal Runs in one owner scope (admission backpressure, K2-8)."""
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            return int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ExecutionRunProjectionORM)
+                    .where(
+                        ExecutionRunProjectionORM.terminal.is_(False),
+                        self._scope_filter(owner_scope),
+                    )
+                )
+                or 0
+            )
+
     async def run_id_for_pending_approval(
         self,
         *,
@@ -104,32 +121,52 @@ class PostgresRunProjection:
             return None
 
     async def approval_stats(self, since: datetime) -> dict[str, Any]:
-        """Aggregate approval lifecycle data from the formal projection."""
+        """Aggregate approval lifecycle data from the formal projection.
+
+        Aggregated in SQL (P2-17): one grouped count plus one AVG over the
+        decided rows replaces loading every approval row into memory. Called
+        for platform-wide governance overview under a system/admin identity,
+        so the aggregate is deliberately global (no tenant filter).
+        """
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            rows = (
+            status_rows = (
                 await session.execute(
                     select(
                         ExecutionApprovalProjectionORM.status,
-                        ExecutionApprovalProjectionORM.requested_at,
-                        ExecutionApprovalProjectionORM.decided_at,
-                    ).where(ExecutionApprovalProjectionORM.requested_at >= since)
+                        func.count(),
+                    )
+                    .where(ExecutionApprovalProjectionORM.requested_at >= since)
+                    .group_by(ExecutionApprovalProjectionORM.status)
                 )
             ).all()
+            avg_decision_seconds = await session.scalar(
+                select(
+                    func.avg(
+                        func.extract(
+                            "epoch",
+                            ExecutionApprovalProjectionORM.decided_at
+                            - ExecutionApprovalProjectionORM.requested_at,
+                        )
+                    )
+                ).where(
+                    ExecutionApprovalProjectionORM.requested_at >= since,
+                    ExecutionApprovalProjectionORM.decided_at.is_not(None),
+                )
+            )
         outcomes = {"approved": 0, "rejected": 0, "cancelled": 0}
-        durations: list[float] = []
         pending_count = 0
-        for status, requested_at, decided_at in rows:
+        for status, count in status_rows:
             if status == "pending":
-                pending_count += 1
+                pending_count = int(count)
             elif status in outcomes:
-                outcomes[status] += 1
-            if decided_at is not None:
-                durations.append((decided_at - requested_at).total_seconds())
+                outcomes[status] = int(count)
         return {
             "pending_count": pending_count,
             "outcomes": outcomes,
-            "avg_decision_seconds": (sum(durations) / len(durations) if durations else None),
+            "avg_decision_seconds": (
+                float(avg_decision_seconds) if avg_decision_seconds is not None else None
+            ),
         }
 
     async def list_approvals(
@@ -148,6 +185,9 @@ class PostgresRunProjection:
             await configure_session_authorization(session, self._authorization)
             stmt = select(ExecutionApprovalProjectionORM).where(
                 self._approval_scope_filter(owner_scope),
+                # 澄清不是审批：clarification 是会话内交互（澄清选项卡片），
+                # 不进入审批收件箱与待办指示器；治理/合规读取仍可见全量行。
+                ExecutionApprovalProjectionORM.approval_kind != "clarification",
             )
             if status is not None:
                 stmt = stmt.where(ExecutionApprovalProjectionORM.status == status)
@@ -193,14 +233,14 @@ class PostgresRunProjection:
             tool_stmt = (
                 select(func.count())
                 .select_from(ExecutionActivityProjectionORM)
-                .where(ExecutionActivityProjectionORM.activity_type == "tool.call")
+                .where(ExecutionActivityProjectionORM.activity_type == activity_types.TOOL_CALL)
             )
             approval_stmt = select(func.count()).select_from(ExecutionApprovalProjectionORM)
             failure_stmt = (
                 select(func.count())
                 .select_from(ExecutionActivityProjectionORM)
                 .where(
-                    ExecutionActivityProjectionORM.activity_type == "tool.call",
+                    ExecutionActivityProjectionORM.activity_type == activity_types.TOOL_CALL,
                     ExecutionActivityProjectionORM.status.in_(("failed", "unknown")),
                 )
             )
@@ -230,33 +270,43 @@ class PostgresRunProjection:
             }
 
     async def governance_daily(self, since: datetime) -> list[dict[str, Any]]:
-        """Return daily approval requests and failed/unknown tool Activities."""
+        """Return daily approval requests and failed/unknown tool Activities.
+
+        Aggregated in SQL (P2-17): two ``date_trunc + GROUP BY`` scans replace
+        loading every timestamp into memory. Bucketing uses ``date_trunc`` on
+        the stored timestamptz, which the old in-memory ``.date()`` bucketing
+        matched for UTC-normalized storage (the projector writes UTC). Global
+        on purpose — the governance overview is a platform-wide admin view.
+        """
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            approval_times = (
-                await session.scalars(
-                    select(ExecutionApprovalProjectionORM.requested_at).where(
-                        ExecutionApprovalProjectionORM.requested_at >= since
-                    )
+            approval_day = func.date_trunc("day", ExecutionApprovalProjectionORM.requested_at)
+            approval_rows = (
+                await session.execute(
+                    select(approval_day, func.count())
+                    .where(ExecutionApprovalProjectionORM.requested_at >= since)
+                    .group_by(approval_day)
                 )
             ).all()
-            failure_times = (
-                await session.scalars(
-                    select(ExecutionActivityProjectionORM.terminal_at).where(
-                        ExecutionActivityProjectionORM.activity_type == "tool.call",
+            failure_day = func.date_trunc("day", ExecutionActivityProjectionORM.terminal_at)
+            failure_rows = (
+                await session.execute(
+                    select(failure_day, func.count())
+                    .where(
+                        ExecutionActivityProjectionORM.activity_type == activity_types.TOOL_CALL,
                         ExecutionActivityProjectionORM.status.in_(("failed", "unknown")),
                         ExecutionActivityProjectionORM.terminal_at >= since,
                     )
+                    .group_by(failure_day)
                 )
             ).all()
         daily: dict[str, dict[str, int]] = defaultdict(
             lambda: {"approval_requests": 0, "activity_failures": 0}
         )
-        for occurred_at in approval_times:
-            daily[occurred_at.date().isoformat()]["approval_requests"] += 1
-        for occurred_at in failure_times:
-            if occurred_at is not None:
-                daily[occurred_at.date().isoformat()]["activity_failures"] += 1
+        for day, count in approval_rows:
+            daily[day.date().isoformat()]["approval_requests"] = int(count)
+        for day, count in failure_rows:
+            daily[day.date().isoformat()]["activity_failures"] = int(count)
         return [{"date": date, **counts} for date, counts in sorted(daily.items())]
 
     async def source_governance(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -69,8 +70,11 @@ def lifecycle_command(state: RunState) -> tuple[bool, RegisteredCommand | None]:
     if state.status == RunStatus.QUEUED:
         return True, command(state, "StartRun", {})
     if state.status == RunStatus.WAITING:
-        if state.wait_reason == "retry":
-            return True, command(state, "RetryRun", {})
+        # WAITING(retry) is idle here on purpose (D6): RetryRun is delivered by
+        # the durable backoff timer scheduled in run.py's _decide_FailRun, not
+        # by the decision loop — otherwise every retryable failure retried with
+        # zero delay (retry storm). WAITING(approval) resumes via
+        # DecideApproval / ExpireApproval commands.
         return True, None
     if state.status != RunStatus.RUNNING or state.active_activity_ids:
         return True, None
@@ -95,7 +99,7 @@ def next_plan_command(
         if status is None:
             if activity.requires_approval:
                 approval = approval_identity(state, key)
-                decision = dict(state.approval_decisions).get(approval)
+                decision = approval_decision(state, approval)
                 if decision is None:
                     return request_approval(
                         state,
@@ -160,17 +164,33 @@ def request_approval(
     approval_kind: str,
     risk_summary: str,
     subject_label: str,
+    choices: list[str] | None = None,
 ) -> RegisteredCommand:
-    return command(
-        state,
-        "RequestApproval",
-        {
-            "approval_id": str(approval_id),
-            "subject_activity_id": str(activity_id),
-            "approval_kind": approval_kind,
-            "risk_summary": risk_summary[:1024],
-            "subject_label": subject_label[:128],
-        },
+    payload: dict[str, JsonValue] = {
+        "approval_id": str(approval_id),
+        "subject_activity_id": str(activity_id),
+        "approval_kind": approval_kind,
+        "risk_summary": risk_summary[:1024],
+        "subject_label": subject_label[:128],
+    }
+    if choices:
+        # Clarification card options (already normalized by model.call).
+        payload["choices"] = [choice[:200] for choice in choices[:6]]
+    return command(state, "RequestApproval", payload)
+
+
+def approval_decision(
+    state: RunState,
+    approval_id: UUID,
+) -> tuple[str, str] | None:
+    """One approval's (decision, feedback), or None while still pending."""
+    return next(
+        (
+            (decision, feedback)
+            for decided_id, decision, feedback in state.approval_decisions
+            if decided_id == approval_id
+        ),
+        None,
     )
 
 
@@ -237,15 +257,26 @@ def settled_status(state: RunState, activity_id: UUID) -> str | None:
 def activity_result(
     state: RunState,
     activity_id: UUID,
+    *,
+    outcomes: Mapping[UUID, dict[str, JsonValue]] | None = None,
 ) -> tuple[str | None, str | None, dict[str, JsonValue]] | None:
-    return next(
-        (
-            (result_ref, summary, decision_data)
-            for candidate, generation, result_ref, summary, decision_data in state.activity_results
-            if candidate == activity_id and generation == state.retry_generation
-        ),
-        None,
-    )
+    """One settled activity's (result_ref, result_summary, decision_data).
+
+    The ref and summary live in the aggregate state; the decision payload is
+    off-stream and must be supplied via ``outcomes`` (digest-verified by the
+    decision source). A recorded digest with no supplied payload is a wiring
+    error and fails loud rather than silently planning without tool calls.
+    """
+    for candidate, generation, result_ref, summary, digest in state.activity_results:
+        if candidate == activity_id and generation == state.retry_generation:
+            decision_data = (outcomes or {}).get(activity_id)
+            if digest is not None and decision_data is None:
+                raise ValueError(
+                    f"activity {activity_id} recorded a decision digest but no "
+                    "decision payload was supplied to the planner"
+                )
+            return result_ref, summary, decision_data or {}
+    return None
 
 
 def result_refs(state: RunState) -> list[str]:
@@ -283,6 +314,7 @@ __all__ = [
     "WorkflowPlan",
     "activity_identity",
     "activity_result",
+    "approval_decision",
     "approval_identity",
     "command",
     "fail_for_activity",

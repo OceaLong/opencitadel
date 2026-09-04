@@ -32,7 +32,7 @@ def command(*, stream_id: str, expected_version: int | None = None) -> CommandEn
     return CommandEnvelope(
         command_id=uuid4(),
         command_type="CreateRun",
-        command_schema_version=2,
+        command_schema_version=1,
         stream_type="run",
         stream_id=stream_id,
         expected_stream_version=expected_version,

@@ -37,6 +37,17 @@ WRITE = ToolExecutionPolicy(
 INTEGRATION_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.INTEGRATION_READ})
 
 
+def _seed_mcp_schema(mcp_tool: MCPTool, name: str, *, policy) -> None:
+    """Simulate a remote MCP tool schema directly on the pack caches."""
+    mcp_tool._tools.append(
+        {
+            "type": "function",
+            "function": {"name": name, "description": "", "parameters": {}},
+        }
+    )
+    mcp_tool._tool_policies[name] = policy or CONSERVATIVE_TOOL_POLICY
+
+
 class _MixedTool(BaseTool):
     name = "mixed"
 
@@ -83,20 +94,9 @@ async def test_ask_denies_direct_invocation_of_filtered_write_tool():
     assert exc_info.value.tool_name == "write_file"
 
 
-def test_ask_child_policy_cannot_expand_parent_policy():
-    parent = CapabilityPolicy.for_mode(SessionMode.ASK)
-
-    with pytest.raises(CapabilityDeniedError) as exc_info:
-        parent.for_child(requested_tool_names=["shell_execute"])
-
-    # Ask sub-agents with no explicit allowlist yet: denial happens while
-    # assembling the child's capability policy, before any tool is exposed.
-    assert exc_info.value.layer == "assembly"
-
-
 def test_unknown_mcp_function_is_hidden_from_ask():
     mcp_tool = MCPTool(MagicMock())
-    mcp_tool.register_schema("create_ticket", schema={}, policy=None)
+    _seed_mcp_schema(mcp_tool, "create_ticket", policy=None)
     ToolRegistry.build_tools(
         policy=CapabilityPolicy.for_mode(SessionMode.ASK),
         candidate_tools=[mcp_tool],
@@ -107,11 +107,7 @@ def test_unknown_mcp_function_is_hidden_from_ask():
 
 def test_admin_classified_read_only_mcp_function_is_visible_in_ask():
     mcp_tool = MCPTool(MagicMock())
-    mcp_tool.register_schema(
-        "lookup_ticket",
-        schema={},
-        policy=INTEGRATION_READ,
-    )
+    _seed_mcp_schema(mcp_tool, "lookup_ticket", policy=INTEGRATION_READ)
 
     assert [
         schema["function"]["name"]
@@ -130,9 +126,9 @@ def test_integration_read_declaration_with_non_integration_capability_is_hidden_
     capability,
 ):
     mcp_tool = MCPTool(MagicMock())
-    mcp_tool.register_schema(
+    _seed_mcp_schema(
+        mcp_tool,
         "lookup_ticket",
-        schema={},
         policy=READ_SAFE.model_copy(update={"capability": capability}),
     )
     tools = ToolRegistry.build_tools(
@@ -174,21 +170,6 @@ def test_agent_policy_respects_tool_allowlist():
 
     assert policy.allows(READ_SAFE, tool_name="kb_search")
     assert not policy.allows(WRITE, tool_name="write_file")
-
-
-def test_agent_child_policy_cannot_expand_beyond_allowlist():
-    parent = CapabilityPolicy.for_mode(
-        SessionMode.AGENT,
-        allowed_tool_names=["kb_search"],
-    )
-
-    with pytest.raises(CapabilityDeniedError) as exc_info:
-        parent.for_child(requested_tool_names=["shell_execute"])
-
-    # Parent already has an explicit allowlist: denial happens because the
-    # child requested a tool that would be *exposed* beyond what the parent
-    # granted, distinct from the "no allowlist at all" assembly case above.
-    assert exc_info.value.layer == "exposure"
 
 
 @pytest.mark.asyncio

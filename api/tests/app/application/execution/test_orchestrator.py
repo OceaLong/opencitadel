@@ -10,6 +10,7 @@ from app.domain.execution.aggregate import ReplaySnapshot, replay
 from app.domain.execution.commands import CommandEnvelope
 from app.domain.execution.errors import CommandInProgressError
 from app.domain.execution.events import NewEvent
+from app.domain.execution.registry import UnregisteredSchemaError
 from app.domain.execution.run import RunAggregate
 from app.domain.execution.store import (
     AppendContext,
@@ -71,7 +72,7 @@ def command(
     return CommandEnvelope(
         command_id=command_id or uuid4(),
         command_type=command_type,
-        command_schema_version=2 if command_type == "CreateRun" else 1,
+        command_schema_version=1,
         stream_type="run",
         stream_id=stream_id,
         expected_stream_version=expected_version,
@@ -293,9 +294,13 @@ async def test_invalid_historical_event_schema_fails_closed_before_decision(
             StreamRef(stream_type="run", stream_id=stream_id),
             0,
             (
+                # A schema version the registry does not know (only v1 is
+                # registered) must fail closed at the read boundary before
+                # decide or append — as a ValueError the handler rolls back on,
+                # never as a bare KeyError escaping the control plane.
                 NewEvent(
                     event_type="RunCreated",
-                    event_schema_version=1,
+                    event_schema_version=2,
                     public_payload={"unexpected": True},
                     internal_payload={},
                 ),
@@ -310,7 +315,7 @@ async def test_invalid_historical_event_schema_fails_closed_before_decision(
         )
         await session.commit()
 
-    with pytest.raises(KeyError, match="Unknown RunCreated version 1"):
+    with pytest.raises(UnregisteredSchemaError, match="Unknown RunCreated version 2"):
         await make_orchestrator(session_factory).handle(candidate)
 
     async with session_factory() as session:

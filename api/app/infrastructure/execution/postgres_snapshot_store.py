@@ -109,9 +109,14 @@ class PostgresSnapshotStore:
             return None
         try:
             state = state_type.model_validate(record.state)
-            if canonical_state_hash(state) != record.state_hash:
-                raise ValueError("snapshot state hash mismatch")
-        except (TypeError, ValueError, ValidationError):
+        except (TypeError, ValidationError):
+            # The state shape no longer parses: schema drifted without a
+            # serializer_version bump. Self-heals via replay, but must not be
+            # counted as corruption — that alarm is for real integrity damage.
+            record_replay_failure("snapshot_schema_drift")
+            await self._delete_record(record)
+            return None
+        if canonical_state_hash(state) != record.state_hash:
             record_replay_failure("snapshot_hash_mismatch")
             await self._delete_record(record)
             return None

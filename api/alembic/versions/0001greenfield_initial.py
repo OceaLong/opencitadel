@@ -319,6 +319,13 @@ def _grant_runtime_privileges() -> None:
                 'GRANT USAGE, SELECT ON SEQUENCE '
                 'execution_events_position_seq TO %I', kernel_role
             );
+            -- Public feed rows now carry their own identity sequence; both the
+            -- formal projector and the activity progress sink insert as the
+            -- kernel role.
+            EXECUTE format(
+                'GRANT USAGE, SELECT ON SEQUENCE '
+                'execution_public_events_seq_seq TO %I', kernel_role
+            );
             EXECUTE format(
                 'GRANT SELECT, INSERT, UPDATE, DELETE ON {execution_mutable} '
                 'TO %I', kernel_role
@@ -334,6 +341,13 @@ def _grant_runtime_privileges() -> None:
             EXECUTE format(
                 'GRANT SELECT, INSERT, UPDATE ON execution_scope_head '
                 'TO %I', kernel_role
+            );
+            -- Kernel-internal owner-scope quarantine + rebuild marker (K4-1,
+            -- no tenant RLS). The kernel writes/clears rows; the rebuild CLI
+            -- (kernel credentials) deletes them on completion.
+            EXECUTE format(
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON '
+                'execution_poisoned_scopes TO %I', kernel_role
             );
 
             EXECUTE format(
@@ -357,6 +371,15 @@ def _grant_runtime_privileges() -> None:
             );
             EXECUTE format(
                 'GRANT SELECT ON {projections} TO %I', api_role
+            );
+            -- Admin observability (K4-3): the API status endpoint reads
+            -- per-scope projection lag (scope head vs formal checkpoint) and
+            -- the quarantined-scope list. Read-only; checkpoints stay under
+            -- RLS (system/admin), the two control tables carry no tenant RLS.
+            EXECUTE format(
+                'GRANT SELECT ON execution_projector_checkpoints, '
+                'execution_scope_head, execution_poisoned_scopes TO %I',
+                api_role
             );
 
             EXECUTE format(

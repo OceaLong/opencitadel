@@ -17,6 +17,7 @@ from app.domain.services.knowledge_base.retriever import HybridRetriever
 from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.services.tools.base import BaseTool, tool
 from app.domain.services.tools.capability_policy import READ_SAFE
+from app.domain.services.tools.errors import ToolInvocationError
 from app.domain.vector_port import EmbeddingPort
 
 
@@ -59,7 +60,7 @@ class KnowledgeBaseTool(BaseTool):
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
         ):
-            raise ValueError("limit must be a positive integer")
+            raise ToolInvocationError("limit must be a positive integer", kind="invalid_arguments")
         effective_limit = min(
             limit or self._policy.retrieval.final_top_k,
             self._policy.retrieval.final_top_k,
@@ -249,9 +250,9 @@ class KnowledgeBaseTool(BaseTool):
         limit: int = 30,
     ) -> ToolResult[str]:
         if page is not None and (isinstance(page, bool) or not isinstance(page, int) or page < 1):
-            raise ValueError("page must be at least 1")
+            raise ToolInvocationError("page must be at least 1", kind="invalid_arguments")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 200:
-            raise ValueError("limit must be between 1 and 200")
+            raise ToolInvocationError("limit must be between 1 and 200", kind="invalid_arguments")
         async with self._uow_factory() as uow:
             resolved = await uow.knowledge_base.get_document_for_version(
                 self._kb_id,

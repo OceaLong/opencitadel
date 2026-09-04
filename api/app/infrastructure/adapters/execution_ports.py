@@ -3,54 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from socket import gethostname
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
-from redis.asyncio import Redis
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.execution.activity_registry import ActivityRegistry
-from app.application.execution.activity_worker import (
-    DEFAULT_ACTIVITY_MAX_CONCURRENCY,
-    ActivityWorker,
-)
-from app.application.execution.decision_worker import DecisionWorker
-from app.application.execution.inbox_worker import InboxWorker
-from app.application.execution.outbox_dispatcher import OutboxDispatcher
-from app.application.execution.run_service import RunService
-from app.application.execution.timer_dispatcher import TimerDispatcher
 from app.application.ports.execution import (
     OutboxClaim,
     TimerFireResult,
 )
 from app.application.ports.observability import ExecutionMetricsSnapshot
 from app.domain.execution.commands import CommandEnvelope
-from app.domain.execution.run import RunAggregate
 from app.domain.models.authorization import AuthorizationContext
-from app.execution_kernel import ExecutionKernelRuntime
-from app.infrastructure.adapters.redis_capabilities import (
-    RedisNotificationPublisher,
-    RedisWakeupAdapter,
-)
 from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
-from app.infrastructure.execution.postgres_formal_projector import (
-    PostgresApprovalNotifier,
-    PostgresFormalProjector,
-)
 from app.infrastructure.execution.postgres_inbox import PostgresInbox
-from app.infrastructure.execution.postgres_inbox_source import PostgresInboxSource
 from app.infrastructure.execution.postgres_outbox import (
     OutboxClaim as PostgresOutboxClaim,
 )
 from app.infrastructure.execution.postgres_outbox import PostgresOutbox
-from app.infrastructure.execution.postgres_owner_scope_source import PostgresOwnerScopeSource
-from app.infrastructure.execution.postgres_run_context_source import PostgresRunContextSource
-from app.infrastructure.execution.postgres_run_decision_source import PostgresRunDecisionSource
 from app.infrastructure.execution.postgres_timer_store import PostgresTimerStore
-from app.infrastructure.execution.sqlalchemy_orchestrator import (
-    SqlAlchemyExecutionOrchestrator,
-)
 from app.infrastructure.observability.execution_metrics import ExecutionMetrics
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
@@ -72,7 +44,7 @@ class SqlAlchemyCommandEnvelopeWriter:
                 received = await PostgresInbox(session).receive(command)
                 await session.commit()
                 return received
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError, SQLAlchemyError):
                 await session.rollback()
                 raise
 
@@ -110,6 +82,7 @@ class SqlAlchemyOutboxStore:
                 dedupe_key=claim.dedupe_key,
                 generation=claim.generation,
                 attempt=claim.attempt,
+                payload=claim.payload,
             )
             for claim in claims
         )
@@ -154,6 +127,7 @@ class SqlAlchemyOutboxStore:
             dedupe_key=claim.dedupe_key,
             generation=claim.generation,
             attempt=claim.attempt,
+            payload=claim.payload,
         )
 
 
@@ -208,10 +182,64 @@ class SqlAlchemyTimerDispatcher:
                     fired += int(acknowledged)
                     failed += int(not acknowledged)
                 await session.commit()
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError, SQLAlchemyError):
                 await session.rollback()
                 raise
         return TimerFireResult(len(claims), fired, failed)
+
+
+class SqlAlchemyExecutionQueueRetentionStore:
+    """Batch deletion over the four durable execution queues (K2-5/D7).
+
+    Each purge runs in its own short transaction so one large queue cannot
+    starve the others of the leader tick, and a mid-batch failure loses at
+    most one queue's batch.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_factory: async_sessionmaker[AsyncSession],
+        authorization: AuthorizationContext,
+    ) -> None:
+        self._session_factory = session_factory
+        self._authorization = authorization
+
+    async def purge_inbox(self, *, before: datetime, limit: int) -> int:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            purged = await PostgresInbox(session).purge_completed(before=before, limit=limit)
+            await session.commit()
+            return purged
+
+    async def purge_inbox_dead_letters(self, *, before: datetime, limit: int) -> int:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            purged = await PostgresInbox(session).purge_dead_lettered(before=before, limit=limit)
+            await session.commit()
+            return purged
+
+    async def purge_outbox(self, *, before: datetime, limit: int) -> int:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            purged = await PostgresOutbox(session).purge_completed(before=before, limit=limit)
+            await session.commit()
+            return purged
+
+    async def purge_timers(self, *, before: datetime, limit: int) -> int:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            purged = await PostgresTimerStore(session).purge_completed(before=before, limit=limit)
+            await session.commit()
+            return purged
+
+    async def purge_activities(self, *, before: datetime, limit: int) -> int:
+        # PostgresActivityStore manages its own session/commit (it enforces the
+        # "owning Run must be terminal" purge invariant internally).
+        return await PostgresActivityStore(
+            session_factory=self._session_factory,
+            authorization=self._authorization,
+        ).purge_completed(before=before, limit=limit)
 
 
 class SqlAlchemyExecutionMetricsAdapter:
@@ -231,91 +259,10 @@ class SqlAlchemyExecutionMetricsAdapter:
             return await self._metrics.refresh(session, now=now)
 
 
-def build_execution_kernel_runtime(
-    *,
-    session_factory: async_sessionmaker[AsyncSession],
-    redis: Redis,
-    authorization: AuthorizationContext,
-    activity_registry: ActivityRegistry,
-    worker_id: str | None = None,
-    activity_max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
-    approval_ttl_minutes=None,
-) -> ExecutionKernelRuntime:
-    command_handler = SqlAlchemyExecutionOrchestrator(
-        session_factory=session_factory,
-        aggregates={"run": RunAggregate()},
-        authorization=authorization,
-    )
-    run_service = RunService(orchestrator=command_handler)
-    return ExecutionKernelRuntime(
-        command_handler=command_handler,
-        inbox_worker=InboxWorker(
-            source=PostgresInboxSource(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
-            handler=command_handler,
-        ),
-        activity_worker=ActivityWorker(
-            store=PostgresActivityStore(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
-            run_contexts=PostgresRunContextSource(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
-            run_service=run_service,
-            registry=activity_registry,
-            worker_id=worker_id or f"{gethostname()}:execution-kernel",
-            max_concurrency=activity_max_concurrency,
-        ),
-        decision_worker=DecisionWorker(
-            source=PostgresRunDecisionSource(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
-            run_service=run_service,
-            approval_ttl_minutes=approval_ttl_minutes,
-        ),
-        outbox_dispatcher=OutboxDispatcher(
-            store=SqlAlchemyOutboxStore(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
-            publisher=RedisWakeupAdapter(redis),
-        ),
-        timer_dispatcher=TimerDispatcher(
-            dispatcher=SqlAlchemyTimerDispatcher(
-                session_factory=session_factory,
-                authorization=authorization,
-            )
-        ),
-        projector=PostgresFormalProjector(
-            session_factory=session_factory,
-            authorization=authorization,
-            notifier=PostgresApprovalNotifier(
-                session_factory=session_factory,
-                authorization=authorization,
-                publisher=RedisNotificationPublisher(redis),
-            ),
-        ),
-        owner_scopes=PostgresOwnerScopeSource(
-            session_factory=session_factory,
-            authorization=authorization,
-        ),
-        metrics=SqlAlchemyExecutionMetricsAdapter(
-            session_factory=session_factory,
-            authorization=authorization,
-        ),
-        activity_registry=activity_registry,
-    )
-
-
 __all__ = [
     "SqlAlchemyCommandEnvelopeWriter",
     "SqlAlchemyExecutionMetricsAdapter",
+    "SqlAlchemyExecutionQueueRetentionStore",
     "SqlAlchemyOutboxStore",
     "SqlAlchemyTimerDispatcher",
-    "build_execution_kernel_runtime",
 ]

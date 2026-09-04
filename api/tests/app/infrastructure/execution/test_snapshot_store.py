@@ -30,7 +30,7 @@ NOW = datetime(2026, 8, 20, 16, 0, tzinfo=UTC)
 EVENTS = (
     NewEvent(
         event_type="RunCreated",
-        event_schema_version=2,
+        event_schema_version=1,
         public_payload={
             "family": "ask",
             "source_entity_type": "session",
@@ -271,7 +271,9 @@ async def test_corrupt_snapshot_is_deleted_and_full_replay_remains_available(
             session,
             AuthorizationContext.system("snapshot-corrupt-load"),
         )
-        labels = {"reason": "snapshot_hash_mismatch"}
+        # An unparseable state counts as schema drift, not corruption: the
+        # corruption alarm is reserved for parseable-state / wrong-hash rows.
+        labels = {"reason": "snapshot_schema_drift"}
         before_failures = metric_sample(
             "execution_replay_failures_total",
             labels,
@@ -301,6 +303,68 @@ async def test_corrupt_snapshot_is_deleted_and_full_replay_remains_available(
             )
             is None
         )
+
+
+@pytest.mark.asyncio
+async def test_parseable_snapshot_with_wrong_hash_counts_as_corruption(
+    snapshot_database,
+) -> None:
+    session_factory, streams = snapshot_database
+    stream, events = await seed_stream(session_factory)
+    streams.append(stream)
+    prefix = replay(RunAggregate(), events[:2], stream_id=stream.stream_id)
+    candidate = ReplaySnapshot(
+        stream_id=stream.stream_id,
+        stream_version=prefix.stream_version,
+        state=prefix.state,
+        state_hash=prefix.state_hash,
+        last_event_hash=prefix.last_event_hash,
+    )
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("snapshot-hash-save"),
+        )
+        await PostgresSnapshotStore(session).save(
+            stream.stream_type,
+            candidate,
+            owner_user_id="snapshot-user",
+            team_id=None,
+            serializer_version=RunAggregate.snapshot_serializer_version,
+        )
+        await session.commit()
+    tampered = prefix.state.model_copy(update={"retry_generation": 9}).model_dump(mode="json")
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("snapshot-hash-inject"),
+        )
+        await session.execute(
+            update(ExecutionSnapshotORM)
+            .where(
+                ExecutionSnapshotORM.stream_type == stream.stream_type,
+                ExecutionSnapshotORM.stream_id == stream.stream_id,
+            )
+            .values(state=tampered)
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session,
+            AuthorizationContext.system("snapshot-hash-load"),
+        )
+        labels = {"reason": "snapshot_hash_mismatch"}
+        before_failures = metric_sample("execution_replay_failures_total", labels)
+        loaded = await PostgresSnapshotStore(session).load(
+            stream.stream_type,
+            stream.stream_id,
+            state_type=RunState,
+            serializer_version=RunAggregate.snapshot_serializer_version,
+        )
+        assert metric_sample("execution_replay_failures_total", labels) - before_failures == 1
+        await session.commit()
+    assert loaded is None
 
 
 @pytest.mark.asyncio

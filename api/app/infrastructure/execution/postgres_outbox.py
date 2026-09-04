@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.execution.commands import normalize_utc
@@ -21,6 +21,8 @@ class OutboxClaim:
     dedupe_key: str
     generation: int
     attempt: int
+    # Destination-specific message body (K4-2); None for plain wakeup hints.
+    payload: dict | None = None
 
 
 class PostgresOutbox:
@@ -74,6 +76,7 @@ class PostgresOutbox:
                     dedupe_key=record.dedupe_key,
                     generation=record.claim_generation,
                     attempt=record.attempts,
+                    payload=record.payload,
                 )
             )
         await self._session.flush()
@@ -132,6 +135,24 @@ class PostgresOutbox:
             .returning(ExecutionOutboxORM.outbox_id)
         )
         return failed is not None
+
+    async def purge_completed(self, *, before: datetime, limit: int) -> int:
+        """Delete a batch of delivered outbox rows older than ``before``."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        resolved_before = normalize_utc(before)
+        purgeable = (
+            select(ExecutionOutboxORM.outbox_id)
+            .where(
+                ExecutionOutboxORM.delivered_at.is_not(None),
+                ExecutionOutboxORM.delivered_at < resolved_before,
+            )
+            .limit(limit)
+        )
+        result = await self._session.execute(
+            delete(ExecutionOutboxORM).where(ExecutionOutboxORM.outbox_id.in_(purgeable))
+        )
+        return int(result.rowcount or 0)
 
 
 __all__ = ["OutboxClaim", "PostgresOutbox"]

@@ -106,6 +106,7 @@
     "inference.errors.endpointInUse",
     "inference.errors.endpointNameRequired",
     "inference.errors.endpointNotFound",
+    "inference.errors.modelInUse",
     "inference.errors.modelNotFound",
     "inference.errors.probeFailed",
     "inference.errors.unsupportedProviderKind",
@@ -117,6 +118,8 @@
   "notificationKeys": [
     "notifications.approvalExpired",
     "notifications.approvalWaiting",
+    "notifications.clarificationExpired",
+    "notifications.clarificationWaiting",
     "notifications.patrolCompleted",
     "notifications.scheduledJobCompleted",
     "notifications.scheduledJobStarted"

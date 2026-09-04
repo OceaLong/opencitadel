@@ -41,6 +41,9 @@ class InfrastructureMCPConnectionPoolAdapter(MCPConnectionPoolPort):
     ) -> MCPClientManager:
         return await self._pool.acquire(runtime, policy=policy)
 
+    async def report_result(self, manager: MCPClientManager, *, success: bool) -> None:
+        await self._pool.report_result(manager, success=success)
+
     async def release_stale(self) -> None:
         await self._pool.release_stale()
 
@@ -72,6 +75,9 @@ class InfrastructureA2AConnectionPoolAdapter(A2AConnectionPoolPort):
         policy: ActivityExecutionPolicy,
     ) -> A2AClientManager:
         return await self._pool.acquire(runtime, policy=policy)
+
+    async def report_result(self, manager: A2AClientManager, *, success: bool) -> None:
+        await self._pool.report_result(manager, success=success)
 
     async def release_stale(self) -> None:
         await self._pool.release_stale()

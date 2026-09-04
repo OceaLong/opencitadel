@@ -12,7 +12,7 @@ from app.application.ports.coordination import (
     SandboxQuotaStorePort,
 )
 from app.application.ports.execution import WakeupMessage
-from app.application.ports.streams import WakeupPort
+from app.application.ports.streams import WakeupBroadcastPort, WakeupPort
 from app.infrastructure.adapters.redis_capabilities import (
     RedisConnectivityProbe,
     RedisLeaseManager,
@@ -27,6 +27,8 @@ class MemoryRedis:
         self.values: dict[str, str] = {}
         self.expirations: dict[str, tuple[str, int]] = {}
         self.streams: dict[str, list[tuple[str, dict[str, str]]]] = {}
+        # stream -> group -> {"delivered": int, "pending": {entry_id: consumer}}
+        self.groups: dict[str, dict[str, dict[str, Any]]] = {}
         self.available = True
 
     async def ping(self) -> bool:
@@ -102,6 +104,54 @@ class MemoryRedis:
         stream, cursor = next(iter(streams.items()))
         entries = [entry for entry in self.streams.get(stream, []) if entry[0] > cursor]
         return [(stream, entries[:count])] if entries else []
+
+    async def xgroup_create(
+        self,
+        stream: str,
+        group: str,
+        *,
+        id: str = "$",
+        mkstream: bool = False,
+    ) -> bool:
+        await self.ping()
+        if mkstream:
+            self.streams.setdefault(stream, [])
+        groups = self.groups.setdefault(stream, {})
+        if group in groups:
+            from redis.exceptions import ResponseError
+
+            raise ResponseError("BUSYGROUP Consumer Group name already exists")
+        delivered = len(self.streams.get(stream, [])) if id == "$" else 0
+        groups[group] = {"delivered": delivered, "pending": {}}
+        return True
+
+    async def xreadgroup(
+        self,
+        group: str,
+        consumer: str,
+        streams: dict[str, str],
+        *,
+        count: int,
+        block: int,
+    ) -> list[tuple[str, list[tuple[str, dict[str, str]]]]]:
+        del block
+        await self.ping()
+        stream, cursor = next(iter(streams.items()))
+        assert cursor == ">"
+        state = self.groups[stream][group]
+        entries = self.streams.get(stream, [])[state["delivered"] :][:count]
+        state["delivered"] += len(entries)
+        for entry_id, _values in entries:
+            state["pending"][entry_id] = consumer
+        return [(stream, entries)] if entries else []
+
+    async def xack(self, stream: str, group: str, *entry_ids: str) -> int:
+        await self.ping()
+        state = self.groups[stream][group]
+        acked = 0
+        for entry_id in entry_ids:
+            acked += int(state["pending"].pop(entry_id, None) is not None)
+        return acked
 
     async def scan_iter(self, *, match: str, count: int) -> AsyncIterator[str]:
         del match, count
@@ -194,11 +244,17 @@ async def test_wakeup_round_trip_and_read_degradation_are_explicit() -> None:
 
     assert isinstance(wakeup, WakeupPort)
     await wakeup.publish(message)
-    received = await wakeup.read("0-0", block_milliseconds=1)
+    received = await wakeup.read("$", block_milliseconds=1)
 
     assert received.connectivity.available is True
-    assert received.cursor == "1-0"
+    # Consumer-group delivery is tracked server-side; the API-shape cursor is
+    # returned unchanged.
+    assert received.cursor == "$"
     assert received.messages == (message,)
+    # Delivered entries are acked immediately so the PEL never grows.
+    assert (
+        redis.groups[RedisWakeupAdapter.STREAM_KEY][RedisWakeupAdapter.GROUP_NAME]["pending"] == {}
+    )
 
     redis.available = False
     degraded = await wakeup.read(received.cursor, block_milliseconds=1)
@@ -207,8 +263,73 @@ async def test_wakeup_round_trip_and_read_degradation_are_explicit() -> None:
     assert degraded.messages == ()
 
 
+@pytest.mark.asyncio
+async def test_wakeup_consumer_group_delivers_each_hint_to_exactly_one_replica() -> None:
+    """K2-6 惊群治理: two kernel replicas share one consumer group, so a hint
+    wakes exactly one of them instead of stampeding both."""
+    redis = MemoryRedis()
+    replica_a = RedisWakeupAdapter(redis, consumer_name="replica-a")
+    replica_b = RedisWakeupAdapter(redis, consumer_name="replica-b")
+    message = WakeupMessage(
+        destination="execution.events",
+        dedupe_key="event:2",
+        event_position=8,
+    )
+
+    await replica_a.publish(message)
+    first = await replica_a.read("$", block_milliseconds=1)
+    second = await replica_b.read("$", block_milliseconds=1)
+
+    assert first.messages == (message,)
+    assert second.messages == ()  # already delivered to (and acked by) replica-a
+
+
 def test_coordination_ports_are_runtime_checkable() -> None:
     assert isinstance(RedisSandboxQuotaStore(FailingRedis()), SandboxQuotaStorePort)
     assert isinstance(RedisSandboxActivityStore(FailingRedis()), SandboxActivityStorePort)
     assert isinstance(RedisLeaseManager(FailingRedis()), LeaseManagerPort)
     assert isinstance(object(), RateLimitStorePort) is False
+
+
+@pytest.mark.asyncio
+async def test_wakeup_broadcast_reaches_every_listener_and_never_steals_from_the_group() -> None:
+    """SSE listeners consume in broadcast mode (own cursor each): every
+    listener sees every hint, and none of them consumes the kernel consumer
+    group's delivery — a group read from an SSE stream would silently steal
+    hints from the kernel replicas."""
+    redis = MemoryRedis()
+    kernel = RedisWakeupAdapter(redis, consumer_name="replica-a")
+    listener_a = RedisWakeupAdapter(redis)
+    listener_b = RedisWakeupAdapter(redis)
+    message = WakeupMessage(
+        destination="execution.events",
+        dedupe_key="event:3",
+        event_position=9,
+    )
+    assert isinstance(listener_a, WakeupBroadcastPort)
+
+    await kernel.publish(message)
+    seen_a = await listener_a.read_broadcast("0", block_milliseconds=1)
+    seen_b = await listener_b.read_broadcast("0", block_milliseconds=1)
+
+    # Broadcast: both listeners observe the hint, cursors advance.
+    assert seen_a.messages == (message,)
+    assert seen_b.messages == (message,)
+    assert seen_a.cursor != "0"
+
+    # The kernel's group delivery is untouched by the broadcast reads.
+    delivered = await kernel.read("$", block_milliseconds=1)
+    assert delivered.messages == (message,)
+
+
+@pytest.mark.asyncio
+async def test_wakeup_broadcast_degrades_explicitly_when_redis_is_unavailable() -> None:
+    redis = MemoryRedis()
+    listener = RedisWakeupAdapter(redis)
+    redis.available = False
+
+    degraded = await listener.read_broadcast("0", block_milliseconds=1)
+
+    assert degraded.connectivity.available is False
+    assert degraded.messages == ()
+    assert degraded.cursor == "0"

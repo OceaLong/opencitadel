@@ -29,7 +29,30 @@ class HintPoll:
 
 @runtime_checkable
 class WakeupPort(WakeupPublisherPort, Protocol):
+    """Competing consumption: each hint reaches exactly one reader.
+
+    This is the kernel replicas' mode (consumer group) — one replica wakes for
+    a hint, the rest keep sleeping. SSE listeners must NOT use it: they would
+    steal hints from the kernel and from each other.
+    """
+
     async def read(
+        self,
+        cursor: str,
+        *,
+        block_milliseconds: int,
+    ) -> WakeupBatch: ...
+
+
+@runtime_checkable
+class WakeupBroadcastPort(Protocol):
+    """Broadcast consumption: every listener sees every hint.
+
+    The SSE mode — each stream_source/chat listener holds its own cursor and
+    wakes on any hint, leaving the kernel's consumer group untouched.
+    """
+
+    async def read_broadcast(
         self,
         cursor: str,
         *,

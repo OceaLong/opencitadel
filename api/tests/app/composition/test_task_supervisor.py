@@ -46,7 +46,9 @@ async def test_auxiliary_task_restarts_with_bounded_policy() -> None:
         running.set()
         await asyncio.Event().wait()
 
-    supervisor = TaskSupervisor()
+    # The task ignores the stop event, so use a tiny drain window to keep the
+    # three-phase stop() fast before it falls back to cancellation.
+    supervisor = TaskSupervisor(shutdown_timeout_seconds=0.05)
     await supervisor.start(
         "policy-hints",
         flaky,
@@ -87,7 +89,7 @@ async def test_request_stop_is_idempotent_and_visible_to_cooperative_tasks() -> 
 
 @pytest.mark.asyncio
 async def test_stop_drains_registered_and_transient_tasks() -> None:
-    supervisor = TaskSupervisor()
+    supervisor = TaskSupervisor(shutdown_timeout_seconds=0.05)
     cancelled: list[str] = []
 
     async def waits_forever(name: str) -> None:
@@ -113,6 +115,37 @@ async def test_stop_drains_registered_and_transient_tasks() -> None:
     assert reports["transient"].state is TaskState.CANCELLED
     assert supervisor.pending_names == ()
     assert await supervisor.stop() == reports
+
+
+@pytest.mark.asyncio
+async def test_stop_drains_in_flight_handler_to_completion_without_cancelling() -> None:
+    """K2-3 排水: an in-flight handler that finishes within the shutdown window
+    completes naturally — stop() must not cancel it (which would abort an
+    in-flight model call and spuriously fail its Run)."""
+    supervisor = TaskSupervisor(shutdown_timeout_seconds=5.0)
+    events: list[str] = []
+    started = asyncio.Event()
+
+    async def slow_handler_then_drain() -> None:
+        # Simulates one worker loop: an in-flight handler (sleep) that must be
+        # allowed to finish, then the loop observes the stop event and exits.
+        try:
+            started.set()
+            await asyncio.sleep(0.1)
+            events.append("handler-finished")
+            await supervisor.stop_event.wait()
+            events.append("drained")
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+
+    await supervisor.start("worker", slow_handler_then_drain, kind=TaskKind.CRITICAL)
+    await started.wait()
+
+    reports = await supervisor.stop()
+
+    assert events == ["handler-finished", "drained"]
+    assert reports["worker"].state is TaskState.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -142,7 +175,7 @@ async def test_stop_reports_task_that_exceeds_shutdown_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_duplicate_and_blank_names_are_rejected() -> None:
-    supervisor = TaskSupervisor()
+    supervisor = TaskSupervisor(shutdown_timeout_seconds=0.05)
 
     async def waits() -> None:
         await asyncio.Event().wait()

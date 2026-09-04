@@ -1,5 +1,6 @@
 """Patrol and remediation workflows."""
 
+from app.application.execution import activity_types
 from app.application.execution.decisions.base import WorkflowPlan, step
 from app.domain.execution.commands import JsonValue
 from app.domain.execution.run import RunFamily
@@ -13,10 +14,12 @@ def patrol_plan(
 ) -> WorkflowPlan:
     if family == RunFamily.PATROL:
         types = (
-            "patrol.validate" if semantic.get("operation") == "validate" else "patrol.execute",
+            activity_types.PATROL_VALIDATE
+            if semantic.get("operation") == "validate"
+            else activity_types.PATROL_EXECUTE,
         )
     elif family == RunFamily.REMEDIATION:
-        types = ("remediation.execute",)
+        types = (activity_types.REMEDIATION_EXECUTE,)
     else:
         raise ValueError(f"not a patrol family: {family}")
     return WorkflowPlan(

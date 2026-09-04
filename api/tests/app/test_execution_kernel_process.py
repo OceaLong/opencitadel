@@ -42,6 +42,11 @@ class _IdleRuntime:
     def __init__(self, stopping) -> None:
         self._stopping = stopping
         self.inbox_calls = 0
+        self.metrics_refreshes = 0
+
+    async def refresh_metrics(self, **_kwargs):
+        self.metrics_refreshes += 1
+        return SimpleNamespace()
 
     async def run_pending_projectors_once(self, **_kwargs):
         return SimpleNamespace(processed=0)
@@ -225,6 +230,90 @@ async def test_kernel_heartbeat_continues_during_long_async_work(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_periodically_refreshes_runtime_metrics(tmp_path):
+    """D13/K4-3: the heartbeat cadence drives runtime.refresh_metrics.
+
+    Behavior-level proof that one heartbeat round leaves the Prometheus gauges
+    set: the runtime's refresh sets a sentinel value that must be observable by
+    sampling the process REGISTRY after the round.
+    """
+    import asyncio
+
+    from prometheus_client import REGISTRY
+
+    from app.infrastructure.observability.execution_metrics import (
+        EXECUTION_OUTBOX_LAG_SECONDS,
+    )
+
+    stopping = asyncio.Event()
+    runtime = _IdleRuntime(stopping)
+    refreshed = asyncio.Event()
+    sentinel = 1234.5
+
+    async def refresh_metrics(**_kwargs):
+        runtime.metrics_refreshes += 1
+        EXECUTION_OUTBOX_LAG_SECONDS.set(sentinel)
+        if runtime.metrics_refreshes >= 2:
+            refreshed.set()
+        return SimpleNamespace()
+
+    runtime.refresh_metrics = refresh_metrics
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        health_file=tmp_path / "kernel.health",
+        heartbeat_interval_seconds=0.005,
+    )
+
+    heartbeat = asyncio.create_task(process.run_heartbeat())
+    await asyncio.wait_for(refreshed.wait(), timeout=2.0)
+    stopping.set()
+    await heartbeat
+
+    assert runtime.metrics_refreshes >= 2
+    assert REGISTRY.get_sample_value("execution_outbox_lag_seconds") == sentinel
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_survives_metrics_refresh_failure(tmp_path):
+    """A failing metrics refresh warns but never kills the liveness lane."""
+    import asyncio
+
+    stopping = asyncio.Event()
+    runtime = _IdleRuntime(stopping)
+    calls = 0
+    second_call = asyncio.Event()
+
+    async def refresh_metrics(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            second_call.set()
+        raise RuntimeError("metrics store down")
+
+    runtime.refresh_metrics = refresh_metrics
+    health_file = tmp_path / "kernel.health"
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        health_file=health_file,
+        heartbeat_interval_seconds=0.005,
+    )
+
+    heartbeat = asyncio.create_task(process.run_heartbeat())
+    await asyncio.wait_for(second_call.wait(), timeout=2.0)
+    assert health_file.exists()
+    stopping.set()
+    await heartbeat
+
+    assert calls >= 2
+
+
+@pytest.mark.asyncio
 async def test_long_activity_does_not_block_control_plane_progress() -> None:
     import asyncio
 
@@ -246,6 +335,100 @@ async def test_long_activity_does_not_block_control_plane_progress() -> None:
     await asyncio.wait_for(running, timeout=0.1)
 
     assert runtime.inbox_calls >= 2
+
+
+class _DrainingActivityRuntime(_IdleRuntime):
+    """One in-flight activity batch that outlives the stop request."""
+
+    def __init__(self, stopping, activity_started, release) -> None:
+        super().__init__(stopping)
+        self._activity_started = activity_started
+        self._release = release
+        self.activity_finished = False
+        self.activity_cancelled = False
+
+    async def run_inbox_once(self, **_kwargs):
+        self.inbox_calls += 1
+        if self._activity_started.is_set() and not self._stopping.is_set():
+            self._stopping.set()
+        return SimpleNamespace(loaded=0)
+
+    async def run_activities_once(self, **_kwargs):
+        self._activity_started.set()
+        try:
+            await self._release.wait()
+        except __import__("asyncio").CancelledError:
+            self.activity_cancelled = True
+            raise
+        self.activity_finished = True
+        return SimpleNamespace(claimed=1)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_drains_in_flight_activity_batch_without_cancelling() -> None:
+    """K2-3 排水: after stop is requested, run() waits for the in-flight
+    activity batch (e.g. a long model call) instead of cancelling it."""
+    import asyncio
+
+    stopping = asyncio.Event()
+    activity_started = asyncio.Event()
+    release = asyncio.Event()
+    runtime = _DrainingActivityRuntime(stopping, activity_started, release)
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        idle_poll_seconds=0,
+    )
+
+    running = asyncio.create_task(process.run())
+    await activity_started.wait()
+    await stopping.wait()  # control plane requested stop while activity in flight
+    await asyncio.sleep(0.01)
+    assert not running.done()  # run() is draining, not exiting/cancelling
+
+    release.set()
+    await asyncio.wait_for(running, timeout=1)
+
+    assert runtime.activity_finished is True
+    assert runtime.activity_cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_activity_plane_survives_a_failing_batch() -> None:
+    """K2-2 (D5): a raising activity batch must not tear down the plane."""
+    import asyncio
+
+    stopping = asyncio.Event()
+
+    class _FailingActivityRuntime(_IdleRuntime):
+        def __init__(self, stopping) -> None:
+            super().__init__(stopping)
+            self.activity_calls = 0
+
+        async def run_inbox_once(self, **_kwargs):
+            # Keep the control plane idle; the activity plane drives the stop.
+            return SimpleNamespace(loaded=0)
+
+        async def run_activities_once(self, **_kwargs):
+            self.activity_calls += 1
+            if self.activity_calls >= 3:
+                self._stopping.set()
+            raise RuntimeError("poison activity batch")
+
+    runtime = _FailingActivityRuntime(stopping)
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        idle_poll_seconds=0,
+    )
+
+    await asyncio.wait_for(process.run(), timeout=1)
+
+    assert runtime.activity_calls >= 3
 
 
 @pytest.mark.asyncio

@@ -30,7 +30,7 @@ type SessionsContextValue = {
   error: string | null;
   /** 手动刷新（通过 REST 接口拉取一次） */
   refresh: () => Promise<void>;
-  deleteSession: (sessionId: string) => Promise<boolean>;
+  deleteSession: (sessionId: string) => Promise<{ success: boolean; message?: string }>;
   /** 当前搜索关键词（经 `q` 传给列表/流接口），空串表示不过滤 */
   query: string;
   /** 更新搜索关键词；调用方需自行 debounce（见 SessionList 搜索框） */
@@ -265,15 +265,23 @@ export function SessionsProvider({
   }, [authLoading, userId, streamStarted, query]);
 
   // ---------- 删除会话 ----------
-  const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
-    try {
-      await sessionApi.deleteSession(sessionId);
-      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+  const deleteSession = useCallback(
+    async (sessionId: string): Promise<{ success: boolean; message?: string }> => {
+      try {
+        await sessionApi.deleteSession(sessionId);
+        setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+        return { success: true };
+      } catch (err) {
+        // 把服务端的具体原因（如"会话仍有活动 Run，请先停止并等待进入终态"）
+        // 带回给调用方展示，而不是吞成笼统的"删除失败，请重试"。
+        return {
+          success: false,
+          message: err instanceof Error && err.message ? err.message : undefined,
+        };
+      }
+    },
+    [],
+  );
 
   const contextValue = useMemo(
     () => ({ sessions, loading, error, refresh, deleteSession, query, setQuery }),

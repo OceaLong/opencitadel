@@ -8,7 +8,11 @@ import {
   type CapabilitySnapshot,
   type CapabilityState,
 } from "@/lib/api/capabilities";
+import { CAPABILITIES_CHANGED_EVENT, subscribeAppEvent } from "@/lib/events";
 import { useAuth } from "@/providers/auth-provider";
+
+/** 兜底轮询间隔（毫秒）：事件/焦点刷新失效时的最长陈旧窗口。 */
+const POLL_INTERVAL_MS = 60_000;
 
 export function useCapabilities() {
   const { user, loading: authLoading } = useAuth();
@@ -49,6 +53,21 @@ export function useCapabilities() {
       return;
     }
     void reload();
+  }, [authLoading, reload, userId]);
+
+  // 及时性：窗口重获焦点 / 推理配置保存成功（CAPABILITIES_CHANGED_EVENT）时
+  // 立即重拉；另有 60s 轮询兜底。卸载与登出时全部清理。
+  useEffect(() => {
+    if (authLoading || !userId) return;
+    const onRefresh = () => void reload();
+    window.addEventListener("focus", onRefresh);
+    const unsubscribe = subscribeAppEvent(CAPABILITIES_CHANGED_EVENT, onRefresh);
+    const timer = window.setInterval(onRefresh, POLL_INTERVAL_MS);
+    return () => {
+      window.removeEventListener("focus", onRefresh);
+      unsubscribe();
+      window.clearInterval(timer);
+    };
   }, [authLoading, reload, userId]);
 
   const capability = useCallback(

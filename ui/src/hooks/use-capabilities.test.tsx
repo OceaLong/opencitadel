@@ -18,6 +18,8 @@ vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => mocks.auth,
 }));
 
+import { CAPABILITIES_CHANGED_EVENT } from "@/lib/events";
+
 import { useCapabilities } from "./use-capabilities";
 
 function Probe() {
@@ -68,5 +70,35 @@ describe("useCapabilities authentication lifecycle", () => {
     expect(container.textContent).toBe("empty");
 
     await unmount();
+  });
+
+  it("reloads on CAPABILITIES_CHANGED_EVENT and window focus, and cleans up on unmount", async () => {
+    mocks.auth.loading = false;
+    mocks.auth.user = { id: "user-1" };
+    const { container, unmount } = await renderComponent(<Probe />);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toBe("available");
+
+    // 推理配置保存成功 → 事件驱动立即重拉
+    mocks.get.mockResolvedValue({ items: { chat: { state: "unavailable" } } });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(CAPABILITIES_CHANGED_EVENT));
+      await Promise.resolve();
+    });
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toBe("unavailable");
+
+    // 窗口重获焦点 → 重拉
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(mocks.get).toHaveBeenCalledTimes(3);
+
+    // 卸载后监听全部清理，事件不再触发请求
+    await unmount();
+    window.dispatchEvent(new CustomEvent(CAPABILITIES_CHANGED_EVENT));
+    window.dispatchEvent(new Event("focus"));
+    expect(mocks.get).toHaveBeenCalledTimes(3);
   });
 });

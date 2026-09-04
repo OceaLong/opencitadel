@@ -27,6 +27,7 @@ from app.domain.services.knowledge_base.retriever import (
     RetrievalResponse,
     RetrievedChunk,
 )
+from app.domain.services.tools.errors import ToolInvocationError
 from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
 
 _KB_POLICY = KnowledgeRetrievalRunPolicy(
@@ -308,7 +309,7 @@ async def test_get_document_rejects_limit_outside_1_to_200(limit):
         policy=_KB_POLICY,
     )
 
-    with pytest.raises(ValueError, match="limit"):
+    with pytest.raises(ToolInvocationError, match="limit"):
         await tool.get_document("doc1", limit=limit)
 
     repo.get_document_for_version.assert_not_awaited()

@@ -191,6 +191,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/execution/projection-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 执行投影状态（每 scope 滞后 + 隔离清单）
+         * @description D13/K4-3: 管理员可见的正式投影运行状况。
+         *
+         *     - ``scope_lags``：scope head 水位 − formal checkpoint 的每 scope 滞后（仅列出滞后 > 0 的 scope，按滞后降序）。
+         *     - ``poisoned_scopes``：连续失败被隔离或正在重建中的 scope 清单。
+         */
+        get: operations["get_execution_projection_status_admin_api_admin_execution_projection_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/governance/overview": {
         parameters: {
             query?: never;
@@ -8285,7 +8308,7 @@ export interface components {
             a2a_server_refs?: string[];
             agent_params?: components["schemas"]["SkillAgentParams"];
             /** Allowed Tools */
-            allowed_tools?: string[];
+            allowed_tools?: string[] | null;
             /**
              * Body
              * @default
@@ -8381,7 +8404,7 @@ export interface components {
             a2a_server_refs?: string[];
             agent_params: components["schemas"]["SkillAgentParams"];
             /** Allowed Tools */
-            allowed_tools: string[];
+            allowed_tools?: string[] | null;
             /**
              * Body
              * @default
@@ -8684,6 +8707,17 @@ export interface components {
         /** ToolExecutionPolicy */
         ToolExecutionPolicy: {
             approval: components["schemas"]["ApprovalMode"];
+            /** Approval Choices Param */
+            approval_choices_param?: string | null;
+            /** Approval Feedback Param */
+            approval_feedback_param?: string | null;
+            /**
+             * Approval Kind
+             * @default tool_effect
+             */
+            approval_kind: string;
+            /** Approval Prompt Param */
+            approval_prompt_param?: string | null;
             capability: components["schemas"]["ToolCapability"];
             /**
              * Concurrency Group
@@ -9285,6 +9319,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_projection_status_admin_api_admin_execution_projection_status_get: {
+        parameters: {
+            query?: {
+                lag_limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
                 };
             };
             /** @description Validation Error */

@@ -12,6 +12,7 @@ from app.domain.services.tools.capability_policy import (
     CapabilityDeniedError,
     CapabilityPolicy,
 )
+from app.domain.services.tools.errors import ToolInvocationError
 
 """
 OpenCitadel 工具设计思路:
@@ -58,6 +59,27 @@ def tool(
     return decorator
 
 
+_JSON_TYPE_CHECKS: dict[str, Callable[[Any], bool]] = {
+    "string": lambda value: isinstance(value, str),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+    "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+    "boolean": lambda value: isinstance(value, bool),
+    "array": lambda value: isinstance(value, list),
+    "object": lambda value: isinstance(value, dict),
+    "null": lambda value: value is None,
+}
+
+
+def _matches_json_type(value: Any, declared: Any) -> bool:
+    if declared is None:
+        return True
+    types = declared if isinstance(declared, list) else [declared]
+    checks = [_JSON_TYPE_CHECKS.get(str(item)) for item in types]
+    if not any(checks):
+        return True
+    return any(check(value) for check in checks if check is not None)
+
+
 class BaseTool:
     """基础工具类，用于定义一个工具类，管理统一的工具集"""
 
@@ -81,9 +103,38 @@ class BaseTool:
 
     @classmethod
     def _filter_parameters(cls, method: Callable, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """传递method+kwargs并过滤参数，使其符合method参数的要求，因为LLM输出的内容有可能有幻觉"""
-        sign = inspect.signature(method)
-        return {key: value for key, value in kwargs.items() if key in sign.parameters}
+        """按 @tool 声明的 JSON schema 做必填/类型前置校验并剔除多余参数。
+
+        LLM 输出可能有幻觉：多余参数直接剔除；缺失必填或类型不符抛
+        ``ToolInvocationError(invalid_arguments)``，由活动边界归一化为失败的
+        tool result 喂回模型，而不是击穿为 Run 失败。
+        """
+        schema = getattr(method, "_tool_schema", None)
+        if schema is None:
+            sign = inspect.signature(method)
+            return {key: value for key, value in kwargs.items() if key in sign.parameters}
+        parameters = schema.get("function", {}).get("parameters", {})
+        properties = parameters.get("properties") or {}
+        required = parameters.get("required") or []
+        tool_name = getattr(method, "_tool_name", "tool")
+        missing = [name for name in required if kwargs.get(name) is None]
+        if missing:
+            raise ToolInvocationError(
+                f"工具[{tool_name}]缺少必填参数: {', '.join(sorted(missing))}",
+                kind="invalid_arguments",
+            )
+        filtered: dict[str, Any] = {}
+        for key, value in kwargs.items():
+            if key not in properties:
+                continue
+            declared = properties[key].get("type")
+            if value is not None and not _matches_json_type(value, declared):
+                raise ToolInvocationError(
+                    f"工具[{tool_name}]参数[{key}]类型不符: 期望 {declared}",
+                    kind="invalid_arguments",
+                )
+            filtered[key] = value
+        return filtered
 
     def get_tools(self) -> list[dict[str, Any]]:
         """获取所有已注册的工具列表schema信息，用于LLM绑定工具"""
@@ -105,7 +156,7 @@ class BaseTool:
         """Return the executable method and governance metadata for a registered tool."""
         method = self._get_tool_methods().get(name)
         if method is None:
-            raise ValueError(f"工具[{name}]未找到")
+            raise ToolInvocationError(f"工具[{name}]未找到", kind="not_found")
         return ToolDescriptor(
             name=name,
             schema=method._tool_schema,
@@ -149,7 +200,15 @@ class BaseTool:
             return normalize_tool_result(raw)
 
         # 3.如果没有找到工具则抛出错误
-        raise ValueError(f"工具[{tool_name}]未找到")
+        raise ToolInvocationError(f"工具[{tool_name}]未找到", kind="not_found")
+
+    async def on_cancel(self) -> None:
+        """协作式取消钩子：活动被取消时给工具一次释放外部资源的机会。
+
+        默认 no-op；shell/browser 等持有外部进程或页面的工具应覆写。
+        实现必须尽力而为且不得抛出取消以外的异常。
+        """
+        return
 
 
 class PolicyBoundTool(BaseTool):
@@ -197,6 +256,10 @@ class PolicyBoundTool(BaseTool):
                 tool_name=tool_name,
             )
         return await self._wrapped.invoke(tool_name, **kwargs)
+
+    async def on_cancel(self) -> None:
+        # BaseTool 定义了默认 no-op，__getattr__ 不会触发，必须显式转发。
+        await self._wrapped.on_cancel()
 
     def __getattr__(self, name: str):
         return getattr(self._wrapped, name)

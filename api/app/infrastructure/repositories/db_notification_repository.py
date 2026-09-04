@@ -18,6 +18,7 @@ class DBNotificationRepository(NotificationRepository):
                 user_id=notification.user_id,
                 type=notification.type,
                 session_id=notification.session_id,
+                approval_id=notification.approval_id,
                 artifact_id=notification.artifact_id,
                 job_id=notification.job_id,
                 message=encode_notification_message(

@@ -27,9 +27,8 @@ class SkillORM(Base):
     resources: Mapped[list[dict]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
-    allowed_tools: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )
+    # None=不限制 / []=禁全部（D11）：NULL 与空列表语义不同，列必须可空。
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     mcp_server_refs: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
@@ -118,7 +117,7 @@ class SkillORM(Base):
             system_prompt=self.system_prompt,
             body=self.body or "",
             resources=[SkillResource(**item) for item in (self.resources or [])],
-            allowed_tools=self.allowed_tools or [],
+            allowed_tools=self.allowed_tools,
             mcp_server_refs=self.mcp_server_refs or [],
             a2a_server_refs=self.a2a_server_refs or [],
             recommended_model_id=self.recommended_model_id,

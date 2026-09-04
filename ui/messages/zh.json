@@ -219,7 +219,8 @@
       "endpointNotFound": "未找到推理端点",
       "modelNotFound": "未找到推理模型",
       "probeFailed": "推理模型探测失败",
-      "unsupportedProviderKind": "该推理提供方不支持所请求的工作负载"
+      "unsupportedProviderKind": "该推理提供方不支持所请求的工作负载",
+      "modelInUse": "仍有推理绑定正在使用该模型，请先解除绑定"
     }
   },
   "language": {
@@ -272,7 +273,8 @@
     "agent": "Agent"
   },
   "chatHeader": {
-    "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}"
+    "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}",
+    "modelStatusTooltip": "点击打开模型设置"
   },
   "leftPanel": {
     "newTask": "新建任务",
@@ -759,6 +761,10 @@
     "descriptionLabel": "描述",
     "toolWhitelist": "工具白名单（逗号分隔，空=不过滤）",
     "toolWhitelistHint": "支持通配符，例如 mcp_*（全部 MCP）、mcp_jina_*（指定 MCP 服务）",
+    "toolsUnrestricted": "未限制工具",
+    "toolsUnrestrictedHint": "未限制工具：该技能可使用全部已启用工具",
+    "toolsAllDisabled": "已禁用全部工具",
+    "toolsAllDisabledHint": "工具白名单为空清单：该技能不可调用任何工具",
     "dynamicToolGroups": "动态工具组",
     "allowAllMcp": "允许所有 MCP 工具 (mcp_*)",
     "allowA2a": "允许 A2A 远程 Agent (a2a)",
@@ -1327,7 +1333,9 @@
     "scheduledJobStarted": "定时任务「{jobName}」已开始执行",
     "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}",
     "approvalWaiting": "「{subject}」需要审批",
-    "approvalExpired": "审批超时未处理，运行已取消（{subject}）"
+    "approvalExpired": "审批超时未处理，运行已取消（{subject}）",
+    "clarificationWaiting": "任务等待你的选择：{subject}",
+    "clarificationExpired": "澄清超时未选择，任务已取消：{subject}"
   },
   "toolUse": {
     "statusRunning": "执行中",
@@ -1821,6 +1829,8 @@
   },
   "approvalActions": {
     "approve": "批准",
+    "clarificationDecline": "拒绝澄清",
+    "clarificationTitle": "需要你的选择",
     "confirmReject": "确认拒绝",
     "reject": "拒绝",
     "rejectPlaceholder": "拒绝原因...",

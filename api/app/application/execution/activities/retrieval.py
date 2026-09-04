@@ -2,6 +2,7 @@
 
 import json
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.tool_catalog import ExecutionToolCatalog
 from app.application.services.memory_service import MemoryService
@@ -13,7 +14,7 @@ from app.domain.execution.activity import (
 
 
 class RetrievalActivityHandler:
-    activity_type = "retrieval.search"
+    activity_type = activity_types.RETRIEVAL_SEARCH
     idempotent = True
 
     def __init__(

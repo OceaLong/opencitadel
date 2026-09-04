@@ -219,7 +219,8 @@
       "endpointNotFound": "The inference endpoint could not be found.",
       "modelNotFound": "The inference model could not be found.",
       "probeFailed": "The inference model probe failed.",
-      "unsupportedProviderKind": "This inference provider does not support the requested workload."
+      "unsupportedProviderKind": "This inference provider does not support the requested workload.",
+      "modelInUse": "This inference model is still referenced by one or more bindings."
     }
   },
   "language": {
@@ -272,7 +273,8 @@
     "agent": "Agent"
   },
   "chatHeader": {
-    "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}"
+    "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}",
+    "modelStatusTooltip": "Open model settings"
   },
   "leftPanel": {
     "newTask": "New task",
@@ -759,6 +761,10 @@
     "descriptionLabel": "Description",
     "toolWhitelist": "Tool allowlist (comma-separated, empty = no filter)",
     "toolWhitelistHint": "Wildcards supported, e.g. mcp_* (all MCP) or mcp_jina_* (specific MCP service)",
+    "toolsUnrestricted": "Tools unrestricted",
+    "toolsUnrestrictedHint": "Tools unrestricted: this skill can use every enabled tool",
+    "toolsAllDisabled": "All tools disabled",
+    "toolsAllDisabledHint": "Empty tool allowlist: this skill cannot invoke any tools",
     "dynamicToolGroups": "Dynamic tool groups",
     "allowAllMcp": "Allow all MCP tools (mcp_*)",
     "allowA2a": "Allow A2A remote agents (a2a)",
@@ -1327,7 +1333,9 @@
     "scheduledJobStarted": "Scheduled job \"{jobName}\" started",
     "patrolCompleted": "Patrol \"{packName}\" completed with status {status}",
     "approvalWaiting": "Approval needed for {subject}",
-    "approvalExpired": "Approval expired without a decision; the run was cancelled ({subject})"
+    "approvalExpired": "Approval expired without a decision; the run was cancelled ({subject})",
+    "clarificationWaiting": "Your choice is needed: {subject}",
+    "clarificationExpired": "Clarification timed out and the task was cancelled: {subject}"
   },
   "toolUse": {
     "statusRunning": "running",
@@ -1821,6 +1829,8 @@
   },
   "approvalActions": {
     "approve": "Approve",
+    "clarificationDecline": "Decline",
+    "clarificationTitle": "Your choice is needed",
     "confirmReject": "Confirm reject",
     "reject": "Reject",
     "rejectPlaceholder": "Reason for rejection...",

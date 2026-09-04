@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from app.domain.execution.aggregate import (
 )
 from app.domain.execution.commands import CommandEnvelope
 from app.domain.execution.errors import CommandInProgressError, RejectionCode
+from app.domain.execution.registry import UnregisteredSchemaError
 from app.domain.execution.run import (
     ExpectedStreamVersionError,
     InvalidRunTransitionError,
@@ -61,7 +63,7 @@ class SqlAlchemyExecutionOrchestrator:
         session_factory: async_sessionmaker[AsyncSession],
         aggregates: Mapping[str, Aggregate],
         authorization: AuthorizationContext,
-        event_store_factory: EventStoreFactory = PostgresEventStore,
+        event_store_factory: EventStoreFactory | None = None,
         inbox_factory: InboxFactory = PostgresInbox,
         snapshot_store_factory: SnapshotStoreFactory = PostgresSnapshotStore,
         now: Callable[[], datetime] | None = None,
@@ -78,7 +80,18 @@ class SqlAlchemyExecutionOrchestrator:
         self._session_factory = session_factory
         self._aggregates = dict(aggregates)
         self._authorization = authorization
-        self._event_store_factory = event_store_factory
+        # The default store carries every aggregate's event registry so schema
+        # upcasting happens at the read boundary (shared with the projectors);
+        # a custom factory must wire its own registries if it wants upcasting.
+        self._event_store_factory = event_store_factory or (
+            lambda session: PostgresEventStore(
+                session,
+                event_registries={
+                    stream_type: aggregate.event_registry
+                    for stream_type, aggregate in self._aggregates.items()
+                },
+            )
+        )
         self._inbox_factory = inbox_factory
         self._snapshot_store_factory = snapshot_store_factory
         self._now = now or (lambda: datetime.now(UTC))
@@ -136,7 +149,7 @@ class SqlAlchemyExecutionOrchestrator:
             return self._rejected(command, RejectionCode.UNKNOWN_COMMAND)
         try:
             aggregate.command_registry.latest(command.command_type)
-        except KeyError:
+        except UnregisteredSchemaError:
             return self._rejected(command, RejectionCode.UNKNOWN_COMMAND)
         try:
             command_schema_version, command_payload = aggregate.command_registry.upcast(
@@ -144,7 +157,7 @@ class SqlAlchemyExecutionOrchestrator:
                 command.command_schema_version,
                 command.payload,
             )
-        except (KeyError, ValidationError):
+        except (UnregisteredSchemaError, ValidationError):
             return self._rejected(command, RejectionCode.INVALID_COMMAND_SCHEMA)
         normalized_command = CommandEnvelope.model_validate(
             {
@@ -160,7 +173,14 @@ class SqlAlchemyExecutionOrchestrator:
             stream_type=command.stream_type,
             stream_id=command.stream_id,
         )
-        for _ in range(self._max_conflict_retries):
+        for attempt in range(self._max_conflict_retries):
+            if attempt > 0:
+                # Deterministic, increasing backoff between optimistic-conflict
+                # retries (10ms, 30ms, 50ms, ...): without it colliding writers
+                # re-read and re-collide in lockstep (K2-8). Deterministic (no
+                # jitter) keeps behavior reproducible in tests; the increasing
+                # slope is what breaks the lockstep.
+                await asyncio.sleep(0.01 + (attempt - 1) * 0.02)
             snapshot = await snapshot_store.load(
                 stream.stream_type,
                 stream.stream_id,
@@ -174,7 +194,7 @@ class SqlAlchemyExecutionOrchestrator:
                 )
                 replayed = replay(
                     aggregate,
-                    self._upcast_events(aggregate, stored_events),
+                    stored_events,
                     stream_id=stream.stream_id,
                 )
             else:
@@ -197,13 +217,13 @@ class SqlAlchemyExecutionOrchestrator:
                     )
                     replayed = replay(
                         aggregate,
-                        self._upcast_events(aggregate, stored_events),
+                        stored_events,
                         stream_id=stream.stream_id,
                     )
                 else:
                     replayed = replay(
                         aggregate,
-                        self._upcast_events(aggregate, stored_events),
+                        stored_events,
                         snapshot=snapshot,
                         stream_id=stream.stream_id,
                     )
@@ -306,29 +326,6 @@ class SqlAlchemyExecutionOrchestrator:
         )
 
     @staticmethod
-    def _upcast_events(
-        aggregate: Aggregate,
-        events: tuple,
-    ) -> tuple:
-        upcasted = []
-        for event in events:
-            schema_version, payload = aggregate.event_registry.upcast(
-                event.event_type,
-                event.event_schema_version,
-                event.public_payload,
-            )
-            upcasted.append(
-                event.__class__.model_validate(
-                    {
-                        **event.model_dump(mode="python"),
-                        "event_schema_version": schema_version,
-                        "public_payload": payload,
-                    }
-                )
-            )
-        return tuple(upcasted)
-
-    @staticmethod
     async def _write_critical_records(
         session: AsyncSession,
         *,
@@ -347,25 +344,40 @@ class SqlAlchemyExecutionOrchestrator:
             if terminal_activity_status is None:
                 continue
             activity_id = UUID(str(event.public_payload["activity_id"]))
+            settle_values: dict[str, object] = {
+                "status": terminal_activity_status,
+                "result_ref": event.public_payload.get("result_ref"),
+                "result_summary": event.public_payload.get("result_summary"),
+                "failure_code": event.public_payload.get("failure_code"),
+                "completed_at": event.occurred_at,
+                "claimed_by": None,
+                "claim_deadline": None,
+                "heartbeat_at": None,
+                "updated_at": event.occurred_at,
+            }
+            # The full decision payload stays off the hash-chained event stream;
+            # it lands on the operational task row in the same transaction as
+            # the ActivityCompleted event that carries only its digest.
+            if (
+                event.event_type == "ActivityCompleted"
+                and command.command_type == "CompleteActivity"
+            ):
+                settle_values["decision_payload"] = command.payload.get("decision_data") or {}
             completed = await session.scalar(
                 update(ExecutionActivityTaskORM)
                 .where(
                     ExecutionActivityTaskORM.activity_id == activity_id,
                     ExecutionActivityTaskORM.request_generation
                     == int(event.public_payload["generation"]),
-                    ExecutionActivityTaskORM.status.in_(("pending", "claimed", "call_started")),
+                    # "dead_lettered" is settleable: a task parked by the
+                    # claim-attempt cap (K2-2) is later converged by the
+                    # activity-timeout timer's FailActivity, whose settlement
+                    # must find the row here instead of erroring.
+                    ExecutionActivityTaskORM.status.in_(
+                        ("pending", "claimed", "call_started", "dead_lettered")
+                    ),
                 )
-                .values(
-                    status=terminal_activity_status,
-                    result_ref=event.public_payload.get("result_ref"),
-                    result_summary=event.public_payload.get("result_summary"),
-                    failure_code=event.public_payload.get("failure_code"),
-                    completed_at=event.occurred_at,
-                    claimed_by=None,
-                    claim_deadline=None,
-                    heartbeat_at=None,
-                    updated_at=event.occurred_at,
-                )
+                .values(**settle_values)
                 .returning(ExecutionActivityTaskORM.activity_id)
             )
             if completed is None:

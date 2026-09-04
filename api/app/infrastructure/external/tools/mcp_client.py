@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
@@ -23,6 +24,7 @@ from app.domain.models.tool_policy import (
     ToolExecutionPolicy,
 )
 from app.domain.models.tool_result import ToolResult
+from app.domain.services.tools.untrusted import json_depth, truncate_and_wrap
 from app.domain.utils.mcp_url import validate_mcp_http_url
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
@@ -42,10 +44,24 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOOL_NAME_LEN = 64
 _INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+# 信任边界（D11）：远端工具 description 截断上限与 inputSchema 结构上限。
+_MAX_TOOL_DESCRIPTION_CHARS = 512
+_MAX_INPUT_SCHEMA_DEPTH = 8
+_MAX_INPUT_SCHEMA_BYTES = 16 * 1024
 
 
 def _sanitize_segment(segment: str) -> str:
     return _INVALID_TOOL_NAME_CHARS.sub("_", segment)
+
+
+def _input_schema_within_limits(input_schema: Any) -> bool:
+    try:
+        serialized = json.dumps(input_schema, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return False
+    if len(serialized.encode("utf-8")) > _MAX_INPUT_SCHEMA_BYTES:
+        return False
+    return json_depth(input_schema) <= _MAX_INPUT_SCHEMA_DEPTH
 
 
 def build_mcp_tool_name(server_name: str, tool_name: str) -> str:
@@ -413,6 +429,17 @@ class MCPClientManager:
 
         for server_name, tools in self._tools.items():
             for tool in tools:
+                # 信任边界（D11）：inputSchema 超深/超大的远端工具直接拒绝，
+                # 避免把不可信的巨型 schema 注入模型上下文。
+                if not _input_schema_within_limits(tool.inputSchema):
+                    logger.warning(
+                        "MCP服务器[%s]的工具[%s] inputSchema 超出限制（深度≤%s、序列化≤%s字节），已拒绝",
+                        server_name,
+                        tool.name,
+                        _MAX_INPUT_SCHEMA_DEPTH,
+                        _MAX_INPUT_SCHEMA_BYTES,
+                    )
+                    continue
                 tool_name = build_mcp_tool_name(server_name, tool.name)
                 if tool_name in self._canonical_to_source:
                     suffix = hashlib.sha256(f"{server_name}:{tool.name}".encode()).hexdigest()[:6]
@@ -420,11 +447,15 @@ class MCPClientManager:
                     tool_name = f"{base}_{suffix}"
                 self._canonical_to_source[tool_name] = (server_name, tool.name)
 
+                description = truncate_and_wrap(
+                    str(tool.description or tool.name),
+                    max_chars=_MAX_TOOL_DESCRIPTION_CHARS,
+                )
                 tool_schema = {
                     "type": "function",
                     "function": {
                         "name": tool_name,
-                        "description": f"[{server_name}] {tool.description or tool.name}",
+                        "description": f"[{server_name}] {description}",
                         "parameters": tool.inputSchema,
                     },
                 }
@@ -498,11 +529,13 @@ class MCPClientManager:
                 return ToolResult(success=True, data=rendered or "工具执行成功")
             return ToolResult(success=True, data="工具执行成功")
         except (OSError, RuntimeError, ValueError) as e:
-            # 记录错误日志并返回失败的工具结果
+            # 记录错误日志并返回失败的工具结果；failure_kind=transport 供连接池
+            # 统计连续失败并在超阈值时强制重建条目（P2-9）。
             logger.error("调用MCP工具[%s]失败: %s", tool_name, e)
             return ToolResult(
                 success=False,
                 message=f"调用MCP工具[{tool_name}]失败: {e!s}",
+                failure_kind="transport",
             )
 
     async def cleanup(self) -> None:

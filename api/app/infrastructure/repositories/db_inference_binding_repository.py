@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.inference import InferenceBinding, InferencePurpose
@@ -101,6 +101,16 @@ class DBInferenceBindingRepository(InferenceBindingRepository):
             return
         record.model_id = binding.model_id
         record.updated_at = binding.updated_at
+
+    async def count_for_model(self, model_id: str) -> int:
+        return int(
+            await self.db_session.scalar(
+                select(func.count())
+                .select_from(InferenceBindingORM)
+                .where(InferenceBindingORM.model_id == model_id)
+            )
+            or 0
+        )
 
     async def delete_scoped_binding(
         self,

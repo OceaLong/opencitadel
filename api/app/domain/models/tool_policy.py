@@ -44,6 +44,28 @@ class ToolExecutionPolicy(BaseModel):
     idempotency: ToolIdempotency
     approval: ApprovalMode
     concurrency_group: str = "none"
+    # Interaction metadata for the approval gate, declared by the tool instead
+    # of name-based special cases anywhere in the core loops:
+    # - approval_kind labels the waiting card the UI renders ("tool_effect" is
+    #   the classic approve/reject gate; "clarification" renders the question +
+    #   recommended-options card).
+    # - approval_prompt_param names the tool argument whose value becomes the
+    #   card's prompt text (falls back to the derived risk summary).
+    # - approval_choices_param names the argument supplying selectable options.
+    # - approval_feedback_param names the argument the reviewer's feedback (the
+    #   chosen option) is injected into when the approved call executes.
+    approval_kind: str = "tool_effect"
+    approval_prompt_param: str | None = None
+    approval_choices_param: str | None = None
+    approval_feedback_param: str | None = None
+
+    def requires_approval(self) -> bool:
+        """Whether an execution under this policy needs a human approval gate.
+
+        单源推导（D10/P2-11）：任何显式审批模式之外，非只读副作用也一律
+        需要审批——曾经散落在目录装配处的硬编码规则收敛到这里。
+        """
+        return self.approval != ApprovalMode.NEVER or self.effect != ToolEffect.READ_ONLY
 
 
 CONSERVATIVE_TOOL_POLICY = ToolExecutionPolicy(

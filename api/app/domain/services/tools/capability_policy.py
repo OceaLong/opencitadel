@@ -51,6 +51,21 @@ GENERATION_WRITE = ToolExecutionPolicy(
     approval=ApprovalMode.POLICY,
     concurrency_group="generation",
 )
+# ask_user: the model pauses the Run with a clarifying question and recommended
+# options; the human's choice IS the approval feedback, injected back into the
+# tool call on resume. approval=ALWAYS routes it through the standard waiting
+# gate — no name-based special case exists anywhere in the loops.
+CLARIFICATION_INTERACTIVE = ToolExecutionPolicy(
+    capability=ToolCapability.UNKNOWN,
+    effect=ToolEffect.INTERACTIVE,
+    idempotency=ToolIdempotency.SAFE,
+    approval=ApprovalMode.ALWAYS,
+    concurrency_group="none",
+    approval_kind="clarification",
+    approval_prompt_param="question",
+    approval_choices_param="options",
+    approval_feedback_param="resolved_choice",
+)
 
 _ASK_CAPABILITIES = frozenset(
     {
@@ -121,26 +136,3 @@ class CapabilityPolicy:
         ):
             return False
         return self.allows(execution_policy, tool_name=tool_name)
-
-    def for_child(self, requested_tool_names: Iterable[str] | None = None) -> "CapabilityPolicy":
-        if requested_tool_names is None:
-            return self
-        requested = frozenset(requested_tool_names)
-        if self.mode == SessionMode.ASK and self.allowed_tool_names is None and requested:
-            raise CapabilityDeniedError(
-                "Ask 子 Agent 不得请求未由父策略显式授予的工具",
-                layer="assembly",
-            )
-        if self.allowed_tool_names is not None:
-            expanded = [
-                name
-                for name in requested
-                if not is_tool_allowed(name, list(self.allowed_tool_names))
-            ]
-            if expanded:
-                raise CapabilityDeniedError(
-                    f"子 Agent 工具请求超出父策略: {', '.join(sorted(expanded))}",
-                    layer="exposure",
-                    tool_name=", ".join(sorted(expanded)),
-                )
-        return CapabilityPolicy(mode=self.mode, allowed_tool_names=requested)

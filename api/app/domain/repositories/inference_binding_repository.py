@@ -33,6 +33,11 @@ class InferenceBindingRepository(ABC):
     ) -> None: ...
 
     @abstractmethod
+    async def count_for_model(self, model_id: str) -> int:
+        """Bindings (any scope) still pointing at this model."""
+        ...
+
+    @abstractmethod
     async def delete_scoped_binding(
         self,
         purpose: InferencePurpose,

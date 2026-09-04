@@ -54,7 +54,7 @@ def _event(
         stream_version=version,
         position=position,
         event_type=event_type,
-        event_schema_version=2 if event_type == "RunCreated" else 1,
+        event_schema_version=1,
         public_payload=public_payload,
         internal_payload=internal_payload,
         secret_ref=None,
@@ -66,6 +66,20 @@ def _event(
         prev_hash="0" * 64,
         event_hash=f"{version:x}" * 64,
     )
+
+
+async def _apply_run_event(projector, session, event) -> None:
+    """Per-event equivalent of the projector's batched fold (K4-4).
+
+    ``_project_run`` was split into ``_track_run`` (in-memory fold) plus
+    per-event product side effects and a final ``_flush_run`` UPSERT; these
+    tests drive one event at a time, so each call folds and flushes.
+    """
+    trackers: dict = {}
+    tracker = await projector._track_run(session, event, trackers)
+    await projector._project_product_lifecycle(session, event, tracker.state)
+    await projector._project_resource_build_failure(session, event, tracker.state)
+    await projector._flush_run(session, tracker)
 
 
 async def _session_row(session, session_id: str) -> object:
@@ -132,7 +146,7 @@ async def test_stale_run_event_cannot_regress_session_status() -> None:
                 },
                 semantic_payload={"session_id": session_id},
             )
-            await projector._project_run(session, created)
+            await _apply_run_event(projector, session, created)
             started = _event(
                 run_id=run_id,
                 owner_user_id=owner_user_id,
@@ -142,7 +156,7 @@ async def test_stale_run_event_cannot_regress_session_status() -> None:
                 occurred_at=occurred_at + timedelta(seconds=1),
                 public_payload={},
             )
-            await projector._project_run(session, started)
+            await _apply_run_event(projector, session, started)
             waiting = _event(
                 run_id=run_id,
                 owner_user_id=owner_user_id,
@@ -152,7 +166,7 @@ async def test_stale_run_event_cannot_regress_session_status() -> None:
                 occurred_at=occurred_at + timedelta(seconds=2),
                 public_payload={"reason": "approval"},
             )
-            await projector._project_run(session, waiting)
+            await _apply_run_event(projector, session, waiting)
 
             # Forward progression advanced the guard monotonically.
             forward = await _session_row(session, session_id)
@@ -183,7 +197,7 @@ async def test_stale_run_event_cannot_regress_session_status() -> None:
                 occurred_at=occurred_at + timedelta(seconds=3),
                 public_payload={},
             )
-            await projector._project_run(session, resumed)
+            await _apply_run_event(projector, session, resumed)
 
             blocked = await _session_row(session, session_id)
             assert blocked.status == "completed"
@@ -285,7 +299,8 @@ async def test_stale_terminal_event_cannot_regress_patrol_run_status() -> None:
                 patrol_run_id=patrol_run_id,
                 execution_run_id=execution_run_id,
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,
@@ -312,7 +327,8 @@ async def test_stale_terminal_event_cannot_regress_patrol_run_status() -> None:
             )
 
             # A stale terminal event at a lower position must not fail the run.
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,

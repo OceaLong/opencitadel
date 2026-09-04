@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -10,6 +11,7 @@ from uuid import UUID, uuid4
 from app.application.execution.command_ingress import CommandIngress
 from app.application.execution.public_projection import PublicExecutionEvent
 from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
+from app.application.ports.streams import WakeupBroadcastPort
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.models.scope import OwnerScope
 
@@ -23,12 +25,17 @@ class RunControlService:
         commands: CommandIngress,
         run_projection: RunProjectionPort,
         public_projection: PublicProjectionPort,
-        poll_interval_seconds: float = 0.2,
+        # K4-3: the stream hangs on the kernel's ``execution:wakeup`` hint
+        # stream in broadcast mode when a port is wired; the interval below is
+        # the no-hint fallback (and the whole cadence when Redis is absent).
+        events_wakeup: WakeupBroadcastPort | None = None,
+        poll_interval_seconds: float = 1.0,
         idle_timeout_seconds: float = 120.0,
     ) -> None:
         self._commands = commands
         self._run_projection = run_projection
         self._public = public_projection
+        self._events_wakeup = events_wakeup
         self._poll_interval = poll_interval_seconds
         self._idle_timeout = idle_timeout_seconds
 
@@ -76,6 +83,7 @@ class RunControlService:
     ) -> AsyncIterator[PublicExecutionEvent]:
         cursor = after
         idle = 0.0
+        wakeup_cursor = "$"
         while idle < self._idle_timeout:
             page = await self._public.list_events(
                 source_entity_type=source_entity_type,
@@ -92,8 +100,51 @@ class RunControlService:
                     if event.event_type in _TERMINAL_EVENTS:
                         return
                 continue
+            wakeup_cursor, waited = await self._await_hint(wakeup_cursor)
+            idle += waited
+        # Explicit idle-timeout close (D13/K4-3): tell the client this stream
+        # ended for lack of events — not because the Run finished — so it can
+        # distinguish "reconnect and keep waiting" from a terminal event.
+        yield self._stream_timeout_event(cursor)
+
+    async def _await_hint(self, wakeup_cursor: str) -> tuple[str, float]:
+        """Wait for the next poll trigger; returns (cursor, seconds waited).
+
+        With a wakeup port, block on the global hint stream (broadcast mode —
+        unrelated events also wake us, which just means one early projection
+        query) and clamp re-query cadence to the poll interval so a busy system
+        never drives this session's DB rate above the fallback cadence. Without
+        one, sleep the fixed interval.
+        """
+        if self._events_wakeup is None:
             await asyncio.sleep(self._poll_interval)
-            idle += self._poll_interval
+            return wakeup_cursor, self._poll_interval
+        started = time.monotonic()
+        batch = await self._events_wakeup.read_broadcast(
+            wakeup_cursor,
+            block_milliseconds=int(self._poll_interval * 1000),
+        )
+        if not batch.connectivity.available:
+            await asyncio.sleep(self._poll_interval)
+            return wakeup_cursor, time.monotonic() - started
+        elapsed = time.monotonic() - started
+        if batch.messages and elapsed < self._poll_interval:
+            await asyncio.sleep(self._poll_interval - elapsed)
+            elapsed = time.monotonic() - started
+        return batch.cursor, elapsed
+
+    @staticmethod
+    def _stream_timeout_event(cursor: str | None) -> PublicExecutionEvent:
+        return PublicExecutionEvent(
+            cursor=cursor or "",
+            event_id=uuid4(),
+            event_type="stream_timeout",
+            run_id=None,
+            stream_id="",
+            stream_version=0,
+            payload={"type": "stream_timeout"},
+            occurred_at=datetime.now(UTC),
+        )
 
 
 __all__ = ["RunControlService"]

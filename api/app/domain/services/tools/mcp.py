@@ -22,6 +22,8 @@ from app.domain.services.tools.capability_policy import (
     CapabilityDeniedError,
     CapabilityPolicy,
 )
+from app.domain.services.tools.errors import ToolInvocationError
+from app.domain.services.tools.untrusted import fence_untrusted_tool_result
 from app.domain.utils.integration_filter import filter_enabled_mcp_runtime
 
 logger = logging.getLogger(__name__)
@@ -75,25 +77,6 @@ class MCPTool(BaseTool):
             return self._tools
         return self.schemas_for(self._capability_policy)
 
-    def register_schema(
-        self,
-        name: str,
-        *,
-        schema: dict[str, Any],
-        policy: ToolExecutionPolicy | None,
-    ) -> None:
-        self._tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": "",
-                    "parameters": schema,
-                },
-            }
-        )
-        self._tool_policies[name] = policy or CONSERVATIVE_TOOL_POLICY
-
     def schemas_for(self, policy: CapabilityPolicy) -> list[dict[str, Any]]:
         return [
             schema
@@ -113,7 +96,7 @@ class MCPTool(BaseTool):
             None,
         )
         if schema is None:
-            raise ValueError(f"工具[{name}]未找到")
+            raise ToolInvocationError(f"工具[{name}]未找到", kind="not_found")
         return ToolDescriptor(
             name=name,
             schema=schema,
@@ -148,7 +131,17 @@ class MCPTool(BaseTool):
             )
         if self._manager is None:
             return ToolResult(success=False, message="MCP工具未初始化")
-        return await self._manager.invoke(tool_name, kwargs)
+        result = await self._manager.invoke(tool_name, kwargs)
+        await self._report_transport_health(result)
+        # 信任边界（D11）：远端返回内容（含 structuredContent）在进入模型
+        # 上下文前统一包裹；巡检等机器通道直接使用底层 manager，不受影响。
+        return fence_untrusted_tool_result(result)
+
+    async def _report_transport_health(self, result: ToolResult) -> None:
+        report = getattr(self._connection_pool, "report_result", None)
+        if report is None or self._manager is None or not self._uses_pool:
+            return
+        await report(self._manager, success=result.failure_kind != "transport")
 
     async def cleanup(self) -> None:
         if not self._uses_pool and self._manager is not None:

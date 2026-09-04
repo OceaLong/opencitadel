@@ -18,9 +18,39 @@ from app.domain.models.tool_policy import (
 from app.domain.models.tool_result import ToolResult
 from app.domain.runtime_policy import ActivityExecutionPolicy
 from app.domain.services.tools.base import BaseTool, tool
+from app.domain.services.tools.untrusted import (
+    fence_untrusted_tool_result,
+    wrap_untrusted_text,
+)
 from app.domain.utils.integration_filter import filter_enabled_a2a_runtime
 
 logger = logging.getLogger(__name__)
+
+
+def _fence_agent_card(card: dict[str, Any]) -> dict[str, Any]:
+    fenced = dict(card)
+    for key in ("name", "description"):
+        value = fenced.get(key)
+        if isinstance(value, str):
+            fenced[key] = wrap_untrusted_text(value)
+    skills = fenced.get("skills")
+    if isinstance(skills, list):
+        fenced["skills"] = [
+            (
+                {
+                    **skill,
+                    **{
+                        key: wrap_untrusted_text(skill[key])
+                        for key in ("name", "description")
+                        if isinstance(skill.get(key), str)
+                    },
+                }
+                if isinstance(skill, dict)
+                else skill
+            )
+            for skill in skills
+        ]
+    return fenced
 
 
 class A2ATool(BaseTool):
@@ -93,8 +123,10 @@ class A2ATool(BaseTool):
     async def get_remote_agent_cards(self) -> ToolResult:
         if not self.manager:
             return ToolResult(success=False, message="A2A工具未初始化")
+        # 信任边界（D11）：Agent Card 的 name/description/skills 为远端可控
+        # 文本，进入模型上下文前统一包裹；id/url 等寻址字段保持原样可用。
         agent_cards = [
-            {"id": card_id, **agent_card}
+            _fence_agent_card({"id": card_id, **agent_card})
             for card_id, agent_card in self.manager.agent_cards.items()
             if agent_card.get("enabled", True)
         ]
@@ -124,7 +156,16 @@ class A2ATool(BaseTool):
     async def call_remote_agent(self, id: str, query: str) -> ToolResult:
         if not self.manager:
             return ToolResult(success=False, message="A2A工具未初始化")
-        return await self.manager.invoke(agent_id=id, query=query)
+        result = await self.manager.invoke(agent_id=id, query=query)
+        await self._report_transport_health(result)
+        # 信任边界（D11）：远程 Agent 返回内容统一包裹后再进入模型上下文。
+        return fence_untrusted_tool_result(result)
+
+    async def _report_transport_health(self, result: ToolResult) -> None:
+        report = getattr(self._connection_pool, "report_result", None)
+        if report is None or self.manager is None or not self._uses_pool:
+            return
+        await report(self.manager, success=result.failure_kind != "transport")
 
     async def cleanup(self) -> None:
         if not self._uses_pool and self.manager is not None:

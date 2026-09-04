@@ -201,6 +201,10 @@ class ExecutionCommandInboxORM(Base):
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     claim_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Real processing deliveries (PostgresInbox.claim only). claim_generation
+    # also climbs on the kernel's batch pre-claim (PostgresInboxSource), so it
+    # fences leases but over-counts deliveries; the dead-letter cap uses this.
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     claim_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_event_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_event_position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -234,6 +238,10 @@ class ExecutionOutboxORM(Base):
     )
     destination: Mapped[str] = mapped_column(String(64), nullable=False)
     dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional destination-specific message body (K4-2). Wakeup hints carry no
+    # payload (NULL); durable approval notices persist the notice data here so
+    # the dispatcher can redeliver after a crash without re-reading projections.
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     available_at: Mapped[datetime] = mapped_column(
@@ -338,6 +346,12 @@ class ExecutionActivityTaskORM(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     request_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     claim_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Poison-pill guard: total number of worker claims (including lease-expiry
+    # reclaims). ``attempt`` only counts call_started transitions, so a task
+    # that crashes the worker *before* call start would otherwise be reclaimed
+    # forever. Once claim_attempts exceeds the configured cap the store parks
+    # the row as ``dead_lettered`` instead of claiming it again.
+    claim_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -357,6 +371,13 @@ class ExecutionActivityTaskORM(Base):
     result_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full decision payload of a succeeded activity (e.g. model tool_calls),
+    # written in the settlement transaction. The ActivityCompleted event keeps
+    # only a digest of this value; the decision source rehydrates and verifies
+    # it before planning.
+    decision_payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     failure_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -389,6 +410,41 @@ class ExecutionPoisonedRunORM(Base):
     team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reason: Mapped[str] = mapped_column(String(128), nullable=False)
     last_error: Mapped[str] = mapped_column(Text, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+
+class ExecutionPoisonedScopeORM(Base):
+    """Kernel-internal quarantine for owner scopes whose projection keeps failing.
+
+    One corrupt projection row (or a scope-local bug) must never stall the whole
+    formal-projection loop: after N consecutive per-scope failures the kernel
+    records the scope here and ``list_pending`` stops offering it, so every
+    other scope keeps projecting (D12/P1-13). The row doubles as the rebuild
+    marker: ``rebuilding = true`` while an operator-driven projection rebuild is
+    in flight, letting the run-context source hand out a retryable signal
+    instead of a permanent policy failure. Operator diagnostic / control table
+    (no tenant RLS), mirroring ``execution_poisoned_runs``.
+    """
+
+    __tablename__ = "execution_poisoned_scopes"
+    __table_args__ = (Index("ix_execution_poisoned_scopes_last_seen", "last_seen_at"),)
+
+    owner_scope_key: Mapped[str] = mapped_column(String(261), primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    rebuilding: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -510,6 +566,13 @@ class ExecutionRunProjectionORM(Base):
             "source_entity_type",
             "source_entity_id",
         ),
+        # Decision-readiness scan: load_ready reads only armed rows in due order.
+        Index(
+            "ix_execution_run_projection_decision_due",
+            "decision_due_at",
+            "run_id",
+            postgresql_where=text("decision_due_at IS NOT NULL AND terminal = false"),
+        ),
     )
 
     run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -520,6 +583,15 @@ class ExecutionRunProjectionORM(Base):
     execution_policy_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Decision-readiness model (D4 / P0-1): the projector maintains these three
+    # columns from the evolved RunState so ``load_ready`` filters decidable Runs
+    # in SQL instead of decoding every non-terminal projection row per poll.
+    # ``decision_due_at`` is armed whenever the projection says the Run needs a
+    # decision (queued, or running with no active activities) and cleared by the
+    # decision worker once a decision round found nothing to do (disarm).
+    wait_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    active_activity_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    decision_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     parent_run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     correlation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -592,7 +664,14 @@ class ExecutionResourceBuildProjectionORM(Base):
 
 
 class ExecutionPublicEventORM(Base):
-    """Sanitized durable event feed projected only from ``execution_events``."""
+    """Sanitized durable event feed for the user-facing SSE/history stream.
+
+    Rows come from two producers: the formal projector (shaped from
+    ``execution_events``, carrying the source event's global ``position``) and
+    the activity worker's progress sink (ephemeral telemetry that never enters
+    the hash-chained aggregate stream, ``position`` is NULL). The feed's total
+    order — and the public cursor — is the table's own ``seq``.
+    """
 
     __tablename__ = "execution_public_events"
     __table_args__ = (
@@ -602,37 +681,39 @@ class ExecutionPublicEventORM(Base):
             "ix_execution_public_events_stream",
             "stream_type",
             "stream_id",
-            "position",
+            "seq",
         ),
         Index(
             "ix_execution_public_events_source",
             "source_entity_type",
             "source_entity_id",
-            "position",
+            "seq",
         ),
         Index(
-            "ix_execution_public_events_owner_position",
+            "ix_execution_public_events_owner_seq",
             "owner_user_id",
-            "position",
+            "seq",
             postgresql_where=text("owner_user_id IS NOT NULL"),
         ),
         Index(
-            "ix_execution_public_events_team_position",
+            "ix_execution_public_events_team_seq",
             "team_id",
-            "position",
+            "seq",
             postgresql_where=text("team_id IS NOT NULL"),
         ),
     )
 
-    # The projector always writes position explicitly (mirrored from
-    # execution_events.position); it is never a locally generated sequence.
-    position: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    seq: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Source position in execution_events for projector-derived rows; NULL for
+    # off-stream telemetry rows (activity progress).
+    position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     source_entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_entity_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stream_type: Mapped[str] = mapped_column(String(64), nullable=False)
     stream_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 0 for off-stream telemetry rows, which have no aggregate stream version.
     stream_version: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -750,6 +831,7 @@ __all__ = [
     "ExecutionEventORM",
     "ExecutionOutboxORM",
     "ExecutionPoisonedRunORM",
+    "ExecutionPoisonedScopeORM",
     "ExecutionProjectorCheckpointORM",
     "ExecutionPublicEventORM",
     "ExecutionResourceBuildProjectionORM",

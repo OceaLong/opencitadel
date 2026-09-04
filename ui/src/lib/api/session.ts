@@ -1,3 +1,5 @@
+import { APPROVALS_CHANGED_EVENT, dispatchAppEvent } from "@/lib/events";
+
 import { translate } from "@/i18n/translate";
 
 import { createSSEStream, get, parseSSEStream, patch, post } from "./fetch";
@@ -199,15 +201,19 @@ export const sessionApi = {
     return patch<SessionDetail>(`/sessions/${sessionId}`, params);
   },
 
-  decideApproval: (
+  decideApproval: async (
     approvalId: string,
     decision: "approved" | "rejected",
     feedback = "",
   ): Promise<{ run_id: string; approval_id: string; decision: string }> => {
-    return post(`/approval-batches/${approvalId}/commands/decide`, {
-      decision,
-      feedback,
-    });
+    const result = await post<{ run_id: string; approval_id: string; decision: string }>(
+      `/approval-batches/${approvalId}/commands/decide`,
+      { decision, feedback },
+    );
+    // 决策成功后通知顶栏角标/通知铃立即刷新（后端会同步把关联通知标记已读），
+    // 与 auth-events 一样在 api 封装层做副作用，覆盖所有调用方。
+    dispatchAppEvent(APPROVALS_CHANGED_EVENT);
+    return result;
   },
 
   getResourceBindings: (sessionId: string): Promise<SessionResourceBinding[]> => {

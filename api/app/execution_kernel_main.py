@@ -21,10 +21,12 @@ from app.composition.tasks import TaskFailure, TaskKind
 from app.composition.types import KernelRuntime
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.logging import setup_logging
-from app.observability.otel import setup_observability
+from app.infrastructure.observability.execution_metrics import observe_lane_duration
+from app.observability.otel import get_tracer, setup_observability
 from core.config import DeploymentSettings, load_deployment_settings
 
 logger = logging.getLogger(__name__)
+_tracer = get_tracer("opencitadel.execution.kernel")
 KernelRuntimeFactory = Callable[..., AbstractAsyncContextManager[KernelRuntime]]
 
 
@@ -82,7 +84,7 @@ class ExecutionKernelProcess:
             ),
         }
         try:
-            done, _ = await asyncio.wait(
+            done, pending = await asyncio.wait(
                 lanes,
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -92,6 +94,13 @@ class ExecutionKernelProcess:
                     raise error
             if not self._stopping.is_set():
                 raise RuntimeError("execution kernel lane stopped unexpectedly")
+            # Graceful drain (D5/K2-3): on shutdown both planes exit their loops
+            # after finishing in-flight work; wait for the slower one instead of
+            # cancelling it (which would abort in-flight model calls). The
+            # supervisor's shutdown timeout still bounds this wait by cancelling
+            # run() as a whole if the drain exceeds it.
+            if pending:
+                await asyncio.wait(pending)
         finally:
             for task in lanes:
                 if not task.done():
@@ -146,22 +155,47 @@ class ExecutionKernelProcess:
                     logger.exception("execution kernel wake-up hint failed")
 
     async def _run_lane(self, name: str, work: object, attribute: str) -> int:
-        """Await one control-plane lane, isolating failures from its peers."""
-        try:
-            result = await work  # type: ignore[misc]
-        except Exception:
-            logger.exception("execution kernel control-plane lane '%s' failed", name)
-            return 0
-        return int(getattr(result, attribute))
+        """Await one control-plane lane, isolating failures from its peers.
+
+        Each pass is wrapped in an OTEL span and a per-lane duration histogram
+        (D13/K4-3) so lane latency and failures are observable per lane.
+        """
+        started = time.monotonic()
+        with _tracer.start_as_current_span("lane.run_once") as span:
+            span.set_attribute("opencitadel.lane", name)
+            span.set_attribute("opencitadel.batch_size", self._batch_size)
+            try:
+                result = await work  # type: ignore[misc]
+            except Exception:
+                span.set_attribute("opencitadel.lane_failed", True)
+                observe_lane_duration(name, time.monotonic() - started)
+                logger.exception("execution kernel control-plane lane '%s' failed", name)
+                return 0
+            processed = int(getattr(result, attribute))
+            span.set_attribute("opencitadel.lane_processed", processed)
+            observe_lane_duration(name, time.monotonic() - started)
+            return processed
 
     async def _run_activity_plane(self) -> None:
+        # Loop condition doubles as the shutdown drain gate: once stop is
+        # requested no new claims are taken; the in-flight batch finishes and
+        # run() waits for this plane to exit (K2-3).
         while not self._stopping.is_set():
-            claimed = (
-                await self._runtime.run_activities_once(
-                    limit=self._batch_size,
-                    now=datetime.now(UTC),
-                )
-            ).claimed
+            # Lane isolation, symmetric with _run_lane on the control plane
+            # (D5): a store outage or unexpected bug in one batch must not tear
+            # down the activity plane (previously a CRITICAL, un-restarted task
+            # whose death CrashLoopBackOff'ed every replica). Failed batches log
+            # and count as zero work, then back off on the idle poll below.
+            claimed = 0
+            try:
+                claimed = (
+                    await self._runtime.run_activities_once(
+                        limit=self._batch_size,
+                        now=datetime.now(UTC),
+                    )
+                ).claimed
+            except Exception:
+                logger.exception("execution kernel activity plane batch failed")
             if claimed == 0:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(
@@ -170,10 +204,17 @@ class ExecutionKernelProcess:
                     )
 
     async def run_heartbeat(self) -> None:
-        """Refresh the liveness marker under external task supervision."""
+        """Refresh the liveness marker under external task supervision.
+
+        The same cadence drives the operational metrics refresh (D13/K4-3):
+        without it every execution Gauge (inbox depth, projector lag, ...)
+        would stay at its default forever. A metrics-refresh failure only
+        warns — it must never kill the heartbeat (liveness) lane.
+        """
 
         try:
             self._refresh_heartbeat()
+            await self._refresh_runtime_metrics()
             while not self._stopping.is_set():
                 try:
                     await asyncio.wait_for(
@@ -182,9 +223,18 @@ class ExecutionKernelProcess:
                     )
                 except TimeoutError:
                     self._refresh_heartbeat()
+                    await self._refresh_runtime_metrics()
         finally:
             with contextlib.suppress(OSError):
                 self._health_file.unlink(missing_ok=True)
+
+    async def _refresh_runtime_metrics(self) -> None:
+        try:
+            await self._runtime.refresh_metrics()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("execution kernel metrics refresh failed", exc_info=True)
 
     def _refresh_heartbeat(self) -> None:
         policy_readiness = self._policy_reader.readiness()
@@ -199,9 +249,12 @@ class ExecutionKernelProcess:
         temporary.replace(self._health_file)
 
     async def _wait_for_hint(self) -> None:
+        # The Redis block time follows execution_idle_poll_seconds so the
+        # config governs the idle cadence end to end (K2-6); clamped to a
+        # minimum because block=0 means "block forever" to Redis.
         batch = await self._wakeup.read(
             self._wakeup_cursor,
-            block_milliseconds=1000,
+            block_milliseconds=max(100, int(self._idle_poll_seconds * 1000)),
         )
         if not batch.connectivity.available:
             if not self._redis_hint_failed:

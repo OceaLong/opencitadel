@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.execution.commands import normalize_utc
@@ -176,6 +176,26 @@ class PostgresTimerStore:
             .returning(ExecutionScheduledCommandORM.timer_id)
         )
         return dead_lettered is not None
+
+    async def purge_completed(self, *, before: datetime, limit: int) -> int:
+        """Delete a batch of settled timers (fired/cancelled/dead_lettered)."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        resolved_before = normalize_utc(before)
+        purgeable = (
+            select(ExecutionScheduledCommandORM.timer_id)
+            .where(
+                ExecutionScheduledCommandORM.status.in_(("fired", "cancelled", "dead_lettered")),
+                ExecutionScheduledCommandORM.due_at < resolved_before,
+            )
+            .limit(limit)
+        )
+        result = await self._session.execute(
+            delete(ExecutionScheduledCommandORM).where(
+                ExecutionScheduledCommandORM.timer_id.in_(purgeable)
+            )
+        )
+        return int(result.rowcount or 0)
 
 
 __all__ = ["PostgresTimerStore", "TimerClaim"]

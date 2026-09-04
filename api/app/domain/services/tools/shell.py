@@ -14,6 +14,18 @@ class ShellTool(BaseTool):
         """构造函数，完成Shell工具箱初始化"""
         super().__init__()
         self.sandbox = sandbox
+        # 取消传播：记录仍在途的 shell 会话，on_cancel 时统一 kill。
+        # 正常完成的调用会主动移除；被取消的调用因异常提前退出而保留在集合中。
+        self._inflight_sessions: set[str] = set()
+
+    async def on_cancel(self) -> None:
+        """活动取消时终止仍在途会话中的进程，避免沙箱内进程泄漏。"""
+        for session_id in sorted(self._inflight_sessions):
+            try:
+                await self.sandbox.kill_process(session_id)
+            except (OSError, RuntimeError, ValueError):
+                continue
+        self._inflight_sessions.clear()
 
     @tool(
         name="shell_execute",
@@ -42,7 +54,10 @@ class ShellTool(BaseTool):
         command: str,
     ) -> ToolResult:
         """执行shell脚本"""
-        return await self.sandbox.exec_command(session_id, exec_dir, command)
+        self._inflight_sessions.add(session_id)
+        result = await self.sandbox.exec_command(session_id, exec_dir, command)
+        self._inflight_sessions.discard(session_id)
+        return result
 
     @tool(
         name="shell_read_output",
@@ -78,7 +93,10 @@ class ShellTool(BaseTool):
     )
     async def shell_wait_process(self, session_id: str, seconds: int | None = None) -> ToolResult:
         """等待指定shell会话中正在运行的进程返回"""
-        return await self.sandbox.wait_process(session_id, seconds)
+        self._inflight_sessions.add(session_id)
+        result = await self.sandbox.wait_process(session_id, seconds)
+        self._inflight_sessions.discard(session_id)
+        return result
 
     @tool(
         name="shell_write_input",

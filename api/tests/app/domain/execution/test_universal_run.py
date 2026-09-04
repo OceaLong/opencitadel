@@ -14,6 +14,8 @@ from app.domain.execution.run import (
     RunAggregate,
     RunFamily,
     RunState,
+    UnknownRunCommandError,
+    decision_data_digest,
 )
 from app.domain.runtime_policy import (
     ActiveExecutionPolicy,
@@ -71,7 +73,7 @@ def command(
     return CommandEnvelope(
         command_id=uuid4(),
         command_type=command_type,
-        command_schema_version=2 if command_type == "CreateRun" else 1,
+        command_schema_version=1,
         stream_type="run",
         stream_id=str(RUN_ID),
         expected_stream_version=version,
@@ -89,7 +91,7 @@ def test_snapshotless_create_run_is_rejected() -> None:
     snapshotless = CommandEnvelope(
         command_id=uuid4(),
         command_type="CreateRun",
-        command_schema_version=2,
+        command_schema_version=1,
         stream_type="run",
         stream_id=str(RUN_ID),
         expected_stream_version=0,
@@ -120,7 +122,7 @@ def test_snapshotless_run_created_event_is_rejected() -> None:
         stream_id=str(RUN_ID),
         stream_version=1,
         event_type="RunCreated",
-        event_schema_version=2,
+        event_schema_version=1,
         public_payload={
             "family": "agent",
             "source_entity_type": "session",
@@ -366,6 +368,72 @@ def test_retryable_failure_waits_then_increments_generation() -> None:
     assert events[-1].event_type == "RunRetried"
 
 
+def test_retryable_failure_schedules_deterministic_backoff_retry_timer() -> None:
+    """K2-4: retries are timer-driven with exponential backoff, not immediate."""
+    from uuid import NAMESPACE_URL, uuid5
+
+    aggregate = RunAggregate()
+    events: list[StoredEvent] = []
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "CreateRun",
+            0,
+            {
+                "family": "ask",
+                "source_entity_type": "session",
+                "source_entity_id": "session-1",
+                "parent_run_id": None,
+                "semantic_payload": {},
+            },
+        ),
+    )
+    decide_and_replay(aggregate, events, command("StartRun", 1))
+    state = replay(aggregate, events, stream_id=str(RUN_ID)).state
+
+    decision = aggregate.decide(
+        state,
+        command("FailRun", 2, {"failure_code": "PROVIDER_TIMEOUT", "retryable": True}),
+    )
+
+    assert [event.event_type for event in decision.events] == ["RunAttemptFailed"]
+    assert len(decision.scheduled_commands) == 1
+    timer = decision.scheduled_commands[0]
+    expected_timer_id = uuid5(NAMESPACE_URL, f"opencitadel:run-retry:{RUN_ID}:0")
+    assert timer.timer_id == expected_timer_id
+    # Generation 0: base backoff of 5s from the command's issued_at.
+    assert timer.due_at == NOW + timedelta(seconds=5)
+    assert timer.command.command_type == "RetryRun"
+    assert timer.command.command_id == expected_timer_id
+    assert timer.command.expected_stream_version is None
+    assert timer.cancellation_event_types == frozenset(
+        {"RunRetried", "RunCancelled", "RunCompleted", "RunFailed"}
+    )
+
+    # Higher retry generations back off exponentially and are capped at 300s.
+    generation_3 = state.model_copy(update={"retry_generation": 3})
+    backoff_3 = aggregate.decide(
+        generation_3,
+        command("FailRun", 2, {"failure_code": "PROVIDER_TIMEOUT", "retryable": True}),
+    ).scheduled_commands[0]
+    assert backoff_3.due_at == NOW + timedelta(seconds=40)  # 5 * 2^3
+    generation_9 = state.model_copy(update={"retry_generation": 9})
+    capped = aggregate.decide(
+        generation_9,
+        command("FailRun", 2, {"failure_code": "PROVIDER_TIMEOUT", "retryable": True}),
+    ).scheduled_commands[0]
+    assert capped.due_at == NOW + timedelta(seconds=300)  # min(5 * 2^9, 300)
+
+    # A terminal (non-retryable) failure schedules nothing.
+    terminal = aggregate.decide(
+        state,
+        command("FailRun", 2, {"failure_code": "PROVIDER_DOWN", "retryable": False}),
+    )
+    assert terminal.scheduled_commands == ()
+    assert [event.event_type for event in terminal.events] == ["RunFailed"]
+
+
 @pytest.mark.parametrize(
     ("decision", "terminal_type", "expected_status"),
     [
@@ -434,7 +502,10 @@ def test_approval_is_an_explicit_run_command_not_a_chat_message(
 
     assert decided.status == expected_status
     assert decided.pending_approval_id is None
-    assert dict(decided.approval_decisions)[approval_id] == decision
+    assert next((dec, fb) for aid, dec, fb in decided.approval_decisions if aid == approval_id) == (
+        decision,
+        "reviewed",
+    )
     assert events[-2].event_type == "ApprovalDecided"
     assert events[-1].event_type == (terminal_type or "RunResumed")
 
@@ -621,9 +692,23 @@ def test_activity_failure_code_is_preserved_by_replay(
     assert settled.activity_failure_codes == ((activity_id, 0, "KNOWLEDGE_NO_INDEXABLE_SOURCE"),)
 
 
-def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:
+def test_activity_progress_is_not_an_aggregate_concern() -> None:
+    """Progress is off-stream telemetry; the aggregate refuses it outright."""
     aggregate = RunAggregate()
-    activity_id = UUID("20000000-0000-0000-0000-000000000099")
+
+    with pytest.raises(UnknownRunCommandError):
+        aggregate.decide(
+            aggregate.initial_state(str(RUN_ID)),
+            command("ReportActivityProgress", 0, {"activity_id": str(UUID(int=9))}),
+        )
+    assert "ReportActivityProgress" not in aggregate.command_registry.registered_names()
+    assert "ActivityProgressed" not in aggregate.event_registry.registered_names()
+
+
+def test_complete_activity_keeps_decision_payload_off_stream_as_a_digest() -> None:
+    aggregate = RunAggregate()
+    activity_id = UUID("20000000-0000-0000-0000-000000000077")
+    decision_data = {"tool_calls": [{"call_id": "c1", "name": "shell_exec"}]}
     events: list[StoredEvent] = []
     decide_and_replay(
         aggregate,
@@ -632,9 +717,9 @@ def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:
             "CreateRun",
             0,
             {
-                "family": "kb_ingest",
-                "source_entity_type": "resource_build",
-                "source_entity_id": "build-1",
+                "family": "agent",
+                "source_entity_type": "session",
+                "source_entity_id": "session-1",
                 "parent_run_id": None,
                 "semantic_payload": {},
             },
@@ -649,72 +734,36 @@ def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:
             2,
             {
                 "activity_id": str(activity_id),
-                "activity_type": "knowledge.build",
+                "activity_type": "model.call",
                 "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
                 "input_ref": "object://request",
                 "input_digest": "a" * 64,
             },
         ),
     )
-    progressed = decide_and_replay(
+    state = decide_and_replay(
         aggregate,
         events,
         command(
-            "ReportActivityProgress",
+            "CompleteActivity",
             3,
             {
                 "activity_id": str(activity_id),
                 "generation": 0,
-                "sequence": 1,
-                "kind": "step",
-                "phase": "parse",
-                "status": "started",
-                "progress": 0,
-                "message": "Parsing documents",
+                "result_ref": "object://result",
+                "result_summary": "ok",
+                "decision_data": decision_data,
             },
         ),
     )
 
-    assert dict(progressed.activity_progress_sequences)[activity_id] == 1
-    assert events[-1].event_type == "ActivityProgressed"
-    with pytest.raises(InvalidRunTransitionError, match="strictly ordered"):
-        aggregate.decide(
-            progressed,
-            command(
-                "ReportActivityProgress",
-                4,
-                {
-                    "activity_id": str(activity_id),
-                    "generation": 0,
-                    "sequence": 1,
-                    "kind": "step",
-                    "phase": "parse",
-                    "status": "completed",
-                    "progress": 10,
-                    "message": "duplicate sequence",
-                },
-            ),
-        )
-
-    stale = progressed.model_copy(update={"activity_generations": ((activity_id, 1),)})
-    with pytest.raises(InvalidRunTransitionError, match="stale Activity generation"):
-        aggregate.decide(
-            stale,
-            command(
-                "ReportActivityProgress",
-                4,
-                {
-                    "activity_id": str(activity_id),
-                    "generation": 0,
-                    "sequence": 2,
-                    "kind": "message",
-                    "phase": None,
-                    "status": None,
-                    "progress": 20,
-                    "message": "stale",
-                },
-            ),
-        )
+    completed = events[-1]
+    assert completed.event_type == "ActivityCompleted"
+    assert "decision_data" not in completed.public_payload
+    assert completed.internal_payload == {"decision_digest": decision_data_digest(decision_data)}
+    assert state.activity_results == (
+        (activity_id, 0, "object://result", "ok", decision_data_digest(decision_data)),
+    )
 
 
 def test_activity_results_preserve_causal_completion_order() -> None:
@@ -903,7 +952,9 @@ def test_expired_approval_advances_a_permanently_waiting_run() -> None:
     ]
     assert expired.status == "cancelled"
     assert expired.pending_approval_id is None
-    assert dict(expired.approval_decisions)[APPROVAL_ID] == "expired"
+    assert (
+        next(dec for aid, dec, _ in expired.approval_decisions if aid == APPROVAL_ID) == "expired"
+    )
 
 
 def test_expire_is_a_noop_once_the_approval_was_already_decided() -> None:

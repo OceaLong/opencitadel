@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
+from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.services.inference_model_service import InferenceModelService
 from app.domain.execution.activity import (
@@ -121,7 +122,7 @@ class _ResourceBuildActivity:
 
 
 class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
-    activity_type = "knowledge.build"
+    activity_type = activity_types.KNOWLEDGE_BUILD
     phases = (
         "parse",
         "chunk",

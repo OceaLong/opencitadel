@@ -25,6 +25,14 @@ from core.config import DeploymentSettings
 
 
 class SandboxFactory:
+    """Attach/inspect surface shared by both process roles (D14/P2-16②).
+
+    This base class deliberately has no warm pool and cannot create sandboxes:
+    ``PooledSandboxFactory`` (execution-kernel process) adds the pool-backed
+    ``create``, while ``AttachOnlySandboxFactory`` (API process) fails loudly
+    on ``create`` so the API can never silently cold-start a sandbox.
+    """
+
     def __init__(
         self,
         *,
@@ -48,7 +56,6 @@ class SandboxFactory:
         )
         self._quota = SandboxQuota(deployment=deployment, store=quota_store)
         self._clock = clock
-        self._pool = SandboxPool(factory=self, activity_store=activity_store)
 
     @classmethod
     def from_settings(
@@ -77,9 +84,10 @@ class SandboxFactory:
     def quota(self) -> SandboxQuota:
         return self._quota
 
-    @property
-    def pool(self) -> SandboxPool:
-        return self._pool
+    async def create(self, *, owner_scope: OwnerScope) -> Sandbox:
+        raise NotImplementedError(
+            "this SandboxFactory cannot create sandboxes; use PooledSandboxFactory"
+        )
 
     async def current_settings(
         self,
@@ -95,12 +103,6 @@ class SandboxFactory:
             operations_revision_id=active.revision.id,
             policy=active.revision.policy.sandbox,
         )
-
-    async def create(self, *, owner_scope: OwnerScope) -> Sandbox:
-        settings = await self.current_settings(require_fresh=True)
-        sandbox = await self._pool.acquire(settings)
-        sandbox.owner_scope = owner_scope
-        return sandbox
 
     async def create_unpooled(
         self,
@@ -143,4 +145,53 @@ class SandboxFactory:
         return await driver.cleanup_orphaned_containers(settings, self._host)
 
 
-__all__ = ["SandboxFactory"]
+class PooledSandboxFactory(SandboxFactory):
+    """Kernel-process factory: owns the warm pool and may create sandboxes."""
+
+    def __init__(
+        self,
+        *,
+        deployment: SandboxDeployment,
+        operations: OperationsPolicyReader,
+        quota_store: SandboxQuotaStorePort,
+        activity_store: SandboxActivityStorePort,
+        host: SandboxHostAccess | None = None,
+        clock: Callable[[], datetime] = utc_now,
+    ) -> None:
+        super().__init__(
+            deployment=deployment,
+            operations=operations,
+            quota_store=quota_store,
+            activity_store=activity_store,
+            host=host,
+            clock=clock,
+        )
+        self._pool = SandboxPool(factory=self, activity_store=activity_store)
+
+    @property
+    def pool(self) -> SandboxPool:
+        return self._pool
+
+    async def create(self, *, owner_scope: OwnerScope) -> Sandbox:
+        settings = await self.current_settings(require_fresh=True)
+        sandbox = await self._pool.acquire(settings)
+        sandbox.owner_scope = owner_scope
+        return sandbox
+
+
+class AttachOnlySandboxFactory(SandboxFactory):
+    """API-process factory: attaches to existing sandboxes, never creates one.
+
+    The execution kernel is the sole sandbox creator (D14/P2-16②); an API
+    request path reaching ``create`` is a wiring bug and fails loudly instead
+    of silently cold-starting a container in the wrong process.
+    """
+
+    async def create(self, *, owner_scope: OwnerScope) -> Sandbox:
+        raise RuntimeError(
+            "sandbox creation is execution-kernel-only; the API process may "
+            "only attach to existing sandboxes"
+        )
+
+
+__all__ = ["AttachOnlySandboxFactory", "PooledSandboxFactory", "SandboxFactory"]

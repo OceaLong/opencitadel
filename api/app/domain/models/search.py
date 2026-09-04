@@ -1,4 +1,23 @@
-from pydantic import BaseModel, Field
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class SearchProviderAvailability(StrEnum):
+    """Web 搜索能力判定（P2-11 单源）：由 search/providers.py 独家产出。"""
+
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    NOT_CONFIGURED = "not_configured"
+
+
+class SearchCapability(BaseModel):
+    """一个 SEARCH_PROVIDER 配置的可用性判定结果。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str
+    availability: SearchProviderAvailability
 
 
 class SearchResultItem(BaseModel):

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,17 +28,24 @@ class InboxClaim:
     payload_too_large: bool = False
 
 
+DEFAULT_MAX_CLAIM_ATTEMPTS = 10
+
+
 class PostgresInbox:
     def __init__(
         self,
         session: AsyncSession,
         *,
         max_payload_bytes: int = 64 * 1024,
+        max_claim_attempts: int = DEFAULT_MAX_CLAIM_ATTEMPTS,
     ) -> None:
         if max_payload_bytes <= 0:
             raise ValueError("max_payload_bytes must be positive")
+        if max_claim_attempts <= 0:
+            raise ValueError("max_claim_attempts must be positive")
         self._session = session
         self._max_payload_bytes = max_payload_bytes
+        self._max_claim_attempts = max_claim_attempts
 
     async def receive(self, command: CommandEnvelope) -> bool:
         if command.payload_digest is not None:
@@ -118,9 +125,37 @@ class PostgresInbox:
                 generation=record.claim_generation,
                 result=self._persisted_result(record),
             )
+        if record.status == "dead_lettered":
+            return InboxClaim(
+                status="completed",
+                generation=record.claim_generation,
+                result=self._dead_lettered_result(record),
+            )
+
+        # Poison-pill cap (K2-5/D6): a command whose processing keeps crashing
+        # mid-claim is parked as a dead_lettered terminal row instead of being
+        # retried forever, surfaced to the caller as a completed/rejected
+        # result so the orchestrator records it and moves on. The cap counts
+        # delivery_attempts — real processing claims made here — NOT
+        # claim_generation, which the kernel's batch pre-claim
+        # (PostgresInboxSource) also bumps for lease fencing and would halve
+        # the effective budget.
+        if record.delivery_attempts + 1 > self._max_claim_attempts:
+            record.status = "dead_lettered"
+            record.rejection_code = "COMMAND_DEAD_LETTERED"
+            record.last_error_code = "MAX_CLAIM_ATTEMPTS_EXCEEDED"
+            record.processed_at = resolved_now
+            record.claim_deadline = None
+            await self._session.flush()
+            return InboxClaim(
+                status="completed",
+                generation=record.claim_generation,
+                result=self._dead_lettered_result(record),
+            )
 
         record.status = "processing"
         record.claim_generation += 1
+        record.delivery_attempts += 1
         record.processing_started_at = resolved_now
         record.claim_deadline = resolved_now + claim_ttl
         await self._session.flush()
@@ -196,6 +231,53 @@ class PostgresInbox:
         if record.payload_ref is not None or record.payload_digest != received_digest:
             raise ValueError("command_id was reused with a different envelope")
 
+    async def purge_completed(self, *, before: datetime, limit: int) -> int:
+        """Delete a batch of settled inbox rows processed before ``before``.
+
+        Only ``accepted``/``rejected`` rows are eligible here; ``dead_lettered``
+        rows are operator diagnostics with their own, longer retention window —
+        see :meth:`purge_dead_lettered`.
+        """
+        return await self._purge(
+            statuses=("accepted", "rejected"),
+            before=before,
+            limit=limit,
+        )
+
+    async def purge_dead_lettered(self, *, before: datetime, limit: int) -> int:
+        """Delete aged dead-lettered rows once their diagnostic value lapsed."""
+        return await self._purge(
+            statuses=("dead_lettered",),
+            before=before,
+            limit=limit,
+        )
+
+    async def _purge(
+        self,
+        *,
+        statuses: tuple[str, ...],
+        before: datetime,
+        limit: int,
+    ) -> int:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        resolved_before = normalize_utc(before)
+        purgeable = (
+            select(ExecutionCommandInboxORM.command_id)
+            .where(
+                ExecutionCommandInboxORM.status.in_(statuses),
+                ExecutionCommandInboxORM.processed_at.is_not(None),
+                ExecutionCommandInboxORM.processed_at < resolved_before,
+            )
+            .limit(limit)
+        )
+        result = await self._session.execute(
+            delete(ExecutionCommandInboxORM).where(
+                ExecutionCommandInboxORM.command_id.in_(purgeable)
+            )
+        )
+        return int(result.rowcount or 0)
+
     @staticmethod
     def _persisted_result(record: ExecutionCommandInboxORM) -> CommandResult:
         from app.application.execution.orchestrator import CommandResult
@@ -206,6 +288,18 @@ class PostgresInbox:
             first_event_position=record.first_event_position,
             last_event_position=record.last_event_position,
             rejection_code=record.rejection_code,
+        )
+
+    @staticmethod
+    def _dead_lettered_result(record: ExecutionCommandInboxORM) -> CommandResult:
+        from app.application.execution.orchestrator import CommandResult
+
+        return CommandResult(
+            command_id=record.command_id,
+            status="rejected",
+            first_event_position=None,
+            last_event_position=None,
+            rejection_code=record.rejection_code or "COMMAND_DEAD_LETTERED",
         )
 
 

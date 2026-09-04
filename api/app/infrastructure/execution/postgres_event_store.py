@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from uuid import uuid4
 
 from sqlalchemy import func, select, text
@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.execution.events import NewEvent, StoredEvent
+from app.domain.execution.registry import EventPayloads, EventRegistry
 from app.domain.execution.serialization import canonical_json_bytes
 from app.domain.execution.store import (
     ZERO_HASH,
@@ -39,11 +40,54 @@ class PostgresEventStore:
         session: AsyncSession,
         *,
         max_payload_bytes: int = 64 * 1024,
+        event_registries: Mapping[str, EventRegistry] | None = None,
     ) -> None:
         if max_payload_bytes <= 0:
             raise ValueError("max_payload_bytes must be positive")
         self._session = session
         self._max_payload_bytes = max_payload_bytes
+        # stream_type -> registry. Every read path applies schema upcasting
+        # AFTER hash verification (hashes cover the raw stored form), so the
+        # orchestrator and every projector consume the same evolution pipeline
+        # instead of each reimplementing (or forgetting) it.
+        self._event_registries = dict(event_registries or {})
+
+    def _upcast(self, events: tuple[StoredEvent, ...]) -> tuple[StoredEvent, ...]:
+        if not self._event_registries:
+            return events
+        upcasted: list[StoredEvent] = []
+        for event in events:
+            registry = self._event_registries.get(event.stream_type)
+            if registry is None:
+                upcasted.append(event)
+                continue
+            # Unknown types/versions raise UnregisteredSchemaError (a
+            # ValueError): fail closed rather than hand consumers an event
+            # they cannot interpret.
+            if registry.latest_version(event.event_type) == event.event_schema_version:
+                upcasted.append(event)
+                continue
+            version, payloads = registry.upcast(
+                event.event_type,
+                event.event_schema_version,
+                EventPayloads(
+                    public=dict(event.public_payload),
+                    internal=dict(event.internal_payload),
+                ),
+            )
+            # event_hash intentionally keeps the raw stored form; it was
+            # verified before upcasting and must stay replay-stable.
+            upcasted.append(
+                StoredEvent.model_validate(
+                    {
+                        **event.model_dump(mode="python"),
+                        "event_schema_version": version,
+                        "public_payload": payloads.public,
+                        "internal_payload": payloads.internal,
+                    }
+                )
+            )
+        return tuple(upcasted)
 
     async def load_stream(
         self,
@@ -80,7 +124,9 @@ class PostgresEventStore:
         except CorruptEventStreamError:
             record_replay_failure("event_hash_mismatch")
             raise
-        return tuple(event for event in events if event.stream_version > after_version)
+        return self._upcast(
+            tuple(event for event in events if event.stream_version > after_version)
+        )
 
     async def _load_verified_tail(
         self,
@@ -125,7 +171,7 @@ class PostgresEventStore:
             stream_identity=(stream_type, stream_id),
             stream_owner_scope=(anchor.owner_user_id, anchor.team_id),
         )
-        return tail
+        return self._upcast(tail)
 
     async def read_all(
         self,
@@ -147,7 +193,7 @@ class PostgresEventStore:
         ).all()
         events = tuple(self._to_stored(row) for row in rows)
         self._verify_position_read(events)
-        return events
+        return self._upcast(events)
 
     async def read_scope(
         self,
@@ -181,7 +227,7 @@ class PostgresEventStore:
         ).all()
         events = tuple(self._to_stored(row) for row in rows)
         self._verify_position_read(events)
-        return events
+        return self._upcast(events)
 
     async def latest_scope_position(
         self,

@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import case, delete, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.ports.execution import FormalProjectorResult
+from app.application.execution import activity_types
+from app.application.execution.outbox_dispatcher import APPROVAL_NOTICE_DESTINATION
+from app.application.ports.execution import (
+    ApprovalNotifierPort,
+    ApprovalWaitingNotice,
+    FormalProjectorResult,
+)
 from app.domain.execution.events import StoredEvent
 from app.domain.execution.run import (
     RunAggregate,
@@ -35,6 +41,7 @@ from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.infrastructure.execution.models import (
     ExecutionActivityProjectionORM,
     ExecutionApprovalProjectionORM,
+    ExecutionOutboxORM,
     ExecutionProjectorCheckpointORM,
     ExecutionPublicEventORM,
     ExecutionResourceBuildProjectionORM,
@@ -43,6 +50,7 @@ from app.infrastructure.execution.models import (
 from app.infrastructure.execution.postgres_event_store import PostgresEventStore
 from app.infrastructure.models.knowledge_base import KnowledgeBaseModel
 from app.infrastructure.models.knowledge_version import KnowledgeBaseVersionORM
+from app.infrastructure.models.notification import NotificationModel
 from app.infrastructure.models.patrol import (
     PatrolPackModel,
     PatrolRemediationModel,
@@ -50,6 +58,7 @@ from app.infrastructure.models.patrol import (
 )
 from app.infrastructure.models.session import SessionModel
 from app.infrastructure.models.team import TeamMemberORM
+from app.infrastructure.observability.execution_metrics import record_replay_failure
 from app.infrastructure.repositories.db_notification_repository import DBNotificationRepository
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
@@ -59,38 +68,13 @@ _CHECKPOINT_NAME = "formal"
 _CHECKPOINT_SCHEMA_VERSION = 1
 
 
-@dataclass(frozen=True)
-class ApprovalWaitingNotice:
-    """One approval lifecycle fact that needs to reach reviewers.
-
-    ``user_id`` targets a single recipient; a purely team-owned Run sets it to
-    None and carries ``team_id`` instead, and the notifier fans out to the
-    team's reviewers. ``kind`` is "approval_waiting" (pending, needs a
-    decision) or "approval_expired" (TTL elapsed, Run was cancelled).
-    """
-
-    user_id: str | None
-    approval_id: UUID
-    run_id: UUID
-    session_id: str | None
-    subject_label: str
-    team_id: str | None = None
-    kind: str = "approval_waiting"
-
-
-@runtime_checkable
-class ApprovalNotifierPort(Protocol):
-    """Collaborator that turns a projected approval fact into a reviewer ping."""
-
-    async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None: ...
-
-
 class PostgresApprovalNotifier:
     """Persist an ``approval_waiting`` notification and publish a realtime hint.
 
-    Runs entirely outside the projection transaction: a failure here is logged
-    and swallowed so it can never stall or corrupt the durable projection. The
-    projector's system authorization scope is reused so the cross-tenant insert
+    Since K4-2 this runs from the outbox dispatcher, not the projection
+    transaction: the projector durably records each notice as an outbox row and
+    the dispatcher redelivers through this notifier until it succeeds. The
+    kernel's system authorization scope is reused so the cross-tenant insert
     into ``notifications`` passes row-level security.
     """
 
@@ -110,6 +94,27 @@ class PostgresApprovalNotifier:
         # Literal i18n_key values: the quality-baseline contract scans the AST
         # for constant i18n_key keywords to keep contracts/i18n-runtime-keys.json
         # in sync with the UI catalog.
+        if notice.kind == "clarification_waiting":
+            return Notification(
+                user_id=user_id,
+                type="clarification_waiting",
+                message=f"任务等待你的选择：{notice.subject_label}",
+                i18n_key="notifications.clarificationWaiting",
+                i18n_params={"subject": notice.subject_label},
+                session_id=notice.session_id,
+                approval_id=str(notice.approval_id),
+            )
+        if notice.kind == "clarification_expired":
+            return Notification(
+                user_id=user_id,
+                type="clarification_expired",
+                message="澄清超时未选择，任务已取消"
+                + (f"：{notice.subject_label}" if notice.subject_label else ""),
+                i18n_key="notifications.clarificationExpired",
+                i18n_params={"subject": notice.subject_label},
+                session_id=notice.session_id,
+                approval_id=str(notice.approval_id),
+            )
         if notice.kind == "approval_expired":
             return Notification(
                 user_id=user_id,
@@ -119,6 +124,7 @@ class PostgresApprovalNotifier:
                 i18n_key="notifications.approvalExpired",
                 i18n_params={"subject": notice.subject_label},
                 session_id=notice.session_id,
+                approval_id=str(notice.approval_id),
             )
         return Notification(
             user_id=user_id,
@@ -127,6 +133,7 @@ class PostgresApprovalNotifier:
             i18n_key="notifications.approvalWaiting",
             i18n_params={"subject": notice.subject_label},
             session_id=notice.session_id,
+            approval_id=str(notice.approval_id),
         )
 
     async def approval_waiting(self, notice: ApprovalWaitingNotice) -> None:
@@ -173,17 +180,30 @@ class PostgresApprovalNotifier:
         return privileged or [user_id for user_id, _role in rows]
 
 
+@dataclass
+class _RunTracker:
+    """In-memory fold of one Run's projection across a projection batch (P2-17).
+
+    The batch evolves the Run state event by event but writes the run
+    projection row (and its derived session / resource-build rows) only once,
+    after the Run's last event in the batch — collapsing O(events) round trips
+    into O(runs). The previous row is read and hash-verified exactly once.
+    """
+
+    state: RunState
+    created_at: datetime
+    last_event: StoredEvent
+
+
 class PostgresFormalProjector:
     def __init__(
         self,
         *,
         session_factory: async_sessionmaker[AsyncSession],
         authorization: AuthorizationContext,
-        notifier: ApprovalNotifierPort | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._authorization = authorization
-        self._notifier = notifier
         self._aggregate = RunAggregate()
 
     async def run_once(
@@ -197,23 +217,42 @@ class PostgresFormalProjector:
         if limit <= 0:
             raise ValueError("limit must be positive")
         key, owner_user_id, team_id = self._scope_parts(owner_scope)
-        notices: list[ApprovalWaitingNotice] = []
+        notices: list[tuple[ApprovalWaitingNotice, int]] = []
         async with self._session_factory() as session:
             try:
                 await configure_session_authorization(session, self._authorization)
-                await self._lock(session, key)
-                checkpoint = await self._checkpoint(session, key)
+                # P2-18: never queue behind another worker's in-flight pass on
+                # the same scope — yield this round and let the caller move on.
+                if not await self._try_lock(session, key):
+                    return FormalProjectorResult(processed=0, last_position=0, busy=True)
+                checkpoint, checkpoint_busy = await self._checkpoint(session, key)
+                if checkpoint_busy:
+                    return FormalProjectorResult(processed=0, last_position=0, busy=True)
                 last_position = checkpoint.last_position if checkpoint else 0
-                events = await PostgresEventStore(session).read_scope(
+                events = await PostgresEventStore(
+                    session,
+                    event_registries={"run": self._aggregate.event_registry},
+                ).read_scope(
                     after_position=last_position,
                     limit=limit,
                     owner_user_id=owner_user_id,
                     team_id=team_id,
                     through_position=through_position,
                 )
+                trackers: dict[str, _RunTracker] = {}
                 for event in events:
-                    await self._project_event(session, event, notices)
+                    await self._project_event(session, event, notices, trackers)
                     last_position = event.position
+                for tracker in trackers.values():
+                    await self._flush_run(session, tracker)
+                # Approval notices are persisted as outbox rows inside the
+                # projection transaction (K4-2): a crash after commit can no
+                # longer lose a reviewer ping, and the dedupe_key unique
+                # constraint keeps replays from duplicating one. A rebuild
+                # (notify=False) replays history and must not re-notify.
+                if notify:
+                    for notice, event_position in notices:
+                        await self._write_notice_outbox(session, notice, event_position)
                 self._write_checkpoint(
                     session,
                     checkpoint=checkpoint,
@@ -223,37 +262,13 @@ class PostgresFormalProjector:
                     last_position=last_position,
                 )
                 await session.commit()
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError, SQLAlchemyError):
                 await session.rollback()
                 raise
-        # Notifications are dispatched only after the projection is durably
-        # committed, and never during a rebuild (which replays history). A
-        # notifier failure must not fail the projection, so it is isolated.
-        if notify:
-            await self._dispatch_approval_notices(notices)
         return FormalProjectorResult(
             processed=len(events),
             last_position=last_position,
         )
-
-    async def _dispatch_approval_notices(
-        self,
-        notices: list[ApprovalWaitingNotice],
-    ) -> None:
-        if self._notifier is None:
-            return
-        for notice in notices:
-            try:
-                await self._notifier.approval_waiting(notice)
-            except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
-                # The projection is already committed; a reviewer ping is
-                # best-effort and must never fail (or retry) the projection.
-                logger.warning(
-                    "审批等待通知失败 approval=%s user=%s: %s",
-                    notice.approval_id,
-                    notice.user_id,
-                    exc,
-                )
 
     async def rebuild(
         self,
@@ -268,6 +283,9 @@ class PostgresFormalProjector:
         async with self._session_factory() as session:
             try:
                 await configure_session_authorization(session, self._authorization)
+                # The destructive delete phase must run: block on the scope
+                # lock instead of yielding (the kernel's regular passes are
+                # short, and a rebuilding scope is excluded from discovery).
                 await self._lock(session, key)
                 target = through_position
                 if target is None:
@@ -282,7 +300,7 @@ class PostgresFormalProjector:
                     team_id=team_id,
                 )
                 await session.commit()
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError, SQLAlchemyError):
                 await session.rollback()
                 raise
 
@@ -295,6 +313,9 @@ class PostgresFormalProjector:
                 through_position=target,
                 notify=False,
             )
+            if batch.busy:
+                await asyncio.sleep(0.1)
+                continue
             processed += batch.processed
             last_position = batch.last_position
             if batch.processed == 0:
@@ -308,69 +329,162 @@ class PostgresFormalProjector:
         self,
         session: AsyncSession,
         event: StoredEvent,
-        notices: list[ApprovalWaitingNotice],
+        notices: list[tuple[ApprovalWaitingNotice, int]],
+        trackers: dict[str, _RunTracker],
     ) -> None:
         run_state: RunState | None = None
+        approval_kind: str | None = None
         if event.stream_type == "run":
-            run_state = await self._project_run(session, event)
+            tracker = await self._track_run(session, event, trackers)
+            run_state = tracker.state
             await self._project_activity(session, event, run_state)
             await self._project_approval(session, event, run_state)
-            await self._project_resource_build(session, event, run_state)
-            self._collect_approval_notice(event, run_state, notices)
-        await self._project_public_event(session, event, run_state)
+            await self._project_product_lifecycle(session, event, run_state)
+            await self._project_resource_build_failure(session, event, run_state)
+            approval_kind = await self._approval_kind(session, event)
+            notices.extend(
+                (notice, event.position)
+                for notice in self._collect_approval_notice(event, run_state, approval_kind)
+            )
+        await self._project_public_event(session, event, run_state, approval_kind)
+
+    async def _approval_kind(
+        self,
+        session: AsyncSession,
+        event: StoredEvent,
+    ) -> str | None:
+        """The approval's kind, for shaping decided/expired public events.
+
+        Requested events carry it in the payload; decided/expired events only
+        carry the approval_id, so the kind comes from the approval projection
+        row written when the request was projected (same scope, earlier
+        position — always present by the time its settlement is processed).
+        """
+        if event.event_type == "ApprovalRequested":
+            return str(event.public_payload.get("approval_kind") or "tool_effect")
+        if event.event_type not in ("ApprovalDecided", "ApprovalExpired"):
+            return None
+        record = await session.get(
+            ExecutionApprovalProjectionORM,
+            UUID(str(event.public_payload["approval_id"])),
+        )
+        return record.approval_kind if record is not None else "tool_effect"
+
+    async def _track_run(
+        self,
+        session: AsyncSession,
+        event: StoredEvent,
+        trackers: dict[str, _RunTracker],
+    ) -> _RunTracker:
+        tracker = trackers.get(event.stream_id)
+        if tracker is None:
+            run_id = UUID(event.stream_id)
+            existing = await session.get(ExecutionRunProjectionORM, run_id)
+            if existing is None:
+                previous = self._aggregate.initial_state(event.stream_id)
+                created_at = event.occurred_at
+            else:
+                previous = RunState.model_validate(existing.state)
+                if canonical_state_hash(previous) != existing.state_hash:
+                    record_replay_failure("projection_hash_mismatch")
+                    raise ValueError("execution_run_projection state hash mismatch")
+                created_at = existing.created_at
+            tracker = _RunTracker(state=previous, created_at=created_at, last_event=event)
+            trackers[event.stream_id] = tracker
+        tracker.state = self._aggregate.evolve(tracker.state, event)
+        tracker.last_event = event
+        return tracker
+
+    async def _write_notice_outbox(
+        self,
+        session: AsyncSession,
+        notice: ApprovalWaitingNotice,
+        event_position: int,
+    ) -> None:
+        scope = f"user:{notice.user_id}" if notice.user_id else f"team:{notice.team_id}"
+        dedupe_key = (
+            f"{APPROVAL_NOTICE_DESTINATION}:"
+            f"{uuid5(NAMESPACE_URL, f'opencitadel:{notice.approval_id}:{notice.kind}:{scope}')}"
+        )
+        await session.execute(
+            pg_insert(ExecutionOutboxORM)
+            .values(
+                outbox_id=uuid4(),
+                event_position=event_position,
+                destination=APPROVAL_NOTICE_DESTINATION,
+                dedupe_key=dedupe_key,
+                payload={
+                    "user_id": notice.user_id,
+                    "approval_id": str(notice.approval_id),
+                    "run_id": str(notice.run_id),
+                    "session_id": notice.session_id,
+                    "subject_label": notice.subject_label,
+                    "team_id": notice.team_id,
+                    "kind": notice.kind,
+                },
+                owner_user_id=notice.user_id,
+                team_id=notice.team_id if notice.user_id is None else None,
+            )
+            .on_conflict_do_nothing(index_elements=["dedupe_key"])
+        )
 
     @staticmethod
     def _collect_approval_notice(
         event: StoredEvent,
         run_state: RunState,
-        notices: list[ApprovalWaitingNotice],
-    ) -> None:
+        approval_kind: str | None,
+    ) -> tuple[ApprovalWaitingNotice, ...]:
         if event.event_type not in ("ApprovalRequested", "ApprovalExpired"):
-            return
+            return ()
         # Personal-scope runs notify their owner (the initiating user). A purely
         # team-owned Run (owner_user_id is None) carries the team id instead so
         # the notifier can fan out to the team's reviewers — otherwise team
         # approvals sit silent until they expire.
         user_id = event.owner_user_id
         if not user_id and not event.team_id:
-            return
+            return ()
         payload = event.public_payload
         session_id = (
             run_state.source_entity_id if run_state.source_entity_type == "session" else None
         )
-        notices.append(
+        # Clarifications are conversation interactions, not governance
+        # approvals: they get their own notification wording and never look
+        # like a pending review (澄清不是审批).
+        clarification = approval_kind == "clarification"
+        if event.event_type == "ApprovalExpired":
+            kind = "clarification_expired" if clarification else "approval_expired"
+        else:
+            kind = "clarification_waiting" if clarification else "approval_waiting"
+        subject = str(payload.get("subject_label") or "")
+        if clarification and event.event_type == "ApprovalRequested":
+            # For the clarification card the meaningful subject is the question.
+            subject = str(payload.get("risk_summary") or subject)[:128]
+        return (
             ApprovalWaitingNotice(
                 user_id=user_id,
                 approval_id=UUID(str(payload["approval_id"])),
                 run_id=run_state.run_id,
                 session_id=session_id,
-                # ApprovalExpired's payload carries no subject_label.
-                subject_label=str(payload.get("subject_label") or ""),
+                subject_label=subject,
                 team_id=None if user_id else event.team_id,
-                kind=(
-                    "approval_expired"
-                    if event.event_type == "ApprovalExpired"
-                    else "approval_waiting"
-                ),
-            )
+                kind=kind,
+            ),
         )
 
-    async def _project_run(
+    async def _flush_run(
         self,
         session: AsyncSession,
-        event: StoredEvent,
-    ) -> RunState:
-        run_id = UUID(event.stream_id)
-        existing = await session.get(ExecutionRunProjectionORM, run_id)
-        if existing is None:
-            previous = self._aggregate.initial_state(event.stream_id)
-            created_at = event.occurred_at
-        else:
-            previous = RunState.model_validate(existing.state)
-            if canonical_state_hash(previous) != existing.state_hash:
-                raise ValueError("execution_run_projection state hash mismatch")
-            created_at = existing.created_at
-        state = self._aggregate.evolve(previous, event)
+        tracker: _RunTracker,
+    ) -> None:
+        """UPSERT one Run's projection row from its batch-final state (P2-17).
+
+        All intermediate states within the batch share this transaction and
+        were never visible outside it, so persisting only the final fold is
+        observably identical to the previous per-event UPSERTs.
+        """
+        state = tracker.state
+        event = tracker.last_event
+        created_at = tracker.created_at
         if state.family is None:
             raise ValueError("Run projection cannot persist an uncreated Run")
         policy_snapshot = validated_run_policy_snapshot(state)
@@ -385,6 +499,21 @@ class PostgresFormalProjector:
             "status": state.status.value,
             "terminal": state.status
             in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
+            # Decision-readiness columns (D4): load_ready filters on these in
+            # SQL. ``decision_due_at`` is armed whenever this event leaves the
+            # Run in a state the decision planner must look at — queued, or
+            # running with no active activities. WAITING never arms it:
+            # approvals resume via DecideApproval/ExpireApproval commands and
+            # retry-waits are driven by the durable retry timer (K2-4), both of
+            # which produce new events that re-arm the row here.
+            "wait_reason": state.wait_reason,
+            "active_activity_count": len(state.active_activity_ids),
+            "decision_due_at": (
+                event.occurred_at
+                if state.status == RunStatus.QUEUED
+                or (state.status == RunStatus.RUNNING and not state.active_activity_ids)
+                else None
+            ),
             "parent_run_id": state.parent_run_id,
             "correlation_id": state.correlation_id,
             "owner_user_id": event.owner_user_id,
@@ -459,8 +588,7 @@ class PostgresFormalProjector:
                 )
                 .values(**session_values)
             )
-        await self._project_product_lifecycle(session, event, state)
-        return state
+        await self._flush_resource_build(session, event, state)
 
     async def _project_product_lifecycle(
         self,
@@ -600,7 +728,6 @@ class PostgresFormalProjector:
         if event.event_type not in {
             "ActivityRequested",
             "ActivityCallStarted",
-            "ActivityProgressed",
             "ActivityCompleted",
             "ActivityFailed",
             "ActivityOutcomeUnknown",
@@ -622,7 +749,6 @@ class PostgresFormalProjector:
             attempt = existing.attempt
             status = {
                 "ActivityCallStarted": "running",
-                "ActivityProgressed": "running",
                 "ActivityCompleted": "succeeded",
                 "ActivityFailed": "failed",
                 "ActivityOutcomeUnknown": "unknown",
@@ -710,10 +836,11 @@ class PostgresFormalProjector:
         if event.event_type == "ApprovalDecided":
             payload = event.public_payload
             decision = str(payload["decision"])
+            approval_id = UUID(str(payload["approval_id"]))
             await session.execute(
                 update(ExecutionApprovalProjectionORM)
                 .where(
-                    ExecutionApprovalProjectionORM.approval_id == UUID(str(payload["approval_id"])),
+                    ExecutionApprovalProjectionORM.approval_id == approval_id,
                     ExecutionApprovalProjectionORM.run_id == run_state.run_id,
                     ExecutionApprovalProjectionORM.status == "pending",
                 )
@@ -726,13 +853,15 @@ class PostgresFormalProjector:
                     decided_at=event.occurred_at,
                 )
             )
+            await PostgresFormalProjector._mark_approval_notifications_read(session, [approval_id])
             return
         if event.event_type == "ApprovalExpired":
             payload = event.public_payload
+            approval_id = UUID(str(payload["approval_id"]))
             await session.execute(
                 update(ExecutionApprovalProjectionORM)
                 .where(
-                    ExecutionApprovalProjectionORM.approval_id == UUID(str(payload["approval_id"])),
+                    ExecutionApprovalProjectionORM.approval_id == approval_id,
                     ExecutionApprovalProjectionORM.run_id == run_state.run_id,
                     ExecutionApprovalProjectionORM.status == "pending",
                 )
@@ -745,33 +874,41 @@ class PostgresFormalProjector:
                     decided_at=event.occurred_at,
                 )
             )
+            await PostgresFormalProjector._mark_approval_notifications_read(session, [approval_id])
             return
         if event.event_type in {"RunCompleted", "RunFailed", "RunCancelled"}:
             # An expiry emits ApprovalExpired *then* RunCancelled; the approval is
             # already 'expired' (no longer pending) by the time this runs, so this
             # blanket cancel only touches approvals still genuinely pending.
-            await session.execute(
-                update(ExecutionApprovalProjectionORM)
-                .where(
-                    ExecutionApprovalProjectionORM.run_id == run_state.run_id,
-                    ExecutionApprovalProjectionORM.status == "pending",
-                )
-                .values(
-                    status="cancelled",
-                    decision="cancelled",
-                    decided_by_user_id=None,
-                    feedback="",
-                    decision_event_position=event.position,
-                    decided_at=event.occurred_at,
-                )
+            cancelled_ids = list(
+                (
+                    await session.execute(
+                        update(ExecutionApprovalProjectionORM)
+                        .where(
+                            ExecutionApprovalProjectionORM.run_id == run_state.run_id,
+                            ExecutionApprovalProjectionORM.status == "pending",
+                        )
+                        .values(
+                            status="cancelled",
+                            decision="cancelled",
+                            decided_by_user_id=None,
+                            feedback="",
+                            decision_event_position=event.position,
+                            decided_at=event.occurred_at,
+                        )
+                        .returning(ExecutionApprovalProjectionORM.approval_id)
+                    )
+                ).scalars()
             )
+            await PostgresFormalProjector._mark_approval_notifications_read(session, cancelled_ids)
 
-    async def _project_resource_build(
+    async def _flush_resource_build(
         self,
         session: AsyncSession,
         event: StoredEvent,
         state: RunState,
     ) -> None:
+        """UPSERT the resource-build row from the Run's batch-final state (P2-17)."""
         if state.family is not RunFamily.KB_INGEST:
             return
         build_id = str(state.semantic_payload.get("build_id") or state.source_entity_id)
@@ -786,12 +923,12 @@ class PostgresFormalProjector:
             RunStatus.CANCELLED: 100,
         }[state.status]
         existing = await session.get(ExecutionResourceBuildProjectionORM, build_id)
-        phase = None
-        if event.event_type == "ActivityProgressed":
-            progress = int(event.public_payload["progress"])
-            phase = self._optional_string(event.public_payload.get("phase"))
-        elif existing is not None:
-            phase = existing.phase
+        # Fine-grained progress/phase is written off-stream by the activity
+        # worker's progress sink; the projector only derives a coarse floor from
+        # the Run status and must never regress a fresher off-stream value.
+        phase = existing.phase if existing is not None else None
+        if existing is not None and not self._is_terminal_status(state.status):
+            progress = max(progress, existing.progress)
         values = {
             "build_id": build_id,
             "run_id": state.run_id,
@@ -832,53 +969,99 @@ class PostgresFormalProjector:
                 },
             )
         )
-        if event.event_type in {"RunCancelled", "RunFailed"}:
-            error_code = (
-                "BUILD_CANCELLED"
-                if event.event_type == "RunCancelled"
-                else state.failure_code or "BUILD_FAILED"
+
+    @staticmethod
+    async def _mark_approval_notifications_read(
+        session: AsyncSession,
+        approval_ids: list[UUID],
+    ) -> None:
+        """Settle the waiting notifications of decided/expired approvals.
+
+        Same transaction as the approval projection update: once an approval
+        (or clarification) is no longer pending, its "waiting" notification
+        must stop nagging. Idempotent and replay-safe (rebuilds re-mark rows
+        that are already read).
+        """
+        if not approval_ids:
+            return
+        await session.execute(
+            update(NotificationModel)
+            .where(
+                NotificationModel.approval_id.in_([str(item) for item in approval_ids]),
+                NotificationModel.read.is_(False),
             )
-            await session.execute(
-                update(KnowledgeBaseVersionORM)
-                .where(
-                    KnowledgeBaseVersionORM.build_id == build_id,
-                    KnowledgeBaseVersionORM.published_at.is_(None),
-                )
-                .values(state="failed")
+            .values(read=True)
+        )
+
+    async def _project_resource_build_failure(
+        self,
+        session: AsyncSession,
+        event: StoredEvent,
+        state: RunState,
+    ) -> None:
+        """Per-event terminal side effects on the KB product tables.
+
+        These are event-type conditioned (unlike the state-derived build row,
+        which is flushed once per Run per batch), so they stay per event.
+        """
+        if state.family is not RunFamily.KB_INGEST:
+            return
+        if event.event_type not in {"RunCancelled", "RunFailed"}:
+            return
+        build_id = str(state.semantic_payload.get("build_id") or state.source_entity_id)
+        resource_id = (
+            self._optional_string(state.semantic_payload.get("resource_id"))
+            or state.source_entity_id
+        )
+        error_code = (
+            "BUILD_CANCELLED"
+            if event.event_type == "RunCancelled"
+            else state.failure_code or "BUILD_FAILED"
+        )
+        await session.execute(
+            update(KnowledgeBaseVersionORM)
+            .where(
+                KnowledgeBaseVersionORM.build_id == build_id,
+                KnowledgeBaseVersionORM.published_at.is_(None),
             )
-            await session.execute(
-                update(KnowledgeBaseModel)
-                .where(
-                    KnowledgeBaseModel.id == values["resource_id"],
-                    or_(
-                        KnowledgeBaseModel.last_event_position.is_(None),
-                        KnowledgeBaseModel.last_event_position < event.position,
+            .values(state="failed")
+        )
+        await session.execute(
+            update(KnowledgeBaseModel)
+            .where(
+                KnowledgeBaseModel.id == resource_id,
+                or_(
+                    KnowledgeBaseModel.last_event_position.is_(None),
+                    KnowledgeBaseModel.last_event_position < event.position,
+                ),
+            )
+            .values(
+                status=case(
+                    (
+                        KnowledgeBaseModel.active_version_id.is_not(None),
+                        "ready",
                     ),
-                )
-                .values(
-                    status=case(
-                        (
-                            KnowledgeBaseModel.active_version_id.is_not(None),
-                            "ready",
-                        ),
-                        else_="failed",
-                    ),
-                    error=error_code,
-                    last_event_position=event.position,
-                    updated_at=event.occurred_at,
-                )
+                    else_="failed",
+                ),
+                error=error_code,
+                last_event_position=event.position,
+                updated_at=event.occurred_at,
             )
+        )
 
     @staticmethod
     async def _project_public_event(
         session: AsyncSession,
         event: StoredEvent,
         state: RunState | None,
+        approval_kind: str | None = None,
     ) -> None:
-        public_shape = PostgresFormalProjector._public_shape(event)
+        public_shape = PostgresFormalProjector._public_shape(event, approval_kind)
         if public_shape is None:
             return
         event_type, payload = public_shape
+        # Dedupe on the source event identity: replays and rebuilds re-insert
+        # the same event_id, while the feed's own ``seq`` keeps advancing.
         await session.execute(
             pg_insert(ExecutionPublicEventORM)
             .values(
@@ -896,12 +1079,13 @@ class PostgresFormalProjector:
                 team_id=event.team_id,
                 occurred_at=event.occurred_at,
             )
-            .on_conflict_do_nothing(index_elements=["position"])
+            .on_conflict_do_nothing(index_elements=["event_id"])
         )
 
     @staticmethod
     def _public_shape(
         event: StoredEvent,
+        approval_kind: str | None = None,
     ) -> tuple[str, dict] | None:
         meta = {
             "event_id": str(event.event_id),
@@ -942,16 +1126,49 @@ class PostgresFormalProjector:
                 "retryable": event.event_type == "RunAttemptFailed",
             }
         if event.event_type == "ApprovalRequested":
+            raw_choices = payload.get("choices")
+            choices = (
+                [str(choice) for choice in raw_choices]
+                if isinstance(raw_choices, list) and raw_choices
+                else None
+            )
+            # 澄清不是审批：clarification 走独立的 "ask" 公共事件，不进入
+            # 审批卡片/收件箱语义；治理侧的正式审批投影仍完整记录它。
+            if str(payload.get("approval_kind") or "tool_effect") == "clarification":
+                return "ask", {
+                    **meta,
+                    "ask_id": str(payload["approval_id"]),
+                    "status": "pending",
+                    "question": str(payload["risk_summary"]),
+                    "choices": choices or [],
+                    "tool_name": str(payload["subject_label"]),
+                    "subject_activity_id": str(payload["subject_activity_id"]),
+                }
             return "approval", {
                 **meta,
                 "approval_id": str(payload["approval_id"]),
                 "kind": "tool",
+                "approval_kind": "tool_effect",
                 "payload": {
                     "subject_activity_id": str(payload["subject_activity_id"]),
                     "tool_name": str(payload["subject_label"]),
                     "note": str(payload["risk_summary"]),
                 },
                 "options": ["approve", "reject"],
+            }
+        if event.event_type == "ApprovalDecided" and approval_kind == "clarification":
+            decision = str(payload["decision"])
+            return "ask", {
+                **meta,
+                "ask_id": str(payload["approval_id"]),
+                "status": "resolved" if decision == "approved" else "declined",
+                "choice": str(payload.get("feedback") or ""),
+            }
+        if event.event_type == "ApprovalExpired" and approval_kind == "clarification":
+            return "ask", {
+                **meta,
+                "ask_id": str(payload["approval_id"]),
+                "status": "expired",
             }
         if event.event_type == "ApprovalDecided":
             return "approval", {
@@ -966,7 +1183,9 @@ class PostgresFormalProjector:
             }
         if event.event_type == "ActivityRequested":
             public_data = payload.get("public_data", {})
-            if payload.get("activity_type") == "tool.call" and isinstance(public_data, dict):
+            if payload.get("activity_type") == activity_types.TOOL_CALL and isinstance(
+                public_data, dict
+            ):
                 name = str(public_data.get("name") or "tool")
                 return "tool", {
                     **meta,
@@ -977,16 +1196,6 @@ class PostgresFormalProjector:
                     "status": "started",
                 }
             return None
-        if event.event_type == "ActivityProgressed":
-            return "resource_build", {
-                **meta,
-                "activity_id": str(payload["activity_id"]),
-                "kind": str(payload["kind"]),
-                "phase": payload.get("phase"),
-                "status": payload.get("status"),
-                "progress": int(payload["progress"]),
-                "message": str(payload.get("message") or ""),
-            }
         if event.event_type == "ActivityCompleted":
             public_data = payload.get("public_data", {})
             if not isinstance(public_data, dict):
@@ -1016,18 +1225,33 @@ class PostgresFormalProjector:
         self,
         session: AsyncSession,
         key: str,
-    ) -> ExecutionProjectorCheckpointORM | None:
+    ) -> tuple[ExecutionProjectorCheckpointORM | None, bool]:
+        """Lock and return the scope checkpoint; (None, True) means "busy".
+
+        P2-18: ``skip_locked`` never queues behind a concurrent holder. A
+        missing row is disambiguated from a locked one by a plain re-read: only
+        when the row genuinely does not exist may the caller create it.
+        """
         checkpoint = await session.scalar(
             select(ExecutionProjectorCheckpointORM)
             .where(
                 ExecutionProjectorCheckpointORM.projector_name == _CHECKPOINT_NAME,
                 ExecutionProjectorCheckpointORM.owner_scope_key == key,
             )
-            .with_for_update()
+            .with_for_update(skip_locked=True)
         )
-        if checkpoint is not None:
-            self._validate_checkpoint(checkpoint, key)
-        return checkpoint
+        if checkpoint is None:
+            held_elsewhere = await session.scalar(
+                select(ExecutionProjectorCheckpointORM.last_position).where(
+                    ExecutionProjectorCheckpointORM.projector_name == _CHECKPOINT_NAME,
+                    ExecutionProjectorCheckpointORM.owner_scope_key == key,
+                )
+            )
+            if held_elsewhere is not None:
+                return None, True
+            return None, False
+        self._validate_checkpoint(checkpoint, key)
+        return checkpoint, False
 
     @staticmethod
     def _write_checkpoint(
@@ -1112,13 +1336,25 @@ class PostgresFormalProjector:
         )
 
     @staticmethod
-    async def _lock(session: AsyncSession, key: str) -> None:
+    def _lock_key(key: str) -> int:
         digest = hashlib.sha256(f"{_CHECKPOINT_NAME}\0{key}".encode()).digest()
-        lock_key = int.from_bytes(digest[:8], byteorder="big", signed=True)
+        return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+    @staticmethod
+    async def _lock(session: AsyncSession, key: str) -> None:
         await session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
-            {"lock_key": lock_key},
+            {"lock_key": PostgresFormalProjector._lock_key(key)},
         )
+
+    @staticmethod
+    async def _try_lock(session: AsyncSession, key: str) -> bool:
+        """Non-blocking scope lock (P2-18): False means another pass holds it."""
+        acquired = await session.scalar(
+            text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+            {"lock_key": PostgresFormalProjector._lock_key(key)},
+        )
+        return bool(acquired)
 
     @staticmethod
     def _scope_parts(
@@ -1131,6 +1367,10 @@ class PostgresFormalProjector:
         if owner_scope.type == OwnerScopeType.TEAM and owner_scope.team_id:
             return f"team:{owner_scope.team_id}", None, owner_scope.team_id
         raise ValueError("team scope requires team_id")
+
+    @staticmethod
+    def _is_terminal_status(status: RunStatus) -> bool:
+        return status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 
     @staticmethod
     def _json_hash(value: dict) -> str:

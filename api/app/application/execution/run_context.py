@@ -15,6 +15,18 @@ from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 _INVALID_CONTEXT = "POLICY_SNAPSHOT_INVALID"
 
 
+class RunContextUnavailableError(Exception):
+    """The Run context is temporarily missing (projection rebuild in flight).
+
+    Raised by a context source when the Run projection row is absent *because*
+    the scope's formal projection is being rebuilt (K4-1/P2-14). The activity
+    worker treats it as a transient fault and defers the claim with backoff
+    instead of settling the activity as permanently failed. Defined at the
+    application layer so the infrastructure source can raise it and the worker
+    can match on it without either importing the other's internals.
+    """
+
+
 class RunContextSource(Protocol):
     async def load(self, run_id: UUID) -> RunExecutionContext: ...
 
@@ -38,9 +50,11 @@ def run_execution_context(state: RunState) -> RunExecutionContext:
             owner_scope=owner_scope,
             policy_snapshot=snapshot,
             correlation_id=state.correlation_id,
+            source_entity_type=state.source_entity_type,
+            source_entity_id=state.source_entity_id,
         )
     except (RuntimePolicyIntegrityError, ValidationError, ValueError) as exc:
         raise RuntimePolicyIntegrityError(_INVALID_CONTEXT) from exc
 
 
-__all__ = ["RunContextSource", "run_execution_context"]
+__all__ = ["RunContextSource", "RunContextUnavailableError", "run_execution_context"]

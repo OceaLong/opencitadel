@@ -16,7 +16,7 @@ from app.application.execution.public_projection import (
     PublicExecutionEvent,
 )
 from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
-from app.application.ports.streams import WakeupPort
+from app.application.ports.streams import WakeupBroadcastPort
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunFamily
 from app.domain.models.file import File
@@ -56,7 +56,7 @@ class AgentService:
         command_ingress: CommandIngress,
         public_projection: PublicProjectionPort,
         run_projection: RunProjectionPort,
-        events_wakeup: WakeupPort | None = None,
+        events_wakeup: WakeupBroadcastPort | None = None,
         poll_interval_seconds: float = 0.2,
         idle_timeout_seconds: float = 120.0,
         fallback_poll_seconds: float = 30.0,
@@ -278,7 +278,7 @@ class AgentService:
         """
         assert self._events_wakeup is not None
         started = time.monotonic()
-        batch = await self._events_wakeup.read(
+        batch = await self._events_wakeup.read_broadcast(
             cursor,
             block_milliseconds=int(self._fallback_poll * 1000),
         )

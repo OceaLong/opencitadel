@@ -40,7 +40,7 @@ def _event(
         stream_version=version,
         position=8_000_000_000 + version,
         event_type=event_type,
-        event_schema_version=2 if event_type == "RunCreated" else 1,
+        event_schema_version=1,
         public_payload=public_payload,
         internal_payload=internal_payload,
         secret_ref=None,
@@ -52,6 +52,20 @@ def _event(
         prev_hash="0" * 64,
         event_hash=f"{version:x}" * 64,
     )
+
+
+async def _apply_run_event(projector, session, event) -> None:
+    """Per-event equivalent of the projector's batched fold (K4-4).
+
+    ``_project_run`` was split into ``_track_run`` (in-memory fold) plus
+    per-event product side effects and a final ``_flush_run`` UPSERT; these
+    tests drive one event at a time, so each call folds and flushes.
+    """
+    trackers: dict = {}
+    tracker = await projector._track_run(session, event, trackers)
+    await projector._project_product_lifecycle(session, event, tracker.state)
+    await projector._project_resource_build_failure(session, event, tracker.state)
+    await projector._flush_run(session, tracker)
 
 
 async def _insert_patrol_graph(
@@ -165,7 +179,8 @@ async def test_failed_formal_patrol_run_closes_running_product_run() -> None:
                 patrol_run_id=patrol_run_id,
                 execution_run_id=execution_run_id,
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,
@@ -183,7 +198,8 @@ async def test_failed_formal_patrol_run_closes_running_product_run() -> None:
                     semantic_payload={"patrol_run_id": patrol_run_id},
                 ),
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,
@@ -282,7 +298,8 @@ async def test_formal_validation_terminal_event_closes_matching_pack_validation(
                     "summary": json.dumps({"validation_run_id": str(validation_run_id)}),
                 },
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=validation_run_id,
@@ -305,7 +322,8 @@ async def test_formal_validation_terminal_event_closes_matching_pack_validation(
                 ),
             )
             terminal_at = occurred_at + timedelta(seconds=5)
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=validation_run_id,
@@ -386,7 +404,8 @@ async def test_formal_validation_terminal_event_cannot_overwrite_newer_validatio
                     "summary": json.dumps({"generation": "newer"}),
                 },
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=stale_run_id,
@@ -404,7 +423,8 @@ async def test_formal_validation_terminal_event_cannot_overwrite_newer_validatio
                     semantic_payload={"operation": "validate", "pack_id": pack_id},
                 ),
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=stale_run_id,
@@ -563,7 +583,8 @@ async def test_formal_remediation_terminal_event_closes_product_lifecycle(
                     "created_by": owner_user_id,
                 },
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,
@@ -584,7 +605,8 @@ async def test_formal_remediation_terminal_event_closes_product_lifecycle(
                     },
                 ),
             )
-            await projector._project_run(
+            await _apply_run_event(
+                projector,
                 session,
                 _event(
                     run_id=execution_run_id,

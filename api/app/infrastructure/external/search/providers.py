@@ -19,10 +19,47 @@ import logging
 import httpx
 
 from app.domain.external.search import SearchEngine
-from app.domain.models.search import SearchResultItem, SearchResults
+from app.domain.models.search import (
+    SearchCapability,
+    SearchProviderAvailability,
+    SearchResultItem,
+    SearchResults,
+)
 from app.domain.models.tool_result import ToolResult
 
 logger = logging.getLogger(__name__)
+
+# provider 枚举与可用性判定的单源（P2-11）：capability_service 与组合根
+# 一律消费这里的判定，生产代码不得再对 provider 名做字符串特判。
+_PROVIDER_AVAILABILITY: dict[str, SearchProviderAvailability] = {
+    "none": SearchProviderAvailability.NOT_CONFIGURED,
+    # HTML 抓取在目标改版/反爬时随时失效，标记 degraded 提示运维换 API 源。
+    "bing_html": SearchProviderAvailability.DEGRADED,
+    "searxng": SearchProviderAvailability.AVAILABLE,
+    "tavily": SearchProviderAvailability.AVAILABLE,
+    "bing_api": SearchProviderAvailability.AVAILABLE,
+}
+
+
+def available_providers() -> tuple[str, ...]:
+    """All recognized SEARCH_PROVIDER values."""
+    return tuple(sorted(_PROVIDER_AVAILABILITY))
+
+
+def normalize_provider(provider: str | None) -> str:
+    return (provider or "bing_html").strip().lower()
+
+
+def resolve_search_capability(provider: str | None) -> SearchCapability:
+    """Resolve one configured provider into its availability verdict."""
+    normalized = normalize_provider(provider)
+    availability = _PROVIDER_AVAILABILITY.get(normalized)
+    if availability is None:
+        raise ValueError(
+            f"unknown SEARCH_PROVIDER '{provider}' (expected {'|'.join(available_providers())})"
+        )
+    return SearchCapability(provider=normalized, availability=availability)
+
 
 _TIMEOUT = httpx.Timeout(15.0)
 
@@ -174,7 +211,7 @@ def build_search_engine(
     Misconfiguration fails fast at composition time rather than degrading into
     silent empty search results at runtime.
     """
-    normalized = (provider or "bing_html").strip().lower()
+    normalized = resolve_search_capability(provider).provider
     if normalized == "none":
         return None
     if normalized == "bing_html":
@@ -191,20 +228,19 @@ def build_search_engine(
         if not api_key:
             raise ValueError("SEARCH_PROVIDER=tavily requires SEARCH_API_KEY")
         return TavilySearchEngine(api_key)
-    if normalized == "bing_api":
-        if not api_key:
-            raise ValueError("SEARCH_PROVIDER=bing_api requires SEARCH_API_KEY")
-        if endpoint:
-            return BingApiSearchEngine(api_key, endpoint=endpoint)
-        return BingApiSearchEngine(api_key)
-    raise ValueError(
-        f"unknown SEARCH_PROVIDER '{provider}' (expected searxng|tavily|bing_api|bing_html|none)"
-    )
+    if not api_key:
+        raise ValueError("SEARCH_PROVIDER=bing_api requires SEARCH_API_KEY")
+    if endpoint:
+        return BingApiSearchEngine(api_key, endpoint=endpoint)
+    return BingApiSearchEngine(api_key)
 
 
 __all__ = [
     "BingApiSearchEngine",
     "SearxngSearchEngine",
     "TavilySearchEngine",
+    "available_providers",
     "build_search_engine",
+    "normalize_provider",
+    "resolve_search_capability",
 ]

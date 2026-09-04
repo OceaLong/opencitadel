@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from app.application.execution import activity_types
 from app.application.ports.queries import EvidenceSessionQueryPort
 from app.application.ports.reporting import EvidenceSignerPort, ReportRendererPort
 from app.application.services.artifact_service import ArtifactService
@@ -239,7 +240,7 @@ class EvidenceService:
                     "tool_invocation_count": sum(
                         1
                         for activity in profile["activities"]
-                        if activity["activity_type"] == "tool.call"
+                        if activity["activity_type"] == activity_types.TOOL_CALL
                     ),
                     "governance_action_count": len(profile["approvals"]),
                 }

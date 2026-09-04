@@ -53,6 +53,7 @@ class FakeStore:
     def __init__(self, claims: tuple[ActivityClaim, ...]) -> None:
         self.claims = claims
         self.started: list[ActivityClaim] = []
+        self.deferred: list[tuple[ActivityClaim, timedelta]] = []
         self.allow_start = True
         self.allow_heartbeat = True
 
@@ -69,6 +70,11 @@ class FakeStore:
     async def heartbeat(self, candidate, **kwargs):
         del candidate, kwargs
         return self.allow_heartbeat
+
+    async def defer(self, candidate, *, now, retry_after):
+        del now
+        self.deferred.append((candidate, retry_after))
+        return True
 
 
 class FakeRunService:
@@ -302,12 +308,57 @@ async def test_claimed_activities_execute_concurrently_within_the_bounded_batch(
     assert stats.succeeded == 2
 
 
+class FakeProgressSink:
+    def __init__(self) -> None:
+        self.records = []
+
+    async def record(self, record) -> bool:
+        self.records.append(record)
+        return True
+
+
 @pytest.mark.asyncio
-async def test_activity_progress_commands_are_ordered_between_start_and_completion() -> None:
+async def test_activity_progress_goes_to_the_off_stream_sink_not_the_aggregate() -> None:
     store = FakeStore((claim(),))
     service = FakeRunService()
     registry = ActivityRegistry()
     registry.register(ProgressHandler(idempotent=True))
+    sink = FakeProgressSink()
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="execution-kernel-1",
+        progress_sink=sink,
+    )
+
+    await worker.run_once(now=NOW, limit=1)
+
+    # Progress never becomes an aggregate command: only start + settle do.
+    assert [item[0].command_type for item in service.commands] == [
+        "MarkActivityCallStarted",
+        "CompleteActivity",
+    ]
+    assert [record.sequence for record in sink.records] == [1, 2]
+    assert [record.progress for record in sink.records] == [0, 10]
+    # Deterministic identities dedupe redelivery but differ across executions.
+    assert len({record.event_id for record in sink.records}) == 2
+
+
+@pytest.mark.asyncio
+async def test_progress_reporter_is_absent_without_a_sink() -> None:
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+
+    class NoProgressHandler(Handler):
+        async def execute(self, request, context):
+            assert context.report_progress is None
+            return ActivityOutcome.succeeded(result_ref=None, result_summary="ok")
+
+    NoProgressHandler.activity_type = ProgressHandler.activity_type
+    registry.register(NoProgressHandler(idempotent=True))
     worker = ActivityWorker(
         store=store,
         run_contexts=FakeRunContexts(),
@@ -316,21 +367,9 @@ async def test_activity_progress_commands_are_ordered_between_start_and_completi
         worker_id="execution-kernel-1",
     )
 
-    await worker.run_once(now=NOW, limit=1)
+    stats = await worker.run_once(now=NOW, limit=1)
 
-    assert [item[0].command_type for item in service.commands] == [
-        "MarkActivityCallStarted",
-        "ReportActivityProgress",
-        "ReportActivityProgress",
-        "CompleteActivity",
-    ]
-    assert [item[0].payload.get("sequence") for item in service.commands] == [
-        None,
-        1,
-        2,
-        None,
-    ]
-    assert len({item[0].command_id for item in service.commands}) == 4
+    assert stats.succeeded == 1
 
 
 @pytest.mark.asyncio
@@ -477,6 +516,104 @@ async def test_unexpected_handler_exception_fails_activity_without_crashing_work
     assert stats.failed == 1
 
 
+class InfraFailingRunContexts:
+    """Simulates a database outage while loading the owning Run context."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def load(self, run_id):
+        raise self._error
+
+
+@pytest.mark.asyncio
+async def test_database_outage_defers_the_claim_instead_of_killing_the_batch() -> None:
+    """K2-2 (D5): infrastructure exceptions are classified per claim and defer
+    the lease-fenced row with backoff — they must not escape run_once.
+
+    Mirrors production wiring (execution_ports), which contributes the
+    SQLAlchemy exception family via ``infrastructure_errors``.
+    """
+    from sqlalchemy.exc import OperationalError, SQLAlchemyError
+
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = Handler(idempotent=True)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=InfraFailingRunContexts(
+            OperationalError("SELECT 1", {}, RuntimeError("db down"))
+        ),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+        infrastructure_errors=(SQLAlchemyError, OSError, TimeoutError),
+    )
+
+    stats = await worker.run_once(now=NOW, limit=1)
+
+    assert stats.deferred == 1
+    assert handler.calls == []
+    assert service.commands == []  # not settled as failed: the claim retries
+    assert len(store.deferred) == 1
+    assert store.deferred[0][1] > timedelta(0)
+
+
+@pytest.mark.asyncio
+async def test_unknown_worker_exception_defers_instead_of_crashing_the_lane() -> None:
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = Handler(idempotent=True)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=InfraFailingRunContexts(LookupError("unexpected worker bug")),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+    )
+
+    stats = await worker.run_once(now=NOW, limit=1)
+
+    assert stats.deferred == 1
+    assert len(store.deferred) == 1
+
+
+@pytest.mark.asyncio
+async def test_handler_database_fault_defers_rather_than_failing_the_activity() -> None:
+    """A SQLAlchemyError raised mid-handler is infrastructure, not a handler
+    bug: the claim defers (and will retry) instead of settling as failed."""
+    from sqlalchemy.exc import OperationalError, SQLAlchemyError
+
+    class DbFaultHandler(Handler):
+        async def execute(self, request, context):
+            self.calls.append((request, context))
+            raise OperationalError("INSERT", {}, RuntimeError("connection reset"))
+
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = DbFaultHandler(idempotent=True)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+        infrastructure_errors=(SQLAlchemyError, OSError, TimeoutError),
+    )
+
+    stats = await worker.run_once(now=NOW, limit=1)
+
+    assert stats.deferred == 1
+    assert [item[0].command_type for item in service.commands] == ["MarkActivityCallStarted"]
+    assert len(store.deferred) == 1
+
+
 @pytest.mark.asyncio
 async def test_duplicate_empty_wakeup_is_a_noop() -> None:
     worker = ActivityWorker(
@@ -594,3 +731,41 @@ async def test_worker_rejects_non_positive_max_concurrency() -> None:
             worker_id="worker-1",
             max_concurrency=0,
         )
+
+
+@pytest.mark.asyncio
+async def test_run_context_unavailable_during_rebuild_defers_instead_of_failing() -> None:
+    """K4-1/P2-14: a rebuild-window context miss is a retryable wait.
+
+    The context source signals ``RunContextUnavailableError`` while the scope's
+    projection is being rebuilt; the worker must defer the lease-fenced claim
+    (backoff) instead of settling the activity as permanently failed with
+    POLICY_SNAPSHOT_INVALID.
+    """
+    from app.application.execution.run_context import RunContextUnavailableError
+
+    class RebuildingRunContexts:
+        async def load(self, run_id):
+            raise RunContextUnavailableError("scope rebuild in flight")
+
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = Handler(idempotent=True)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=RebuildingRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+    )
+
+    stats = await worker.run_once(now=NOW, limit=1)
+
+    assert stats.deferred == 1
+    assert stats.failed == 0
+    assert len(store.deferred) == 1
+    # No settlement command was submitted: the activity is untouched.
+    assert service.commands == []
+    assert handler.calls == []

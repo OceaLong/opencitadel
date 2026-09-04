@@ -192,7 +192,30 @@ export type SSEEventType =
   | "done"
   | "error"
   | "approval"
+  | "ask"
   | "resource_build";
+
+/**
+ * 澄清（ask）事件数据：独立于审批的公共事件。
+ *
+ * - pending：等待用户点选推荐选项；
+ * - resolved / declined：用户已选择 / 已拒绝（携带 choice）；
+ * - expired：超时未选择。
+ */
+type AskEventBase = { ask_id: string } & EventMeta;
+
+export type AskEventData =
+  | (AskEventBase & {
+      status: "pending";
+      question: string;
+      choices: string[];
+      tool_name?: string;
+      subject_activity_id?: string;
+    })
+  | (AskEventBase & { status: "resolved" | "declined"; choice: string })
+  | (AskEventBase & { status: "expired" });
+
+export type PendingAskEventData = Extract<AskEventData, { status: "pending" }>;
 
 /**
  * SSE 事件数据
@@ -228,10 +251,14 @@ export type SSEEventData =
       data: {
         approval_id: string;
         kind: "tool";
-        payload: Record<string, unknown>;
+        payload: Record<string, unknown> & {
+          tool_name?: string;
+          note?: string;
+        };
         options: Array<"approve" | "reject">;
       } & EventMeta;
     }
+  | { type: "ask"; data: AskEventData }
   | {
       type: "resource_build";
       data: {

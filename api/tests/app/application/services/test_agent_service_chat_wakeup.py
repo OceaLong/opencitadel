@@ -99,7 +99,7 @@ class _FakeWakeup:
         self._script = list(script)
         self.reads: list[tuple[str, int]] = []
 
-    async def read(self, cursor: str, *, block_milliseconds: int) -> WakeupBatch:
+    async def read_broadcast(self, cursor: str, *, block_milliseconds: int) -> WakeupBatch:
         self.reads.append((cursor, block_milliseconds))
         step = self._script.pop(0) if self._script else "timeout"
         if step == "block":

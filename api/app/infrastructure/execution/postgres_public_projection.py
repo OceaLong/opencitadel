@@ -56,14 +56,10 @@ class PostgresPublicProjection:
             statement = statement.where(ExecutionPublicEventORM.run_id == run_id)
         reverse = latest or before_position is not None
         if after_position is not None:
-            statement = statement.where(ExecutionPublicEventORM.position > after_position)
+            statement = statement.where(ExecutionPublicEventORM.seq > after_position)
         if before_position is not None:
-            statement = statement.where(ExecutionPublicEventORM.position < before_position)
-        order = (
-            ExecutionPublicEventORM.position.desc()
-            if reverse
-            else ExecutionPublicEventORM.position.asc()
-        )
+            statement = statement.where(ExecutionPublicEventORM.seq < before_position)
+        order = ExecutionPublicEventORM.seq.desc() if reverse else ExecutionPublicEventORM.seq.asc()
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
             rows = list((await session.scalars(statement.order_by(order).limit(limit))).all())
@@ -73,7 +69,7 @@ class PostgresPublicProjection:
             if rows:
                 has_earlier = (
                     await session.scalar(
-                        select(ExecutionPublicEventORM.position)
+                        select(ExecutionPublicEventORM.seq)
                         .where(
                             ExecutionPublicEventORM.source_entity_type == source_entity_type,
                             ExecutionPublicEventORM.source_entity_id == source_entity_id,
@@ -83,14 +79,14 @@ class PostgresPublicProjection:
                                 if run_id is not None
                                 else ()
                             ),
-                            ExecutionPublicEventORM.position < rows[0].position,
+                            ExecutionPublicEventORM.seq < rows[0].seq,
                         )
                         .limit(1)
                     )
                 ) is not None
         events = tuple(
             PublicExecutionEvent(
-                cursor=(cursor := self._cursor.encode(row.position)),
+                cursor=(cursor := self._cursor.encode(row.seq)),
                 event_id=row.event_id,
                 event_type=row.event_type,
                 run_id=row.run_id,

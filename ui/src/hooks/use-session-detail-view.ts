@@ -16,6 +16,7 @@ import type {
   ApprovalEventData,
   ArtifactEventSummary,
   FileInfo,
+  PendingAskEventData,
   SessionMode,
   Skill,
   SSEEventData,
@@ -52,6 +53,26 @@ function getLatestApprovalFromEvents(
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
     if (ev.type === "approval" && ev.data.options.length > 0) return ev.data;
+  }
+  return null;
+}
+
+/**
+ * 从事件末尾找最新的 ask 事件：仅当它是 pending 时返回。
+ *
+ * 由于从末尾遍历遇到的第一条 ask 事件即最新一条，若它是 pending，
+ * 则必然不存在更晚的同 ask_id 的 resolved/declined/expired 事件；
+ * 若最新一条已是终态（resolved/declined/expired），说明无待选澄清。
+ */
+export function getLatestAskFromEvents(
+  events: SSEEventData[],
+  waiting: boolean,
+): PendingAskEventData | null {
+  if (!waiting) return null;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i];
+    if (ev.type !== "ask") continue;
+    return ev.data.status === "pending" ? ev.data : null;
   }
   return null;
 }
@@ -113,6 +134,10 @@ export function useSessionDetailView({
     sessionArtifactsKey !== "" && dismissedArtifactsKey === sessionArtifactsKey;
   const latestApproval = useMemo(
     () => getLatestApprovalFromEvents(events, session?.status === "waiting"),
+    [events, session?.status],
+  );
+  const latestAsk = useMemo(
+    () => getLatestAskFromEvents(events, session?.status === "waiting"),
     [events, session?.status],
   );
   const observationSummary = useMemo(
@@ -255,20 +280,35 @@ export function useSessionDetailView({
   );
 
   const handleApprovalSend = useCallback(
-    async (message: string) => {
+    async (message: string, feedback?: string) => {
       if (!requireAuth(tAuth("loginToSendMessage"))) return;
       if (!latestApproval) throw new Error("Approval is no longer pending");
       const rejected = message.startsWith("reject") || message === "skip";
-      const feedback =
+      const parsedFeedback =
         rejected && message.includes(":") ? message.slice(message.indexOf(":") + 1).trim() : "";
       await sessionApi.decideApproval(
         latestApproval.approval_id,
         rejected ? "rejected" : "approved",
-        feedback,
+        feedback ?? parsedFeedback,
       );
       resumeAfterExternalCommand();
     },
     [latestApproval, requireAuth, resumeAfterExternalCommand, tAuth],
+  );
+
+  const handleAskSend = useCallback(
+    async (choice: string | null) => {
+      if (!requireAuth(tAuth("loginToSendMessage"))) return;
+      if (!latestAsk) throw new Error("Ask is no longer pending");
+      // ask_id 复用审批决定 API（ask_id 即 approval_id）。
+      if (choice === null) {
+        await sessionApi.decideApproval(latestAsk.ask_id, "rejected");
+      } else {
+        await sessionApi.decideApproval(latestAsk.ask_id, "approved", choice);
+      }
+      resumeAfterExternalCommand();
+    },
+    [latestAsk, requireAuth, resumeAfterExternalCommand, tAuth],
   );
 
   const handleThinkingChange = useCallback(
@@ -376,6 +416,7 @@ export function useSessionDetailView({
     timeline,
     sessionArtifacts,
     latestApproval,
+    latestAsk,
     observationSummary,
     fileListOpen,
     setFileListOpen,
@@ -387,6 +428,7 @@ export function useSessionDetailView({
     scrollContainerRef,
     handleSend,
     handleApprovalSend,
+    handleAskSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,

@@ -14,7 +14,8 @@ export type Skill = {
   icon: string;
   category: string;
   system_prompt: string;
-  allowed_tools: string[];
+  // null = 不限制工具；[] = 禁用全部工具（后端 D11 语义）
+  allowed_tools: string[] | null;
   mcp_server_refs?: string[];
   a2a_server_refs?: string[];
   recommended_model_id?: string | null;
@@ -47,7 +48,7 @@ export type CreateSkillParams = {
   icon?: string;
   category?: string;
   system_prompt?: string;
-  allowed_tools?: string[];
+  allowed_tools?: string[] | null;
   mcp_server_refs?: string[];
   a2a_server_refs?: string[];
   recommended_model_id?: string | null;

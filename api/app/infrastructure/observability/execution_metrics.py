@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from prometheus_client import Counter, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ REPLAY_FAILURE_REASONS = (
     "event_hash_mismatch",
     "invalid_event_sequence",
     "snapshot_hash_mismatch",
+    "snapshot_schema_drift",
     "projection_hash_mismatch",
 )
 
@@ -80,6 +81,17 @@ EXECUTION_REPLAY_FAILURES = Counter(
 EXECUTION_POISONED_RUNS = Counter(
     "execution_poisoned_runs_total",
     "Run projections quarantined for failing to decode during decisions",
+)
+EXECUTION_POISONED_SCOPES = Counter(
+    "execution_poisoned_scopes_total",
+    "Owner scopes quarantined after consecutive formal-projection failures",
+)
+# Control-plane lane latency (D13/K4-3): one histogram per lane pass.
+EXECUTION_LANE_DURATION_SECONDS = Histogram(
+    "execution_lane_duration_seconds",
+    "Duration of one control-plane lane pass",
+    ("lane",),
+    buckets=(0.005, 0.02, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
 )
 
 
@@ -213,13 +225,25 @@ def record_poisoned_run() -> None:
     EXECUTION_POISONED_RUNS.inc()
 
 
+def record_poisoned_scope() -> None:
+    EXECUTION_POISONED_SCOPES.inc()
+
+
+def observe_lane_duration(lane: str, seconds: float) -> None:
+    EXECUTION_LANE_DURATION_SECONDS.labels(lane=lane).observe(seconds)
+
+
 __all__ = [
     "EXECUTION_ACTIVITY_ROWS",
     "EXECUTION_INBOX_ROWS",
+    "EXECUTION_LANE_DURATION_SECONDS",
     "EXECUTION_POISONED_RUNS",
+    "EXECUTION_POISONED_SCOPES",
     "EXECUTION_PROJECTOR_CURSOR_LAG",
     "ExecutionMetrics",
+    "observe_lane_duration",
     "record_optimistic_conflict",
     "record_poisoned_run",
+    "record_poisoned_scope",
     "record_replay_failure",
 ]
