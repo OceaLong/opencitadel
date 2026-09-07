@@ -85,6 +85,17 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
+          output: trivy-repository.txt
+      - name: Show and preserve repository findings
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+        run: test ! -f trivy-repository.txt || cat trivy-repository.txt
+      - name: Upload repository scan report
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: trivy-repository
+          path: trivy-repository.txt
+          if-no-files-found: warn
       - name: Full weekly scan (report only)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -159,3 +170,14 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
+          output: trivy-image.txt
+      - name: Show container findings
+        if: always()
+        run: test ! -f trivy-image.txt || cat trivy-image.txt
+      - name: Upload container scan report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: trivy-image-${{ matrix.name }}
+          path: trivy-image.txt
+          if-no-files-found: warn

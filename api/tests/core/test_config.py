@@ -8,6 +8,18 @@ from core.config import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_database_overrides(monkeypatch):
+    # These unit tests exercise explicit fields and defaults, independently of
+    # connection overrides used by the PostgreSQL integration suite.
+    for name in (
+        "SQLALCHEMY_DATABASE_URI",
+        "SQLALCHEMY_MIGRATION_DATABASE_URI",
+        "DATABASE_AUTHORIZATION_SIGNING_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_settings_derives_database_uri_from_postgres_fields():
     settings = DeploymentSettings(
         postgres_user="app",

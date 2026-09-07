@@ -13,4 +13,9 @@ spec:
       template:
         spec:
           restartPolicy: Never
-          containers: [{name: job, image: busybox:1.36, command: ["true"]}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile: {type: RuntimeDefault}
+          containers: [{name: job, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["true"]}]

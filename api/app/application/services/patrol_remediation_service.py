@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from app.application.execution.admission import RunAdmissionService
@@ -23,7 +24,6 @@ from app.domain.models.patrol import (
     PatrolRemediation,
     PatrolRemediationAction,
     PatrolRemediationStatus,
-    PatrolTriggerType,
     patrol_remediation_params_hash,
 )
 from app.domain.models.scope import OwnerScope
@@ -631,48 +631,97 @@ class PatrolRemediationService:
 
         return remediation.model_dump(mode="json")
 
+    async def retry_recheck(self, remediation_id: str, scope: OwnerScope) -> PatrolRemediation:
+        remediation = await self.get(remediation_id, scope)
+        if remediation.status != PatrolRemediationStatus.EXECUTED:
+            raise ConflictError("Only an executed remediation awaiting verification can be retried")
+        result = await self._ensure_recheck(remediation, scope, force=True)
+        await self._audit("patrol_remediation_recheck_retry", result, scope.user_id, {})
+        return result
+
+    async def reconcile_rechecks(self, *, limit: int = 100) -> None:
+        """Recover committed actuator success even after its activity/session has ended."""
+        async with self._uow_factory() as uow:
+            pending = await uow.patrol.list_pending_rechecks(utc_now(), limit=limit)
+        for remediation in pending:
+            try:
+                async with self._uow_factory() as uow:
+                    original = await uow.patrol.get_run(remediation.run_id)
+                if original is None:
+                    continue
+                owner = original.pack_snapshot.get("owner_user_id") or remediation.created_by
+                team = original.pack_snapshot.get("team_id")
+                scope = OwnerScope.team(owner, team) if team else OwnerScope.personal(owner)
+                if remediation.recheck_run_id:
+                    await self._patrol_run_service.reconcile_recheck(remediation.id, scope)
+                else:
+                    await self._ensure_recheck(remediation, scope)
+            except Exception:
+                logger.exception("Failed to reconcile remediation %s", remediation.id)
+
     async def _ensure_recheck(
         self,
         remediation: PatrolRemediation,
         scope: OwnerScope,
+        *,
+        force: bool = False,
     ) -> PatrolRemediation:
-        if (
-            remediation.status != PatrolRemediationStatus.EXECUTED
-            or remediation.recheck_run_id is not None
-        ):
-            return remediation
+        # Reserve a bounded retry before dispatch. A crash here becomes eligible
+        # again after backoff; no retry path can invoke the actuator.
+        async with self._uow_factory() as uow:
+            current = await uow.patrol.get_remediation(remediation.id, scope, for_update=True)
+            if current is None:
+                raise NotFoundError("Remediation not found")
+            if current.status != PatrolRemediationStatus.EXECUTED or current.recheck_run_id:
+                return current
+            now = utc_now()
+            if not force and (
+                current.recheck_dispatch_attempts >= 5
+                or (current.recheck_next_attempt_at and current.recheck_next_attempt_at > now)
+            ):
+                return current
+            if force:
+                current.recheck_dispatch_attempts = 0
+            current.recheck_dispatch_attempts += 1
+            current.recheck_next_attempt_at = now + timedelta(
+                seconds=30 * 2 ** (current.recheck_dispatch_attempts - 1)
+            )
+            current.updated_at = now
+            await uow.patrol.save_remediation(current)
+            await uow.commit()
         try:
-            recheck_run = await self._patrol_run_service.trigger_pack(
-                remediation.pack_id,
-                scope,
-                "system:remediation",
-                idempotency_key=f"recheck:{remediation.id}",
-                trigger_type=PatrolTriggerType.REMEDIATION,
-            )
-        except (OSError, RuntimeError, ValueError) as exc:
-            logger.warning(
-                "Failed to dispatch remediation recheck run remediation=%s: %s",
-                remediation.id,
-                exc,
-            )
+            await self._patrol_run_service.trigger_recheck(current.id, scope)
+        except Exception as exc:
+            # The child, link and command have rolled back together. Re-read
+            # under lock so a concurrent successful retry is never overwritten.
+            async with self._uow_factory() as uow:
+                current = await uow.patrol.get_remediation(current.id, scope, for_update=True)
+                if current is None:
+                    raise NotFoundError("Remediation not found") from exc
+                if (
+                    current.status == PatrolRemediationStatus.EXECUTED
+                    and not current.recheck_run_id
+                ):
+                    current.error_code = "recheck_dispatch_failed"
+                    current.error_message = str(exc)[:2000]
+                    current.updated_at = utc_now()
+                    await uow.patrol.save_remediation(current)
+                    await uow.commit()
             await self._audit(
                 "patrol_remediation_recheck_dispatch_failed",
-                remediation,
+                current,
                 scope.user_id,
-                {"error": str(exc)[:500]},
+                {"error": str(exc)[:500], "attempt": current.recheck_dispatch_attempts},
             )
-            return remediation
-        remediation.recheck_run_id = recheck_run.id
-        async with self._uow_factory() as uow:
-            await uow.patrol.save_remediation(remediation)
-            await uow.commit()
+            return current
+        current = await self.get(current.id, scope)
         await self._audit(
             "patrol_remediation_recheck_started",
-            remediation,
+            current,
             scope.user_id,
-            {"recheck_run_id": recheck_run.id},
+            {"recheck_run_id": current.recheck_run_id},
         )
-        return remediation
+        return current
 
     async def cancel_if_pending(self, session_id: str) -> None:
         """Best-effort cleanup when a Remediation session ends without ever

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { ExecutionRecoveryCard } from "@/components/admin/execution-recovery-card";
 import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
 import { AdminStatCard } from "@/components/admin/stat-card";
 import { SystemHealthCard } from "@/components/admin/system-health-card";
@@ -193,6 +194,7 @@ export default function AdminOverviewPage() {
       </div>
 
       <SystemHealthCard />
+      <ExecutionRecoveryCard />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <UsageTimeseriesChart points={timeseries} />

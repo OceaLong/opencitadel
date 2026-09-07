@@ -22,6 +22,17 @@ export const authApi = {
     post<AuthUser>("/auth/login", { email_or_username, password }),
   register: (params: { invite_token: string; email: string; username: string; password: string }) =>
     post<AuthUser>("/auth/register", params),
+  changePassword: (current_password: string, new_password: string) =>
+    post(
+      "/auth/password",
+      { current_password, new_password },
+      {
+        skipAuthRefresh: true,
+        skipAuthRedirect: true,
+      },
+    ),
+  resetPassword: (userId: string, new_password: string) =>
+    post(`/admin/users/${encodeURIComponent(userId)}/password`, { new_password }),
   logout: () => post("/auth/logout", {}),
   /**
    * 已启用的 OAuth 提供商列表。走统一 fetch 层（带 workspace/CSRF header），

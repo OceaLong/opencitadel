@@ -120,8 +120,12 @@
     "notifications.approvalWaiting",
     "notifications.clarificationExpired",
     "notifications.clarificationWaiting",
+    "notifications.executionBlocked",
     "notifications.patrolCompleted",
+    "notifications.scheduledJobCancelled",
     "notifications.scheduledJobCompleted",
-    "notifications.scheduledJobStarted"
+    "notifications.scheduledJobFailed",
+    "notifications.scheduledJobStarted",
+    "notifications.scheduledJobTriggerFailed"
   ]
 }

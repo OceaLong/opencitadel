@@ -3,12 +3,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import AfterValidator
+from pydantic import AfterValidator, BaseModel, Field
 from starlette.responses import StreamingResponse
 
 from app.application.ports.crypto import ApplicationUrls
 from app.application.ports.queries import ExecutionProjectionStatusPort
 from app.application.services.audit_service import AuditService
+from app.application.services.auth_service import AuthService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
 from app.domain.errors import BadRequestError, NotFoundError
@@ -23,6 +24,7 @@ from app.interfaces.auth_dependencies import (
     get_current_principal,
     require_admin,
     require_auditor_or_admin,
+    verify_csrf,
 )
 from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
@@ -46,6 +48,7 @@ from app.interfaces.schemas.admin import (
     UsageSummaryResponse,
     UsageTimeseriesResponse,
 )
+from app.interfaces.schemas.auth import ResetPasswordRequest
 from app.interfaces.schemas.team import (
     InvitationLinkResponse,
     ListTeamMemberDetailsResponse,
@@ -55,6 +58,7 @@ from app.interfaces.schemas.team import (
 from app.interfaces.service_dependencies import (
     get_application_urls,
     get_audit_service,
+    get_auth_service,
     get_execution_projection_status,
     get_team_service,
     get_uow_factory,
@@ -107,6 +111,27 @@ async def list_users(
             total=total,
         ),
     )
+
+
+@router.post(
+    "/users/{user_id}/password",
+    response_model=Response[dict],
+    dependencies=[Depends(verify_csrf)],
+)
+async def reset_user_password(
+    user_id: str,
+    request: Request,
+    body: ResetPasswordRequest,
+    principal=Depends(require_admin),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> Response[dict]:
+    await auth_service.reset_password(
+        principal=principal,
+        user_id=user_id,
+        new_password=body.new_password,
+        ip_address=get_client_ip(request),
+    )
+    return Response.success()
 
 
 @router.patch(
@@ -697,6 +722,8 @@ async def get_execution_projection_status_admin(
     poisoned = await projection_status.poisoned_scopes()
     return Response.success(
         data={
+            "poisoned_runs": await projection_status.poisoned_runs(),
+            "recovery_requests": await projection_status.recovery_requests(),
             "scope_lags": [
                 {
                     "owner_scope_key": item.owner_scope_key,
@@ -720,3 +747,39 @@ async def get_execution_projection_status_admin(
             ],
         }
     )
+
+
+class ExecutionRecoveryRequest(BaseModel):
+    scope_key: str = Field(min_length=6, max_length=320, pattern=r"^(user|team):[^\s]+$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.post(
+    "/execution/recover",
+    response_model=Response[dict],
+    dependencies=[Depends(require_admin), Depends(verify_csrf)],
+)
+async def request_execution_recovery(
+    body: ExecutionRecoveryRequest,
+    request: Request,
+    principal=Depends(get_current_principal),
+    projection_status: ExecutionProjectionStatusPort = Depends(get_execution_projection_status),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> Response[dict]:
+    if not body.reason.strip():
+        raise BadRequestError("A recovery reason is required")
+    request_id = await projection_status.request_recovery(
+        scope_key=body.scope_key,
+        actor=principal.user_id,
+        reason=body.reason,
+    )
+    await _record_admin_audit(
+        audit_service,
+        actor_user_id=principal.user_id,
+        action="execution_recovery_requested",
+        resource_type="execution_scope",
+        resource_id=body.scope_key,
+        request=request,
+        metadata={"recovery_request_id": request_id, "reason": body.reason},
+    )
+    return Response.success(data={"id": request_id, "status": "pending"})

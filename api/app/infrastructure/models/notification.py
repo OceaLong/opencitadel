@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, PrimaryKeyConstraint, String, Text, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.models.notification import Notification
@@ -47,4 +57,36 @@ class NotificationModel(Base):
                 "read": self.read,
                 "created_at": self.created_at,
             }
+        )
+
+
+class NotificationDeliveryModel(Base):
+    """Durable, independently retriable outbound channel delivery."""
+
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    scope: Mapped[dict] = mapped_column(JSON, nullable=False)
+    channel: Mapped[dict] = mapped_column(JSON, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def to_domain(self):
+        from app.domain.models.notification import NotificationDelivery
+
+        return NotificationDelivery.model_validate(
+            {column.name: getattr(self, column.name) for column in self.__table__.columns}
         )

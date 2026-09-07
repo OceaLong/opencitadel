@@ -18,5 +18,10 @@ spec:
       # loop. Same name/namespace/labels/selector as setup.yaml so this replaces the
       # 11 crashing containers in place: the Deployment rolls a brand-new ReplicaSet
       # (different pod template), so the resulting Pod's restartCount starts at 0.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
-        - {name: app, image: busybox:1.36, command: ["sh", "-c", "sleep 3600"]}
+        - {name: app, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "sleep 3600"]}

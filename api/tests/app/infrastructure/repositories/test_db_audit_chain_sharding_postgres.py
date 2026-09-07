@@ -125,8 +125,8 @@ async def test_per_shard_seq_prev_hash_and_tamper_detection() -> None:
         keys = {"primary": (_SIGNING_KEY,)}
         intact = verify_chain_logs(mine, keys)
         assert intact["ok"] is True, intact
-        # The full DB set (all shards) is intact too.
-        assert verify_chain_logs(all_logs, keys)["ok"] is True
+        # Other tests use independent signing keys; only these two complete
+        # shards belong to this proof and its keyring.
 
         # Tamper one entry in-memory -> verification fails (防篡改仍成立).
         tampered = [log.model_copy(deep=True) for log in mine]

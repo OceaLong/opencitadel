@@ -79,12 +79,6 @@ async function createOwnedTeam(page: Page, suffix: string): Promise<Team> {
   return team;
 }
 
-async function useWorkspace(page: Page, teamId: string): Promise<void> {
-  await page.evaluate((id) => {
-    window.localStorage.setItem("opencitadel-active-workspace", id);
-  }, teamId);
-}
-
 function nextBounded(value: number, minimum: number, maximum: number): number {
   return value < maximum ? value + 1 : Math.max(minimum, value - 1);
 }
@@ -176,16 +170,25 @@ test.describe("inference control plane", () => {
     cover("INF-BIND");
     const { chatId } = requireBootstrapIds(bootstrapState);
     const team = await createOwnedTeam(page, "inference-binding-team");
-    await useWorkspace(page, team.id);
+    const headers = { "X-Workspace-Id": team.id };
 
-    const inherited = await appApi<BindingList>(page, "/inference/bindings");
+    const inherited = await appApi<BindingList>(page, "/inference/bindings", {
+      headers,
+    });
     expect(
       inherited.data.items?.find((item) => item.purpose === "chat"),
     ).toMatchObject({ model_id: chatId, team_id: null, owner_user_id: null });
 
+    const bindingCleanup = registerCleanupAction({
+      action: "delete-resource",
+      resource: "inference-binding",
+      resource_id: "chat",
+      workspace_id: team.id,
+    });
     const override = await appApi<Binding>(page, "/inference/bindings/chat", {
       method: "PUT",
       body: { model_id: chatId, binding_scope: "workspace" },
+      headers,
     });
     expect(override.data).toMatchObject({
       purpose: "chat",
@@ -194,15 +197,21 @@ test.describe("inference control plane", () => {
       owner_user_id: null,
     });
 
-    const overridden = await appApi<BindingList>(page, "/inference/bindings");
+    const overridden = await appApi<BindingList>(page, "/inference/bindings", {
+      headers,
+    });
     expect(
       overridden.data.items?.find((item) => item.purpose === "chat"),
     ).toMatchObject({ model_id: chatId, team_id: team.id });
 
     await appApi(page, "/inference/bindings/chat?binding_scope=workspace", {
       method: "DELETE",
+      headers,
     });
-    const restored = await appApi<BindingList>(page, "/inference/bindings");
+    completeCleanupAction(bindingCleanup);
+    const restored = await appApi<BindingList>(page, "/inference/bindings", {
+      headers,
+    });
     expect(
       restored.data.items?.find((item) => item.purpose === "chat"),
     ).toMatchObject({ model_id: chatId, team_id: null, owner_user_id: null });
@@ -259,7 +268,7 @@ test.describe("inference control plane", () => {
     cover("INF-MISMATCH");
     const { chatId, embeddingId } = requireBootstrapIds(bootstrapState);
     const team = await createOwnedTeam(page, "inference-mismatch-team");
-    await useWorkspace(page, team.id);
+    const headers = { "X-Workspace-Id": team.id };
 
     const rejected = await appApi<Record<string, never>>(
       page,
@@ -267,6 +276,7 @@ test.describe("inference control plane", () => {
       {
         method: "PUT",
         body: { model_id: embeddingId, binding_scope: "workspace" },
+        headers,
         expectStatus: 400,
       },
     );
@@ -277,7 +287,9 @@ test.describe("inference control plane", () => {
     });
     expect(rejected.msg).toBeTruthy();
 
-    const bindings = await appApi<BindingList>(page, "/inference/bindings");
+    const bindings = await appApi<BindingList>(page, "/inference/bindings", {
+      headers,
+    });
     expect(
       bindings.data.items?.find((item) => item.purpose === "chat"),
     ).toMatchObject({ model_id: chatId, team_id: null, owner_user_id: null });

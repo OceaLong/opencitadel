@@ -41,6 +41,14 @@ class DecisionCandidate(BaseModel):
 class DecisionSource(Protocol):
     async def load_ready(self, *, limit: int) -> tuple[DecisionCandidate, ...]: ...
 
+    async def failed(self, run_id: UUID, *, error: str, now: datetime) -> None:
+        """Persist a bounded retry or quarantine, distinct from normal idle."""
+        ...
+
+    async def succeeded(self, run_id: UUID) -> None:
+        """Clear prior planner failures after successful planning."""
+        ...
+
     async def disarm(self, run_ids: Collection[UUID]) -> None:
         """Clear the readiness flag for Runs a decision round found idle.
 
@@ -66,8 +74,7 @@ class DecisionBatchStats(BaseModel):
     submitted: int = 0
     rejected: int = 0
     idle: int = 0
-    # Candidates whose planner raised: isolated, logged, and disarmed rather
-    # than aborting the batch.
+    # Planner failures are retried with a durable budget, then quarantined.
     errors: int = 0
 
 
@@ -111,12 +118,7 @@ class DecisionWorker:
                         outcomes=candidate.decision_payloads,
                         now=now,
                     )
-                except Exception:
-                    # One Run's planner defect must not abort the batch (the
-                    # same isolation the source applies to undecodable rows) —
-                    # an escaped exception here previously wedged the whole
-                    # decisions lane once per second. Disarm the Run so it is
-                    # not hot-retried; the next real event re-arms it.
+                except Exception as exc:
                     logger.exception(
                         "decision planner failed run_id=%s family=%s",
                         state.run_id,
@@ -124,8 +126,13 @@ class DecisionWorker:
                     )
                     span.set_attribute("opencitadel.decision", "error")
                     errors += 1
-                    idle_run_ids.append(state.run_id)
+                    await self._source.failed(
+                        state.run_id,
+                        error=type(exc).__name__,
+                        now=now,
+                    )
                     continue
+                await self._source.succeeded(state.run_id)
                 if command is None:
                     span.set_attribute("opencitadel.decision", "idle")
                     idle += 1
@@ -168,7 +175,7 @@ class DecisionWorker:
                     submitted += 1
                 else:
                     rejected += 1
-        # Disarm the Runs this round found idle (or whose planner errored) so
+        # Disarm only genuinely idle Runs so
         # their armed projection rows are not reloaded on every poll.
         if idle_run_ids:
             await self._source.disarm(idle_run_ids)

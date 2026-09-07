@@ -9,7 +9,13 @@ type ProductResource = Extract<
 >["resource"];
 
 type SessionState = {
-  status: "pending" | "running" | "waiting" | "completed" | "cancelled" | "failed";
+  status:
+    | "pending"
+    | "running"
+    | "waiting"
+    | "completed"
+    | "cancelled"
+    | "failed";
 };
 
 type PatrolPackState = {
@@ -24,6 +30,7 @@ const RESOURCE_PATHS = {
   "mcp-server": "/integrations/mcp-servers",
   "a2a-server": "/integrations/a2a-servers",
   "inference-model": "/inference/models",
+  "inference-binding": "/inference/bindings",
   memory: "/memories",
 } as const satisfies Record<ProductResource, string>;
 
@@ -34,7 +41,12 @@ export async function cleanupProductResource(
   options: { workspaceId?: string } = {},
 ): Promise<void> {
   const collection = RESOURCE_PATHS[resource];
-  const resourcePath = `${collection}/${encodeURIComponent(resourceId)}`;
+  const resourcePath = `${collection}/${encodeURIComponent(resourceId)}${resource === "inference-binding" ? "?binding_scope=workspace" : ""}`;
+  if (resource === "inference-binding" && !options.workspaceId) {
+    throw new Error(
+      "workspace binding cleanup requires an explicit workspace ID",
+    );
+  }
   const scopedHeaders = options.workspaceId
     ? { "X-Workspace-Id": options.workspaceId }
     : undefined;
@@ -44,7 +56,10 @@ export async function cleanupProductResource(
       expectStatus: [200, 404],
     });
     if (current.status === 404) return;
-    if (current.data?.status === "running" || current.data?.status === "waiting") {
+    if (
+      current.data?.status === "running" ||
+      current.data?.status === "waiting"
+    ) {
       await appApi(page, `${resourcePath}/stop`, {
         method: "POST",
         body: {},

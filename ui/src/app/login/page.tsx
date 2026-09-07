@@ -21,6 +21,7 @@ export default function LoginPage() {
   const redirectPath = useMemo(() => resolveSafeRedirectPath(params.get("redirect")), [params]);
   const { refresh } = useAuth();
   const t = useTranslations("auth");
+  const tPassword = useTranslations("password");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -84,6 +85,7 @@ export default function LoginPage() {
                 autoComplete="current-password"
               />
             </div>
+            <p className="text-muted-foreground text-xs">{tPassword("recovery")}</p>
             {error ? <p className="text-destructive text-sm">{error}</p> : null}
             <Button className="w-full" disabled={loading}>
               {loading ? t("loggingIn") : t("login")}

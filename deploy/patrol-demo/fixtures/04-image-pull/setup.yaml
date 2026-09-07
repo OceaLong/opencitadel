@@ -10,6 +10,12 @@ spec:
   template:
     metadata: {labels: {app: fixture-image-pull, opencitadel.io/patrol-fixture: "true"}}
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
           image: invalid.invalid/opencitadel/does-not-exist:fixture

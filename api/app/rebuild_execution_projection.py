@@ -25,10 +25,13 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.application.security.authorization_context import authorization_scope
+from app.domain.models.audit_log import AuditLog
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import OwnerScope
 from app.infrastructure.execution.models import ExecutionPoisonedScopeORM
 from app.infrastructure.execution.postgres_formal_projector import PostgresFormalProjector
+from app.infrastructure.execution.postgres_run_decision_source import PostgresRunDecisionSource
+from app.infrastructure.repositories.db_audit_repository import DBAuditRepository
 from app.infrastructure.storage.postgres import Postgres
 from core.config import load_deployment_settings
 
@@ -95,6 +98,30 @@ async def rebuild(raw_scope: str) -> int:
     try:
         with authorization_scope(authorization):
             session_factory = postgres.session_factory
+
+            async def record_recovery(action: str, metadata: dict) -> None:
+                async with session_factory() as session:
+                    from app.infrastructure.security.db_authorization import (
+                        configure_session_authorization,
+                    )
+
+                    await configure_session_authorization(session, authorization)
+                    await DBAuditRepository(
+                        session,
+                        signing_key=settings.audit_signing_key,
+                        signing_key_id=settings.audit_signing_key_id,
+                    ).add(
+                        AuditLog(
+                            actor_user_id=_ACTOR,
+                            action=action,
+                            resource_type="execution_scope",
+                            resource_id=key,
+                            metadata=metadata,
+                        )
+                    )
+                    await session.commit()
+
+            await record_recovery("execution_recovery_requested", {"source": "cli"})
             await _mark_rebuilding(session_factory, authorization, key, owner_scope)
             print(f"scope {key}: marked rebuilding; projection teardown + replay starting")
             projector = PostgresFormalProjector(
@@ -102,10 +129,19 @@ async def rebuild(raw_scope: str) -> int:
                 authorization=authorization,
             )
             result = await projector.rebuild(owner_scope)
+            recovered = await PostgresRunDecisionSource(
+                session_factory=session_factory,
+                authorization=authorization,
+            ).recover_scope(owner_scope)
             await _clear_marker(session_factory, authorization, key)
+            await record_recovery(
+                "execution_recovery_completed",
+                {"source": "cli", "recovered_run_ids": [str(item) for item in recovered]},
+            )
             print(
                 f"scope {key}: rebuilt {result.processed} event(s) through position "
-                f"{result.last_position}; rebuild marker and quarantine cleared"
+                f"{result.last_position}; scope marker cleared, {len(recovered)} verified Runs released; "
+                "Runs with invalid decision inputs remain quarantined"
             )
     finally:
         await postgres.shutdown()

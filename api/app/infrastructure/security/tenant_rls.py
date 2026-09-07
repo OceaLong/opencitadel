@@ -23,6 +23,7 @@ VISIBILITY_ROOT_TABLES = {
 }
 
 POLICY_ROOT_TABLES = {
+    "execution_recovery_requests",
     "execution_policy_revisions",
     "operations_policy_revisions",
     "runtime_policy_heads",
@@ -205,6 +206,7 @@ def policy_statements(
 
 _CUSTOM_OWNER_TABLES = {
     "notifications": "user_id",
+    "notification_deliveries": "user_id",
     "service_api_keys": "owner_user_id",
     "user_quotas": "user_id",
     # Identity credential tables: a principal may only ever see and mutate their

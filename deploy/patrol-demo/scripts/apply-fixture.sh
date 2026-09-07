@@ -24,6 +24,11 @@ fi
 kubectl --context "$context" -n opencitadel-patrol-demo delete deployment,job,cronjob,pod,event,networkpolicy -l opencitadel.io/patrol-fixture=true --ignore-not-found
 kubectl --context "$context" apply -f "$fixture_dir/setup.yaml"
 
+if [[ "$case_id" == "20-prompt-injection" ]]; then
+  kubectl --context "$context" -n opencitadel-patrol-demo \
+    wait --for=condition=Ready pod/fixture-prompt-injection --timeout=120s
+fi
+
 if [[ "$case_id" == "03-crashloop" || "$case_id" == "06-restarts-warn" || "$case_id" == "07-restarts-fail" || "$case_id" == "21-remediation-crashloop" ]]; then
   target=4
   [[ "$case_id" == "03-crashloop" || "$case_id" == "07-restarts-fail" || "$case_id" == "21-remediation-crashloop" ]] && target=11

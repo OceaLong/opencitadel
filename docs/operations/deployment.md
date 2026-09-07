@@ -273,3 +273,120 @@ helm lint deploy/helm/opencitadel
 Database-backed execution/RLS tests require a disposable PostgreSQL database
 and verify append-only events, owner isolation, role grants, inbox idempotency,
 timer/outbox recovery, snapshots, and projector rebuilds.
+
+## Local Compose backup and isolated recovery
+
+Run from the repository root, with the same `.env`, `COMPOSE_FILE` overrides,
+profiles and `COMPOSE_PROJECT_NAME` used by the running stack:
+
+```bash
+bash scripts/backup.sh backups/2026-09-07
+bash scripts/verify-backup.sh backups/2026-09-07
+bash scripts/restore.sh backups/2026-09-07 restore_drill_20260907
+```
+
+The backup destination must not exist. The backup reads resolved Compose
+configuration in memory to discover the database, admin role and actual named
+MinIO volume; it never saves the full config or secrets. It stops running
+application services and MinIO for the dump/object snapshot, then restarts
+exactly those services in a `finally` handler, including on failure or SIGTERM.
+Schedule a maintenance window: API/kernel/other Compose services are unavailable
+during this operation. PostgreSQL and Redis remain running. Stop all writers
+outside this Compose project first; external writers cannot be fenced by this
+script. SIGKILL or host failure cannot run cleanup: inspect the source services
+and start the ones recorded by your operations change before ending maintenance.
+
+`manifest.json` records `complete` only after the PostgreSQL custom dump, role
+schema (without role passwords), table row counts and local object archive have
+been captured and the stopped services restarted. Missing objects, dump/archive
+errors or restart failures exit nonzero; incomplete artifacts remain `partial`
+and cannot be restored. The manifest includes version, source identifiers,
+per-file sizes/SHA-256 hashes and an index of every archived object's content.
+`verify-backup.sh` checks these offline and rejects links, path traversal and
+incomplete backups. Checksums detect corruption; they do not authenticate an
+untrusted backup. Protect the backup directory, including its manifest, in an
+access-controlled encrypted backup store. The database dump contains account
+hashes and application data. Keep original encryption/signing keys and runtime
+secrets separately in your secret manager; they are required for useful recovery.
+
+This workflow deliberately supports only the local named-volume MinIO backend
+at `opencitadel-minio:9000`. External MinIO, COS/S3, bind-mounted data and custom
+storage need a provider-specific, consistent object snapshot procedure; the
+script fails rather than calling a database-only copy a complete backup. Redis
+is disposable coordination/cache state and is not backed up. Sandbox ephemeral
+files and logs are also excluded. The Helm PostgreSQL CronJob remains a database
+backup only, not a complete application recovery procedure.
+
+The restore command first verifies every payload before contacting Docker. It
+accepts only a fresh `restore_<name>` target and refuses existing destination
+containers or volumes. It creates invocation-specific volumes and an isolated
+PostgreSQL container with no network or published ports. It restores roles,
+then the custom dump with fail-on-error, compares every table's row count, and
+extracts the object archive only into an empty new volume. A second archive is
+read back and every restored file's size/hash is compared to the backup.
+The recovery container is stopped afterwards; volumes are retained for review.
+A failed run retains a `partial` recovery report; use a new target for the next
+attempt instead of overwriting it.
+
+`restore-<target>.json` records the exact container/volumes, recovery superuser,
+source manifest hash, and `payload_verified` on successful data verification.
+It explicitly leaves `application_smoke_verified: false`. This is a recovery
+drill, not an automatic production cutover. Inspect its resource identifiers and
+attach those volumes to a separately isolated Compose project for application
+acceptance. Use the same PostgreSQL/MinIO image versions as the backup and the
+application revision that created the data. Reapply runtime role passwords from
+your secret manager (roles are restored without passwords), retain the original
+encryption/signing keys, configure the restored MinIO endpoint and credentials,
+and keep schedulers, integrations and outbound notifications disabled during
+the drill. Bind any acceptance UI only to localhost. Do not mount recovery
+volumes into the live project or start a new empty application over them.
+
+Before approving cutover, record these checks against the isolated application:
+
+1. A known local user can log in and change their password; prior sessions fail.
+2. Existing session history and a representative attachment open correctly.
+3. A known knowledge-base document can be retrieved and its stored content read.
+4. A previously exported evidence package passes signature and content verification
+   using the original signing key (`scripts/verify_evidence_package.py`).
+5. Pending execution/approval state can be inspected without dispatching production
+   actions; enable integrations only after the recovery is accepted.
+
+The orchestration regression suite runs without a Docker daemon:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p test_backup_tooling.py -v
+```
+
+Those tests use a recording Docker substitute and synthetic dumps/objects. They
+validate failure handling, command arguments, ordering and manifest/content checks;
+they do not replace a real Docker/PostgreSQL/MinIO restore and application drill.
+Docker must be running and the source PostgreSQL image plus `alpine:3.20` must be
+available (Docker may pull missing images) for a real recovery.
+
+## Execution failures and verified recovery
+
+The admin dashboard shows scope projection lag, quarantined Runs, planner retry times,
+and durable recovery outcomes. Planner errors retry after 5 and 10 seconds; the third
+failure quarantines the Run and creates an in-app notice for its owner/team. Other
+Runs continue. Recovery requires an administrator and a written reason. Submit the
+owner scope (`user:<id>` or `team:<id>`) in **Execution recovery**, then refresh to see
+`pending`, `completed`, `partial`, or `failed`.
+
+Only the kernel rebuilds projections. It blocks new decisions/activities for the
+scope, replays original events, verifies state and required decision payloads, and
+releases only verified Runs. Missing/corrupt original payloads remain quarantined;
+`partial` results list those Runs. Fix the original data or code before retrying.
+Recovery is audited and never replays an unknown external write. The kernel-credential
+CLI `python -m app.rebuild_execution_projection --scope user:<id>` performs the same
+verification and reports how many Run markers it released.
+
+Disabling business scheduling stops fresh schedules, while reconciliation, retention,
+connection recycling, notification delivery, rechecks, and recovery continue. Delivery,
+recheck, and recovery lanes are independently supervised. The admission ceiling counts
+pending and active workflow groups transactionally; children share their parent's
+capacity until every member is terminal. A new independent group above the ceiling
+receives HTTP 429; retries of an existing group do not consume another slot.
+
+This change targets a freshly initialized greenfield database. Existing initialized
+databases do not acquire new columns/tables by rerunning an already-applied initial
+migration; do not point a fresh-schema test at production data.

@@ -200,6 +200,11 @@ def make_service(
     admission=None,
     governance_metrics=None,
 ) -> PatrolRemediationService:
+    async def dispatch(remediation_id, scope):
+        item = uow.patrol.remediations[remediation_id]
+        item.recheck_run_id = "default-recheck-run"
+        return SimpleNamespace(id=item.recheck_run_id)
+
     return PatrolRemediationService(
         lambda: uow,
         actuator_client=actuator
@@ -207,9 +212,7 @@ def make_service(
             get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
         ),
         patrol_run_service=patrol_runs
-        or SimpleNamespace(
-            trigger_pack=AsyncMock(return_value=SimpleNamespace(id="default-recheck-run"))
-        ),
+        or SimpleNamespace(trigger_recheck=AsyncMock(side_effect=dispatch)),
         run_admission_service=admission or SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
         policy_reader=_POLICY_READER,
         governance_metrics=governance_metrics or NoopGovernanceMetrics(),
@@ -699,7 +702,12 @@ async def test_execute_recovery_skips_completed_actuator_call_and_resumes_rechec
         execute_action=AsyncMock(),
     )
     recheck = SimpleNamespace(id="recheck-run-1")
-    patrol_runs = SimpleNamespace(trigger_pack=AsyncMock(return_value=recheck))
+
+    async def dispatch(remediation_id, scope):
+        repo.remediations[remediation_id].recheck_run_id = recheck.id
+        return recheck
+
+    patrol_runs = SimpleNamespace(trigger_recheck=AsyncMock(side_effect=dispatch))
     service = make_service(
         uow,
         actuator=actuator,
@@ -734,7 +742,7 @@ async def test_execute_recovery_skips_completed_actuator_call_and_resumes_rechec
 
     actuator.get_capabilities.assert_not_awaited()
     actuator.execute_action.assert_not_awaited()
-    patrol_runs.trigger_pack.assert_awaited_once()
+    patrol_runs.trigger_recheck.assert_awaited_once()
     assert repo.remediations[remediation.id].recheck_run_id == recheck.id
     assert result["status"] == PatrolRemediationStatus.EXECUTED.value
 
@@ -959,3 +967,87 @@ async def test_execute_fails_closed_when_capability_baseline_missing():
     persisted = repo.remediations[remediation.id]
     assert persisted.status is PatrolRemediationStatus.FAILED
     assert persisted.error_code == "CAPABILITY_BASELINE_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_recheck_dispatch_failure_is_durable_and_manual_retry_never_executes_actuator():
+    repo = Repo()
+    runs = SimpleNamespace(trigger_recheck=AsyncMock(side_effect=RuntimeError("queue unavailable")))
+    service = make_service(Uow(repo), patrol_runs=runs)
+    scope = OwnerScope.personal("user-1")
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+    remediation.status = PatrolRemediationStatus.EXECUTED
+    await service._ensure_recheck(remediation, scope)
+    persisted = repo.remediations[remediation.id]
+    assert persisted.status == PatrolRemediationStatus.EXECUTED
+    assert persisted.error_code == "recheck_dispatch_failed"
+    assert persisted.recheck_dispatch_attempts == 1
+    assert persisted.recheck_next_attempt_at is not None
+
+    async def dispatched(*args):
+        persisted.recheck_run_id = "child"
+        persisted.error_code = None
+        persisted.error_message = None
+        return SimpleNamespace(id="child")
+
+    runs.trigger_recheck.side_effect = dispatched
+    result = await service.retry_recheck(remediation.id, scope)
+    assert result.recheck_run_id == "child"
+    assert result.error_code is None
+
+
+@pytest.mark.asyncio
+async def test_recheck_dispatch_stops_after_five_attempts_and_respects_backoff():
+    from datetime import timedelta
+
+    from app.domain.utils.time_utils import utc_now
+
+    repo = Repo()
+    runs = SimpleNamespace(trigger_recheck=AsyncMock(side_effect=RuntimeError("unavailable")))
+    service = make_service(Uow(repo), patrol_runs=runs)
+    scope = OwnerScope.personal("user-1")
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+    remediation.status = PatrolRemediationStatus.EXECUTED
+    for attempt in range(5):
+        remediation.recheck_next_attempt_at = utc_now() - timedelta(seconds=1)
+        await service._ensure_recheck(remediation, scope)
+        assert remediation.recheck_dispatch_attempts == attempt + 1
+        await service._ensure_recheck(remediation, scope)
+        assert runs.trigger_recheck.await_count == attempt + 1
+    remediation.recheck_next_attempt_at = utc_now() - timedelta(seconds=1)
+    await service._ensure_recheck(remediation, scope)
+    assert runs.trigger_recheck.await_count == 5
+
+
+@pytest.mark.asyncio
+async def test_manual_recheck_retry_rejects_other_workspace():
+    repo = Repo()
+    service = make_service(Uow(repo))
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            OwnerScope.personal("user-1"),
+            "user-1",
+            workload="deployment/api",
+        )
+    remediation.status = PatrolRemediationStatus.EXECUTED
+    with pytest.raises(NotFoundError):
+        await service.retry_recheck(remediation.id, OwnerScope.personal("other-user"))

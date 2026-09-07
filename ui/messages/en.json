@@ -1331,11 +1331,15 @@
     "title": "Notifications",
     "scheduledJobCompleted": "Scheduled job \"{jobName}\" completed",
     "scheduledJobStarted": "Scheduled job \"{jobName}\" started",
+    "scheduledJobFailed": "Scheduled job \"{jobName}\" failed",
+    "scheduledJobCancelled": "Scheduled job \"{jobName}\" was cancelled",
+    "scheduledJobTriggerFailed": "Scheduled job \"{jobName}\" could not start",
     "patrolCompleted": "Patrol \"{packName}\" completed with status {status}",
     "approvalWaiting": "Approval needed for {subject}",
     "approvalExpired": "Approval expired without a decision; the run was cancelled ({subject})",
     "clarificationWaiting": "Your choice is needed: {subject}",
-    "clarificationExpired": "Clarification timed out and the task was cancelled: {subject}"
+    "clarificationExpired": "Clarification timed out and the task was cancelled: {subject}",
+    "executionBlocked": "Execution paused after repeated internal errors. Contact an administrator to recover it."
   },
   "toolUse": {
     "statusRunning": "running",
@@ -1545,7 +1549,12 @@
         "beforeLabel": "Observation before",
         "paramsLabel": "Parameters",
         "title": "Remediation detail"
-      }
+      },
+      "retryRecheck": "Retry verification",
+      "retryRecheckError": "Unable to retry verification",
+      "retryRecheckQueued": "Verification queued",
+      "dispatchExhausted": "Automatic verification dispatch stopped after 5 attempts. Retry after resolving the error.",
+      "dispatchWaiting": "Action completed; verification is waiting to be dispatched."
     },
     "pack": {
       "boundary": "10 checks; no remediation, Shell, browser, or arbitrary query capability.",
@@ -1671,7 +1680,6 @@
     "notify": {
       "add": "Add channel",
       "addressLabel": "Email address",
-      "channelArgLabel": "Channel argument",
       "empty": "No notification channels configured. Results still appear in the in-app notification inbox.",
       "remove": "Remove channel",
       "secretLabel": "Signing secret",
@@ -1754,8 +1762,6 @@
       "enabled": "Enabled",
       "modelId": "Model ID",
       "name": "Job name",
-      "notifyChannel": "Notify channel",
-      "notifyServer": "Notify MCP server",
       "operatorDomains": "Operator domains",
       "operatorScope": "Operator scope",
       "prompt": "Prompt template",
@@ -1882,5 +1888,34 @@
     "home": "Home",
     "title": "Shared artifact",
     "incompleteContentWarning": "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment."
+  },
+  "password": {
+    "change": "Change password",
+    "reset": "Reset password",
+    "current": "Current password",
+    "new": "New password",
+    "confirm": "Confirm new password",
+    "mismatch": "Passwords do not match.",
+    "policy": "Use 8–128 characters, not entirely whitespace. Choose a different password.",
+    "failed": "Unable to update password.",
+    "saving": "Saving…",
+    "changeNotice": "Changing your password signs out all sessions. Sign in again with the new password.",
+    "resetNotice": "Resetting this password signs out all of this user’s sessions. Share the new password securely with the user.",
+    "resetSuccess": "Password reset. The user can now sign in with the new password.",
+    "changeSuccess": "Password changed. Sign in again.",
+    "recovery": "Forgot your password, or signed up with SSO? Contact a platform administrator. Administrators can reset it in Administration → Users → Reset password."
+  },
+  "executionRecovery": {
+    "title": "Execution recovery",
+    "description": "Rebuild from recorded events and verify required inputs before releasing quarantine. Missing inputs remain blocked.",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "healthy": "No execution lag or quarantined runs detected.",
+    "lag": "Projection lag: {count}",
+    "retryAt": "Automatic retry at {time}",
+    "quarantined": "Quarantined; administrator recovery required",
+    "scope": "Owner scope",
+    "reason": "Recovery reason",
+    "recover": "Queue verified recovery"
   }
 }

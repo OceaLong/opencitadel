@@ -103,3 +103,47 @@ test("journals allowlisted cleanup actions and completes them durably", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("failed workspace override cleanup removes its binding before its team", () => {
+  const root = mkdtempSync(join(tmpdir(), "opencitadel-binding-cleanup-"));
+  const environment = {
+    ACCEPTANCE_EVIDENCE_DIR: root,
+    ACCEPTANCE_RUN_ID: "binding-failure",
+  };
+  try {
+    registerCleanupAction(
+      {
+        action: "delete-resource",
+        resource: "team",
+        resource_id: "team-binding",
+      },
+      environment,
+    );
+    registerCleanupAction(
+      {
+        action: "delete-resource",
+        resource: "inference-binding",
+        resource_id: "chat",
+        workspace_id: "team-binding",
+      },
+      environment,
+    );
+    // An assertion may abort immediately after PUT. Both intents remain durable.
+    const actions = partitionCleanupActions(readCleanupActions(environment));
+    expect(actions.resources.map((entry) => entry.value)).toEqual([
+      {
+        action: "delete-resource",
+        resource: "inference-binding",
+        resource_id: "chat",
+        workspace_id: "team-binding",
+      },
+      {
+        action: "delete-resource",
+        resource: "team",
+        resource_id: "team-binding",
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

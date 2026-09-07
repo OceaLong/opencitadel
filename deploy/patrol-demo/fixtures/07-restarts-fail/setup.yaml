@@ -10,15 +10,20 @@ spec:
   template:
     metadata: {labels: {app: fixture-restarts-fail, opencitadel.io/patrol-fixture: "true"}}
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
-        - {name: restart-01, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-02, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-03, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-04, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-05, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-06, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-07, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-08, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-09, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-10, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
-        - {name: restart-11, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-01, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-02, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-03, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-04, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-05, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-06, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-07, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-08, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-09, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-10, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}
+        - {name: restart-11, securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}, image: busybox:1.36, command: ["sh", "-c", "exit 1"]}

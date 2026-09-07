@@ -1,11 +1,11 @@
 """Read ready Runs from the formal projection for workflow decisions."""
 
 from collections.abc import Collection
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -17,12 +17,18 @@ from app.domain.execution.run import (
 )
 from app.domain.execution.serialization import canonical_state_hash
 from app.domain.models.authorization import AuthorizationContext
+from app.domain.models.notification import Notification
+from app.domain.models.scope import OwnerScope
 from app.infrastructure.execution.models import (
     ExecutionActivityTaskORM,
     ExecutionPoisonedRunORM,
+    ExecutionPoisonedScopeORM,
     ExecutionRunProjectionORM,
 )
+from app.infrastructure.models.team import TeamMemberORM
+from app.infrastructure.models.user import UserORM
 from app.infrastructure.observability.execution_metrics import record_poisoned_run
+from app.infrastructure.repositories.db_notification_repository import DBNotificationRepository
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
 
@@ -50,7 +56,12 @@ class PostgresRunDecisionSource:
             await configure_session_authorization(session, self._authorization)
             # Already-quarantined Runs are excluded so a poison row is skipped on
             # every subsequent scan instead of re-poisoning the batch forever.
-            quarantined = select(ExecutionPoisonedRunORM.run_id)
+            quarantined = select(ExecutionPoisonedRunORM.run_id).where(
+                or_(
+                    ExecutionPoisonedRunORM.next_attempt_at.is_(None),
+                    ExecutionPoisonedRunORM.next_attempt_at > now,
+                )
+            )
             # Decision-readiness filter (D4 / P0-1): only rows the projector
             # armed (queued, or running with no active activities) are decoded.
             # A thousand WAITING(approval) Runs no longer cost this scan
@@ -61,6 +72,22 @@ class PostgresRunDecisionSource:
                     await session.scalars(
                         select(ExecutionRunProjectionORM)
                         .where(
+                            ~select(ExecutionPoisonedScopeORM.owner_scope_key)
+                            .where(
+                                or_(
+                                    (ExecutionRunProjectionORM.team_id.is_not(None))
+                                    & (
+                                        ExecutionPoisonedScopeORM.team_id
+                                        == ExecutionRunProjectionORM.team_id
+                                    ),
+                                    (ExecutionRunProjectionORM.team_id.is_(None))
+                                    & (
+                                        ExecutionPoisonedScopeORM.owner_user_id
+                                        == ExecutionRunProjectionORM.owner_user_id
+                                    ),
+                                )
+                            )
+                            .exists(),
                             ExecutionRunProjectionORM.terminal.is_(False),
                             ExecutionRunProjectionORM.decision_due_at.is_not(None),
                             ExecutionRunProjectionORM.decision_due_at <= now,
@@ -107,6 +134,125 @@ class PostgresRunDecisionSource:
             if quarantined_any:
                 await session.commit()
         return tuple(candidates)
+
+    async def failed(self, run_id: UUID, *, error: str, now: datetime) -> None:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            record = await session.scalar(
+                select(ExecutionRunProjectionORM)
+                .where(
+                    ExecutionRunProjectionORM.run_id == run_id,
+                )
+                .with_for_update()
+            )
+            if (
+                record is None
+                or record.last_event_position != self._armed_positions.get(run_id)
+                or record.decision_due_at is None
+                or record.decision_due_at > now
+            ):
+                return
+            failure = await session.get(ExecutionPoisonedRunORM, run_id)
+            attempt = (failure.failure_count if failure else 0) + 1
+            retry_at = now + timedelta(seconds=5 * 2 ** (attempt - 1)) if attempt < 3 else None
+            values = {
+                "reason": "planner_error",
+                "last_error": error[:2000],
+                "failure_count": attempt,
+                "next_attempt_at": retry_at,
+                "last_seen_at": now,
+            }
+            await session.execute(
+                pg_insert(ExecutionPoisonedRunORM)
+                .values(
+                    run_id=run_id,
+                    owner_user_id=record.owner_user_id,
+                    team_id=record.team_id,
+                    first_seen_at=now,
+                    **values,
+                )
+                .on_conflict_do_update(index_elements=["run_id"], set_=values)
+            )
+            record.decision_due_at = retry_at
+            if retry_at is None:
+                recipients = (
+                    await session.scalars(
+                        select(TeamMemberORM.user_id).where(TeamMemberORM.team_id == record.team_id)
+                        if record.team_id
+                        else select(UserORM.id).where(UserORM.id == record.owner_user_id)
+                    )
+                ).all()
+                for user_id in recipients:
+                    await DBNotificationRepository(session).save(
+                        Notification(
+                            user_id=user_id,
+                            type="execution_blocked",
+                            session_id=record.source_entity_id
+                            if record.source_entity_type == "session"
+                            else None,
+                            message="Execution paused after repeated internal errors; contact an administrator.",
+                            i18n_key="notifications.executionBlocked",
+                        )
+                    )
+            await session.commit()
+
+    async def succeeded(self, run_id: UUID) -> None:
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            await session.execute(
+                delete(ExecutionPoisonedRunORM).where(
+                    ExecutionPoisonedRunORM.run_id == run_id,
+                    ExecutionPoisonedRunORM.reason == "planner_error",
+                    ExecutionPoisonedRunORM.next_attempt_at.is_not(None),
+                )
+            )
+            await session.commit()
+
+    async def recover_scope(self, owner_scope: OwnerScope) -> tuple[UUID, ...]:
+        """Release only rebuilt projections whose decision inputs verify.
+
+        Missing original payloads remain quarantined; rebuilding a hash alone
+        never authorizes replay of an unknown external action.
+        """
+        async with self._session_factory() as session:
+            await configure_session_authorization(session, self._authorization)
+            scope_filter = (
+                ExecutionRunProjectionORM.team_id == owner_scope.team_id
+                if owner_scope.team_id
+                else (ExecutionRunProjectionORM.owner_user_id == owner_scope.user_id)
+                & ExecutionRunProjectionORM.team_id.is_(None)
+            )
+            records = tuple(
+                (
+                    await session.scalars(
+                        select(ExecutionRunProjectionORM)
+                        .where(
+                            scope_filter,
+                            ExecutionRunProjectionORM.run_id.in_(
+                                select(ExecutionPoisonedRunORM.run_id)
+                            ),
+                        )
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            recovered = []
+            for record in records:
+                try:
+                    state = self._decode(record)
+                    payloads = await self._load_decision_payloads(session, [(record, state)])
+                    self._verified_payloads(state, payloads)
+                except (ValidationError, ValueError) as exc:
+                    await self._quarantine(session, record, exc)
+                    continue
+                await session.execute(
+                    delete(ExecutionPoisonedRunORM).where(
+                        ExecutionPoisonedRunORM.run_id == record.run_id,
+                    )
+                )
+                recovered.append(record.run_id)
+            await session.commit()
+            return tuple(recovered)
 
     async def disarm(self, run_ids: Collection[UUID]) -> None:
         """Clear decision_due_at for Runs the planner just found idle.
@@ -227,6 +373,7 @@ class PostgresRunDecisionSource:
                     "reason": reason[:128],
                     "last_error": detail,
                     "last_seen_at": now,
+                    "next_attempt_at": None,
                 },
             )
         )

@@ -29,6 +29,13 @@ async def test_kernel_runtime_contains_execution_services_only(monkeypatch) -> N
     monkeypatch.setattr(csrf_module, "CsrfService", reject_api_security)
     monkeypatch.setattr(oauth_module, "OAuthClients", reject_api_security)
 
+    async def idle_lane(*args, stop_event, **kwargs):
+        await stop_event.wait()
+
+    # Composition tests use intentionally nonfunctional storage; exercise loop
+    # ownership/shutdown here and actual storage behavior in integration tests.
+    monkeypatch.setattr("app.composition.kernel.run_scheduler_loop", idle_lane)
+    monkeypatch.setattr("app.composition.kernel.run_maintenance_loop", idle_lane)
     events: list[str] = []
     async with open_kernel_runtime(
         TEST_SETTINGS,
@@ -54,6 +61,9 @@ async def test_kernel_runtime_contains_execution_services_only(monkeypatch) -> N
         assert runtime.readiness.ready is True
         assert runtime.supervisor.pending_names == (
             "scheduler",
+            "notification-delivery",
+            "patrol-recheck",
+            "execution-recovery",
             "sandbox-pool",
             "sandbox-maintenance",
         )

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
+import { act } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolRemediation, PatrolRemediationStatus } from "@/lib/api/types";
 
 import { renderComponent } from "@/test-utils/render";
@@ -13,6 +15,7 @@ import { RemediationStatusList } from "./remediation-status";
 
 afterEach(() => {
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 const ALL_STATUSES: PatrolRemediationStatus[] = [
@@ -135,4 +138,25 @@ describe.each([
     }
     await unmount();
   });
+});
+
+it("retries only verification and replaces the retry control with the child link", async () => {
+  const original = remediationFixture({ status: "executed", recheck_dispatch_attempts: 5 });
+  const retry = vi.spyOn(patrolsApi, "retryRecheck").mockResolvedValue({
+    ...original,
+    recheck_run_id: "child-run",
+    updated_at: "2026-09-07T00:00:00Z",
+  });
+  const { container, unmount } = await renderList([original], "en", en);
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (item) => item.textContent === en.patrol.remediation.retryRecheck,
+  );
+  expect(button).toBeDefined();
+  await act(async () => {
+    button!.click();
+  });
+  expect(retry).toHaveBeenCalledWith(original.id);
+  expect(container.querySelector('a[href="/patrol-runs/child-run"]')).not.toBeNull();
+  expect(container.textContent).not.toContain(en.patrol.remediation.retryRecheck);
+  await unmount();
 });

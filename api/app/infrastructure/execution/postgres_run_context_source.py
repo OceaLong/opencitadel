@@ -15,6 +15,7 @@ from app.domain.execution.serialization import canonical_state_hash
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from app.infrastructure.execution.models import (
+    ExecutionPoisonedRunORM,
     ExecutionPoisonedScopeORM,
     ExecutionRunProjectionORM,
 )
@@ -53,6 +54,13 @@ class PostgresRunContextSource:
                         f"Run projection {run_id} unavailable: scope rebuild in flight"
                     )
                 raise RuntimePolicyIntegrityError("POLICY_SNAPSHOT_INVALID")
+            scope_key = (
+                f"team:{record.team_id}" if record.team_id else f"user:{record.owner_user_id}"
+            )
+            blocked_scope = await session.get(ExecutionPoisonedScopeORM, scope_key)
+            blocked_run = await session.get(ExecutionPoisonedRunORM, run_id)
+            if blocked_scope is not None or blocked_run is not None:
+                raise RunContextUnavailableError(f"Run {run_id} is awaiting verified recovery")
         try:
             state = RunState.model_validate(record.state)
             if state.run_id != run_id or canonical_state_hash(state) != record.state_hash:

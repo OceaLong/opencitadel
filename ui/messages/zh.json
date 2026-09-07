@@ -1331,11 +1331,15 @@
     "title": "通知",
     "scheduledJobCompleted": "定时任务「{jobName}」已完成",
     "scheduledJobStarted": "定时任务「{jobName}」已开始执行",
+    "scheduledJobFailed": "定时任务「{jobName}」执行失败",
+    "scheduledJobCancelled": "定时任务「{jobName}」已取消",
+    "scheduledJobTriggerFailed": "定时任务「{jobName}」启动失败",
     "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}",
     "approvalWaiting": "「{subject}」需要审批",
     "approvalExpired": "审批超时未处理，运行已取消（{subject}）",
     "clarificationWaiting": "任务等待你的选择：{subject}",
-    "clarificationExpired": "澄清超时未选择，任务已取消：{subject}"
+    "clarificationExpired": "澄清超时未选择，任务已取消：{subject}",
+    "executionBlocked": "执行因连续内部错误已暂停，请联系管理员进行恢复。"
   },
   "toolUse": {
     "statusRunning": "执行中",
@@ -1545,7 +1549,12 @@
         "beforeLabel": "执行前观测",
         "paramsLabel": "参数",
         "title": "修复详情"
-      }
+      },
+      "retryRecheck": "重试复检",
+      "retryRecheckError": "无法重试复检",
+      "retryRecheckQueued": "复检已排队",
+      "dispatchExhausted": "自动派发复检已重试 5 次，请排除故障后手动重试。",
+      "dispatchWaiting": "修复动作已完成，复检正在等待派发。"
     },
     "pack": {
       "boundary": "10 项检查；无修复、Shell、浏览器或任意查询能力。",
@@ -1671,7 +1680,6 @@
     "notify": {
       "add": "添加渠道",
       "addressLabel": "邮箱地址",
-      "channelArgLabel": "频道参数",
       "empty": "尚未配置通知渠道，运行结果仍会进入应用内通知收件箱。",
       "remove": "移除渠道",
       "secretLabel": "签名密钥",
@@ -1754,8 +1762,6 @@
       "enabled": "启用",
       "modelId": "模型 ID",
       "name": "任务名称",
-      "notifyChannel": "通知频道",
-      "notifyServer": "通知 MCP 服务",
       "operatorDomains": "Operator 域名",
       "operatorScope": "Operator 范围",
       "prompt": "提示词模板",
@@ -1882,5 +1888,34 @@
     "home": "首页",
     "title": "分享的交付物",
     "incompleteContentWarning": "交付物内容可能不完整（存储或生成时被截断），建议重新生成或下载沙箱附件核对。"
+  },
+  "password": {
+    "change": "修改密码",
+    "reset": "重置密码",
+    "current": "当前密码",
+    "new": "新密码",
+    "confirm": "确认新密码",
+    "mismatch": "两次输入的密码不一致。",
+    "policy": "密码须为 8–128 个字符，不能全为空白，且不能与当前密码相同。",
+    "failed": "无法更新密码。",
+    "saving": "保存中…",
+    "changeNotice": "修改密码后所有会话将退出，请使用新密码重新登录。",
+    "resetNotice": "重置密码后该用户的所有会话将退出。请通过安全渠道将新密码交给用户。",
+    "resetSuccess": "密码已重置，用户可使用新密码登录。",
+    "changeSuccess": "密码已修改，请重新登录。",
+    "recovery": "忘记密码或通过 SSO 注册？请联系平台管理员，在「管理后台 → 用户 → 重置密码」恢复本地登录。"
+  },
+  "executionRecovery": {
+    "title": "执行恢复",
+    "description": "根据原始事件重建并校验必要输入后解除隔离；缺失输入的任务继续隔离。",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "healthy": "未发现执行投影滞后或隔离任务。",
+    "lag": "投影滞后：{count}",
+    "retryAt": "自动重试时间：{time}",
+    "quarantined": "已隔离，需要管理员恢复",
+    "scope": "所属空间",
+    "reason": "恢复原因",
+    "recover": "安排校验恢复"
   }
 }

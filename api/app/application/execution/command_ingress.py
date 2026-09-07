@@ -19,7 +19,7 @@ from app.domain.execution.commands import (
 
 
 class CommandSink(Protocol):
-    async def receive(self, command: CommandEnvelope) -> bool: ...
+    async def receive(self, command: CommandEnvelope, *, max_active_runs: int = 0) -> bool: ...
 
 
 def run_command_envelope(
@@ -58,12 +58,14 @@ class CommandIngress:
         context: CommandContext,
         *,
         sink: CommandSink | None = None,
+        max_active_runs: int = 0,
     ) -> UUID:
         envelope = run_command_envelope(command, context)
-        if sink is not None:
-            await sink.receive(envelope)
-            return command.command_id
-        await self._writer.receive(envelope)
+        target = sink if sink is not None else self._writer
+        if max_active_runs > 0:
+            await target.receive(envelope, max_active_runs=max_active_runs)
+        else:
+            await target.receive(envelope)
         return command.command_id
 
 

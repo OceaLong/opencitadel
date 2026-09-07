@@ -1,10 +1,13 @@
-from sqlalchemy import func, select, update
+from datetime import timedelta
+
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.notification import Notification
+from app.domain.models.notification import Notification, NotificationDelivery
 from app.domain.repositories.notification_repository import NotificationRepository
 from app.domain.utils.notification_message import encode_notification_message
-from app.infrastructure.models.notification import NotificationModel
+from app.infrastructure.models.notification import NotificationDeliveryModel, NotificationModel
 
 
 class DBNotificationRepository(NotificationRepository):
@@ -12,8 +15,9 @@ class DBNotificationRepository(NotificationRepository):
         self.db_session = db_session
 
     async def save(self, notification: Notification) -> None:
-        self.db_session.add(
-            NotificationModel(
+        await self.db_session.execute(
+            insert(NotificationModel)
+            .values(
                 id=notification.id,
                 user_id=notification.user_id,
                 type=notification.type,
@@ -29,6 +33,7 @@ class DBNotificationRepository(NotificationRepository):
                 read=notification.read,
                 created_at=notification.created_at,
             )
+            .on_conflict_do_nothing(index_elements=["id"])
         )
 
     async def list_for_user(
@@ -69,3 +74,98 @@ class DBNotificationRepository(NotificationRepository):
         )
         result = await self.db_session.execute(stmt)
         return int(result.scalar_one() or 0)
+
+    async def enqueue_delivery(self, delivery: NotificationDelivery) -> None:
+        await self.db_session.execute(
+            insert(NotificationDeliveryModel)
+            .values(**delivery.model_dump())
+            .on_conflict_do_nothing(index_elements=["id"])
+        )
+
+    async def claim_deliveries(
+        self, *, now, limit: int, lease_seconds: int
+    ) -> list[NotificationDelivery]:
+        stmt = (
+            select(NotificationDeliveryModel)
+            .where(
+                or_(
+                    and_(
+                        NotificationDeliveryModel.status.in_(["pending", "retrying"]),
+                        NotificationDeliveryModel.next_attempt_at <= now,
+                    ),
+                    and_(
+                        NotificationDeliveryModel.status == "sending",
+                        NotificationDeliveryModel.lease_until <= now,
+                    ),
+                )
+            )
+            .order_by(NotificationDeliveryModel.next_attempt_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = (await self.db_session.execute(stmt)).scalars().all()
+        for row in rows:
+            row.status = "sending"
+            row.attempts += 1
+            row.lease_until = now + timedelta(seconds=lease_seconds)
+        await self.db_session.flush()
+        return [row.to_domain() for row in rows]
+
+    async def finish_delivery(self, delivery: NotificationDelivery) -> None:
+        await self.db_session.execute(
+            update(NotificationDeliveryModel)
+            .where(
+                NotificationDeliveryModel.id == delivery.id,
+                NotificationDeliveryModel.status == "sending",
+                NotificationDeliveryModel.attempts == delivery.attempts,
+            )
+            .values(
+                status=delivery.status,
+                last_error=delivery.last_error,
+                next_attempt_at=delivery.next_attempt_at,
+                lease_until=None,
+                sent_at=delivery.sent_at,
+            )
+        )
+
+    async def list_deliveries(self, user_id: str, *, limit: int = 50) -> list[NotificationDelivery]:
+        rows = (
+            (
+                await self.db_session.execute(
+                    select(NotificationDeliveryModel)
+                    .where(NotificationDeliveryModel.user_id == user_id)
+                    .order_by(NotificationDeliveryModel.created_at.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [row.to_domain() for row in rows]
+
+    async def retry_delivery(self, delivery_id: str, user_id: str, *, now) -> bool:
+        result = await self.db_session.execute(
+            update(NotificationDeliveryModel)
+            .where(
+                NotificationDeliveryModel.id == delivery_id,
+                NotificationDeliveryModel.user_id == user_id,
+                NotificationDeliveryModel.status.in_(["failed", "retrying"]),
+            )
+            .values(
+                status="pending",
+                next_attempt_at=now,
+                max_attempts=NotificationDeliveryModel.attempts + 5,
+                last_error=None,
+                lease_until=None,
+            )
+        )
+        return result.rowcount == 1
+
+    async def get_delivery(self, delivery_id: str, user_id: str) -> NotificationDelivery | None:
+        row = await self.db_session.scalar(
+            select(NotificationDeliveryModel).where(
+                NotificationDeliveryModel.id == delivery_id,
+                NotificationDeliveryModel.user_id == user_id,
+            )
+        )
+        return row.to_domain() if row else None

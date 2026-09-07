@@ -8,6 +8,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from statistics import median
 from uuid import NAMESPACE_URL, uuid5
@@ -34,6 +35,7 @@ from app.domain.errors import (
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunFamily
 from app.domain.models.audit_log import AuditLog
+from app.domain.models.notification import Notification
 from app.domain.models.patrol import (
     PatrolCheckResult,
     PatrolCheckStatus,
@@ -288,6 +290,88 @@ class PatrolRunService:
         )
         return run
 
+    async def trigger_recheck(self, remediation_id: str, scope: OwnerScope) -> PatrolRun:
+        """Admit verification against the original snapshot, atomically linking its owner.
+
+        Pack edits and activation state cannot change the question being verified.
+        The remediation row serializes concurrent automatic/manual dispatches; all
+        durable state and the queued admission command share a single commit.
+        """
+        async with self._uow_factory() as uow:
+            remediation = await uow.patrol.get_remediation(remediation_id, scope, for_update=True)
+            if remediation is None:
+                raise NotFoundError("Remediation not found")
+            if remediation.recheck_run_id:
+                existing = await uow.patrol.get_run(remediation.recheck_run_id, scope)
+                if existing is not None:
+                    return existing
+                raise ConflictError("Linked recheck run is unavailable")
+            if remediation.status != PatrolRemediationStatus.EXECUTED:
+                raise ConflictError("Only executed remediation can be verified")
+            original = await uow.patrol.get_run(remediation.run_id, scope)
+            if original is None:
+                raise NotFoundError("Original patrol run is unavailable")
+            # Retain the pack lock used by normal dispatch for its active-run constraint.
+            await uow.patrol.get_pack(remediation.pack_id, scope, for_update=True)
+            if await uow.patrol.get_active_run_for_pack(remediation.pack_id) is not None:
+                raise ConflictError("Pack already has an active run")
+            snapshot = deepcopy(original.pack_snapshot)
+            PatrolPackConfig.model_validate(snapshot["config"])
+            if not original.collector_capability_hash:
+                raise ConflictError("Original collector capability baseline is unavailable")
+            if self._quota_service is not None:
+                await self._quota_service.check_session_quota(
+                    snapshot.get("owner_user_id"), scope=scope, uow=uow
+                )
+            session = Session(
+                title=f"[复检] {snapshot.get('name', remediation.pack_id)}",
+                owner_user_id=snapshot.get("owner_user_id"),
+                team_id=snapshot.get("team_id"),
+                mode=SessionMode.AGENT,
+                status=SessionStatus.RUNNING,
+            )
+            key = f"recheck:{remediation.id}"
+            execution_id = run_id_for_idempotency_key(key)
+            run = PatrolRun(
+                pack_id=original.pack_id,
+                session_id=session.id,
+                execution_run_id=execution_id,
+                pack_version=original.pack_version,
+                pack_snapshot=snapshot,
+                trigger_type=PatrolTriggerType.REMEDIATION,
+                idempotency_key=key,
+                collector_capability_hash=original.collector_capability_hash,
+                status=PatrolRunStatus.RUNNING,
+                started_at=utc_now(),
+            )
+            run.submission_idempotency_key = f"{run.id}:{run.pack_version}"
+            run.pack_snapshot["submission_idempotency_key"] = run.submission_idempotency_key
+            await uow.session.save(session)
+            await uow.patrol.save_run(run)
+            remediation.recheck_run_id = run.id
+            remediation.error_code = None
+            remediation.error_message = None
+            remediation.recheck_next_attempt_at = None
+            remediation.updated_at = utc_now()
+            await uow.patrol.save_remediation(remediation)
+            await self._run_admission.admit(
+                family=RunFamily.PATROL,
+                source_entity_type="patrol_run",
+                source_entity_id=run.id,
+                owner_scope=scope,
+                private_input={
+                    "patrol_run_id": run.id,
+                    "session_id": session.id,
+                    "pack_id": run.pack_id,
+                },
+                public_input={"session_id": session.id, "pack_id": run.pack_id},
+                idempotency_key=key,
+                run_id=execution_id,
+                command_sink=uow.execution_commands,
+            )
+            await uow.commit()
+        return run
+
     async def get_run(self, run_id: str, scope: OwnerScope) -> PatrolRun:
         async with self._uow_factory() as uow:
             run = await uow.patrol.get_run(run_id, scope)
@@ -502,69 +586,9 @@ class PatrolRunService:
                 )
             await uow.patrol.save_check_results(check_results)
 
-            # A remediation recheck answers only whether its linked Finding
-            # was fixed. The recheck_run_id back-reference prevents an
-            # unrelated matching fingerprint from closing another Finding.
-            remediation_for_recheck = None
-            remediation_recheck_outcome: str | None = None
-            if run.trigger_type == PatrolTriggerType.REMEDIATION:
-                remediation_for_recheck = await uow.patrol.get_remediation_by_recheck_run_id(run.id)
-                if (
-                    remediation_for_recheck is not None
-                    and remediation_for_recheck.status == PatrolRemediationStatus.EXECUTED
-                ):
-                    original_results = await uow.patrol.list_check_results(
-                        remediation_for_recheck.run_id
-                    )
-                    original_check = next(
-                        (
-                            item
-                            for item in original_results
-                            if item.id == remediation_for_recheck.check_result_id
-                        ),
-                        None,
-                    )
-                    recheck_result = (
-                        next(
-                            (
-                                item
-                                for item in check_results
-                                if item.check_id == original_check.check_id
-                            ),
-                            None,
-                        )
-                        if original_check is not None
-                        else None
-                    )
-                    if recheck_result is not None:
-                        if recheck_result.status == PatrolCheckStatus.PASS:
-                            original_finding = await uow.patrol.get_finding(
-                                remediation_for_recheck.finding_id, for_update=True
-                            )
-                            if original_finding is not None and original_finding.status in {
-                                PatrolFindingStatus.OPEN,
-                                PatrolFindingStatus.ACKNOWLEDGED,
-                            }:
-                                original_finding.status = PatrolFindingStatus.RESOLVED
-                                original_finding.decided_by = "system:remediation"
-                                original_finding.decided_at = now
-                                original_finding.decision_reason = f"Auto-resolved: remediation {remediation_for_recheck.id} recheck run {run.id} passed"
-                                await uow.patrol.save_finding(original_finding)
-                            remediation_for_recheck.status = PatrolRemediationStatus.VERIFIED
-                            await uow.patrol.save_remediation(remediation_for_recheck)
-                            remediation_recheck_outcome = "verified"
-                            # Verification is a distinct transition owned by
-                            # the recheck Run rather than the Actuator call.
-                            self._governance_metrics.record_remediation_transition("verified")
-                        else:
-                            remediation_for_recheck.status = PatrolRemediationStatus.FAILED
-                            remediation_for_recheck.error_code = "recheck_failed"
-                            remediation_for_recheck.error_message = f"Recheck run {run.id} still reports {original_check.check_id}: {recheck_result.status.value}"
-                            await uow.patrol.save_remediation(remediation_for_recheck)
-                            remediation_recheck_outcome = "failed"
-                            # Recheck failure is likewise a distinct durable
-                            # transition and must emit its own metric.
-                            self._governance_metrics.record_remediation_transition("failed")
+            remediation_for_recheck, remediation_recheck_outcome = await self._settle_recheck(
+                uow, run, check_results, now
+            )
 
             for result in check_results:
                 if result.status not in {
@@ -605,6 +629,7 @@ class PatrolRunService:
             run = run.finalize(evaluated, now)
             await uow.patrol.save_run(run)
             await uow.session.update_status(session_id, SessionStatus.COMPLETED)
+            await self._queue_terminal_notification(uow, run)
             await uow.commit()
         await self._audit(
             "patrol_result_submitted",
@@ -626,13 +651,169 @@ class PatrolRunService:
         await self._materialize_outputs(run)
         return run
 
+    async def _settle_recheck(
+        self,
+        uow: IUnitOfWork,
+        run: PatrolRun,
+        check_results: list[PatrolCheckResult],
+        now: datetime,
+    ) -> tuple[PatrolRemediation | None, str | None]:
+        # A remediation recheck answers only whether its linked Finding
+        # was fixed. The recheck_run_id back-reference prevents an
+        # unrelated matching fingerprint from closing another Finding.
+        remediation_for_recheck = None
+        remediation_recheck_outcome: str | None = None
+        if run.trigger_type == PatrolTriggerType.REMEDIATION:
+            remediation_for_recheck = await uow.patrol.get_remediation_by_recheck_run_id(run.id)
+            if (
+                remediation_for_recheck is not None
+                and remediation_for_recheck.status == PatrolRemediationStatus.EXECUTED
+            ):
+                remediation_for_recheck.updated_at = now
+                original_results = await uow.patrol.list_check_results(
+                    remediation_for_recheck.run_id
+                )
+                original_check = next(
+                    (
+                        item
+                        for item in original_results
+                        if item.id == remediation_for_recheck.check_result_id
+                    ),
+                    None,
+                )
+                recheck_result = (
+                    next(
+                        (
+                            item
+                            for item in check_results
+                            if item.check_id == original_check.check_id
+                        ),
+                        None,
+                    )
+                    if original_check is not None
+                    else None
+                )
+                original_run = await uow.patrol.get_run(remediation_for_recheck.run_id)
+                same_definition = (
+                    original_run is not None
+                    and original_run.pack_snapshot.get("config") == run.pack_snapshot.get("config")
+                    and original_run.collector_capability_hash == run.collector_capability_hash
+                )
+                if not same_definition or recheck_result is None:
+                    remediation_for_recheck.status = PatrolRemediationStatus.FAILED
+                    remediation_for_recheck.error_code = (
+                        "recheck_definition_mismatch"
+                        if not same_definition
+                        else "recheck_result_missing"
+                    )
+                    remediation_for_recheck.error_message = (
+                        "Verification did not evaluate the original check definition"
+                    )
+                    await uow.patrol.save_remediation(remediation_for_recheck)
+                    remediation_recheck_outcome = "failed"
+                    self._governance_metrics.record_remediation_transition("failed")
+                else:
+                    if recheck_result.status == PatrolCheckStatus.PASS:
+                        original_finding = await uow.patrol.get_finding(
+                            remediation_for_recheck.finding_id, for_update=True
+                        )
+                        if original_finding is not None and original_finding.status in {
+                            PatrolFindingStatus.OPEN,
+                            PatrolFindingStatus.ACKNOWLEDGED,
+                        }:
+                            original_finding.status = PatrolFindingStatus.RESOLVED
+                            original_finding.decided_by = "system:remediation"
+                            original_finding.decided_at = now
+                            original_finding.decision_reason = f"Auto-resolved: remediation {remediation_for_recheck.id} recheck run {run.id} passed"
+                            await uow.patrol.save_finding(original_finding)
+                        remediation_for_recheck.status = PatrolRemediationStatus.VERIFIED
+                        await uow.patrol.save_remediation(remediation_for_recheck)
+                        remediation_recheck_outcome = "verified"
+                        # Verification is a distinct transition owned by
+                        # the recheck Run rather than the Actuator call.
+                        self._governance_metrics.record_remediation_transition("verified")
+                    else:
+                        remediation_for_recheck.status = PatrolRemediationStatus.FAILED
+                        remediation_for_recheck.error_code = "recheck_failed"
+                        remediation_for_recheck.error_message = f"Recheck run {run.id} still reports {original_check.check_id}: {recheck_result.status.value}"
+                        await uow.patrol.save_remediation(remediation_for_recheck)
+                        remediation_recheck_outcome = "failed"
+                        # Recheck failure is likewise a distinct durable
+                        # transition and must emit its own metric.
+                        self._governance_metrics.record_remediation_transition("failed")
+
+        return remediation_for_recheck, remediation_recheck_outcome
+
+    async def reconcile_recheck(self, remediation_id: str, scope: OwnerScope) -> None:
+        """Settle terminal children written directly by the formal projector."""
+        async with self._uow_factory() as uow:
+            remediation = await uow.patrol.get_remediation(remediation_id, scope, for_update=True)
+            if (
+                remediation is None
+                or remediation.status != PatrolRemediationStatus.EXECUTED
+                or not remediation.recheck_run_id
+            ):
+                return
+            run = await uow.patrol.get_run(remediation.recheck_run_id, scope)
+            if run is None:
+                return
+            if run.status in {PatrolRunStatus.FAILED, PatrolRunStatus.CANCELLED}:
+                changed = await self._abort_remediation_recheck(uow, run)
+                outcome = "aborted" if changed is not None else None
+            elif run.status in {PatrolRunStatus.COMPLETED, PatrolRunStatus.COMPLETED_WITH_FINDINGS}:
+                results = await uow.patrol.list_check_results(run.id)
+                changed, outcome = await self._settle_recheck(uow, run, results, utc_now())
+            else:
+                return
+            if outcome is not None:
+                await self._queue_terminal_notification(uow, run)
+                await uow.commit()
+        if outcome is not None:
+            await self._audit(
+                "patrol_remediation_recheck_completed",
+                run,
+                "system:reconciliation",
+                {"remediation_id": remediation.id, "outcome": outcome},
+            )
+
+    async def _queue_terminal_notification(self, uow: IUnitOfWork, run: PatrolRun) -> None:
+        if self._notification_service is None:
+            return
+        snapshot = run.pack_snapshot
+        owner = snapshot.get("owner_user_id")
+        if not owner:
+            return
+        name = snapshot.get("name", run.pack_id)
+        message = f'Patrol "{name}": {run.status.value}; findings={run.warn_count + run.fail_count + run.error_count}'
+        await uow.notification.save(
+            Notification(
+                id=str(uuid5(NAMESPACE_URL, f"patrol-terminal:{run.id}")),
+                user_id=owner,
+                type="patrol_complete",
+                message=message,
+                session_id=run.session_id,
+                i18n_key="notifications.patrolCompleted",
+                i18n_params={"packName": name, "status": run.status.value},
+            )
+        )
+        team = snapshot.get("team_id")
+        scope = OwnerScope.team(owner, team) if team else OwnerScope.personal(owner)
+        await self._notification_service.queue_channels(
+            uow,
+            owner,
+            scope,
+            snapshot.get("config", {}).get("notify_channels", []),
+            message,
+            idempotency_key=f"patrol-terminal:{run.id}",
+            subject=f"OpenCitadel Patrol · {name}",
+        )
+
     async def _materialize_outputs(self, run: PatrolRun) -> None:
         """Create deterministic outputs after the authoritative DB transaction."""
         try:
             async with self._uow_factory() as uow:
                 results = await uow.patrol.list_check_results(run.id)
                 findings = await uow.patrol.list_findings(run.id)
-                pack = await uow.patrol.get_pack(run.pack_id)
             if self._artifact_service is not None and run.session_id:
                 body = PatrolReportService.render(run, results, findings)
                 artifact = await self._artifact_service.write_content(
@@ -648,37 +829,6 @@ class PatrolRunService:
                     await uow.patrol.save_run(run)
                     await uow.commit()
             self._governance_metrics.observe_patrol_finalized(run, results, findings)
-            if self._notification_service is not None and pack is not None:
-                summary_message = (
-                    f'Patrol "{pack.name}" completed: {run.status.value}; '
-                    f"findings={run.warn_count + run.fail_count + run.error_count}"
-                )
-                await self._notification_service.send(
-                    pack.owner_user_id,
-                    "patrol_complete",
-                    summary_message,
-                    i18n_key="notifications.patrolCompleted",
-                    i18n_params={"packName": pack.name, "status": run.status.value},
-                    session_id=run.session_id,
-                )
-                channels = [channel.model_dump() for channel in pack.config.notify_channels]
-                if channels:
-                    pack_scope = (
-                        OwnerScope.team(pack.owner_user_id, pack.team_id)
-                        if pack.team_id
-                        else OwnerScope.personal(pack.owner_user_id)
-                    )
-                    # 渠道分发失败不能污染 Run 的产出物错误状态。
-                    try:
-                        await self._notification_service.dispatch_notify_channels(
-                            pack.owner_user_id,
-                            pack_scope,
-                            channels,
-                            summary_message,
-                            subject=f"OpenCitadel Patrol · {pack.name}",
-                        )
-                    except (OSError, RuntimeError, ValueError):
-                        logger.exception("Patrol 通知渠道分发失败 run=%s", run.id)
         except (OSError, RuntimeError, ValueError) as exc:
             logger.exception("Patrol output materialization failed run=%s", run.id)
             run.summary = {**run.summary, "output_error": str(exc)[:1000]}
@@ -713,6 +863,7 @@ class PatrolRunService:
         if remediation is None or remediation.status != PatrolRemediationStatus.EXECUTED:
             return None
         remediation.status = PatrolRemediationStatus.FAILED
+        remediation.updated_at = utc_now()
         remediation.error_code = "recheck_aborted"
         remediation.error_message = (
             f"Recheck run {run.id} terminated ({run.status.value}) before it could complete"
@@ -796,6 +947,7 @@ class PatrolRunService:
             }
             await uow.patrol.save_run(run)
             aborted_remediation = await self._abort_remediation_recheck(uow, run)
+            await self._queue_terminal_notification(uow, run)
             await uow.commit()
         await self._audit("patrol_run_finalized", run, None, run.summary)
         if aborted_remediation is not None:
@@ -847,6 +999,7 @@ class PatrolRunService:
             run.finished_at = datetime.now(UTC)
             await uow.patrol.save_run(run)
             aborted_remediation = await self._abort_remediation_recheck(uow, run)
+            await self._queue_terminal_notification(uow, run)
             if run.session_id:
                 await uow.session.update_status(run.session_id, SessionStatus.CANCELLED)
             await self._commands.submit(

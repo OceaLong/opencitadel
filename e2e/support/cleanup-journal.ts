@@ -31,6 +31,7 @@ type ResourceCleanup = {
     | "mcp-server"
     | "a2a-server"
     | "inference-model"
+    | "inference-binding"
     | "memory";
   resource_id: string;
   workspace_id?: string;

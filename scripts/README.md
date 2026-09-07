@@ -8,6 +8,8 @@ Operational and documentation maintenance scripts at the repository root.
 
 | Script | Purpose |
 |--------|---------|
+| [`backup.sh`](backup.sh) / [`backup_tool.py`](backup_tool.py) | Quiesced Compose database + object backup with integrity manifest |
+| [`verify-backup.sh`](verify-backup.sh) / [`restore.sh`](restore.sh) | Offline checks and a fresh-volume recovery drill; see the [runbook](../docs/operations/deployment.md#local-compose-backup-and-isolated-recovery) |
 | [`quickstart.sh`](quickstart.sh) | First-run onboarding: create `.env`, build `opencitadel-sandbox`, start Compose stack |
 | [`check-docs.sh`](check-docs.sh) | CI documentation checks: bilingual pairs, index coverage, stale content guards |
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh) | Own an isolated full-stack acceptance run, evidence manifest, and exact-label cleanup |

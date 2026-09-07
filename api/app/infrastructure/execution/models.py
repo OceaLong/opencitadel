@@ -410,6 +410,8 @@ class ExecutionPoisonedRunORM(Base):
     team_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reason: Mapped[str] = mapped_column(String(128), nullable=False)
     last_error: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -841,3 +843,17 @@ __all__ = [
     "ExecutionSnapshotORM",
     "ExecutionStreamOwnerORM",
 ]
+
+
+class ExecutionRecoveryRequestORM(Base):
+    """Admin intent processed only by the execution kernel, never by API workers."""
+
+    __tablename__ = "execution_recovery_requests"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    owner_scope_key: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

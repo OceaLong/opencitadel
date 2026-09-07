@@ -113,7 +113,11 @@ class DBScheduledJobRepository(ScheduledJobRepository):
         return [row.to_domain() for row in result.scalars().all()]
 
     async def get_by_last_run_session_id(self, session_id: str) -> ScheduledJob | None:
-        stmt = select(ScheduledJobModel).where(ScheduledJobModel.last_run_session_id == session_id)
+        stmt = (
+            select(ScheduledJobModel)
+            .where(ScheduledJobModel.last_run_session_id == session_id)
+            .with_for_update()
+        )
         result = await self.db_session.execute(stmt)
         row = result.scalar_one_or_none()
         return row.to_domain() if row else None

@@ -23,7 +23,12 @@ from app.domain.utils.safe_redirect import resolve_safe_redirect_path
 from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
 from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response as ApiResponse
-from app.interfaces.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+from app.interfaces.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    UserResponse,
+)
 from app.interfaces.service_dependencies import (
     get_application_urls,
     get_auth_service,
@@ -110,6 +115,25 @@ async def logout(
     cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[dict]:
     await auth_service.logout(read_host_cookie(request.cookies, REFRESH_COOKIE))
+    cookie_manager.clear_auth_cookies(response)
+    return ApiResponse.success()
+
+
+@router.post("/password", response_model=ApiResponse[dict], dependencies=[Depends(verify_csrf)])
+async def change_password(
+    response: StarletteResponse,
+    request: Request,
+    body: ChangePasswordRequest,
+    principal=Depends(get_current_principal),
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
+) -> ApiResponse[dict]:
+    await auth_service.change_password(
+        principal=principal,
+        current_password=body.current_password,
+        new_password=body.new_password,
+        ip_address=get_client_ip(request),
+    )
     cookie_manager.clear_auth_cookies(response)
     return ApiResponse.success()
 

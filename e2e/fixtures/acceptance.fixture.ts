@@ -20,7 +20,9 @@ async function loginAsAcceptanceAdmin(page: Page): Promise<void> {
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL;
   const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
   if (!email || !password) {
-    throw new Error("BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD are required");
+    throw new Error(
+      "BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD are required",
+    );
   }
   await page.goto("/login");
   const login = await appApi<UserResponse>(page, "/auth/login", {
@@ -31,6 +33,11 @@ async function loginAsAcceptanceAdmin(page: Page): Promise<void> {
   expect(login.data.global_role).toBe("admin");
   await page.goto("/");
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
+  // URL navigation finishes before AuthProvider binds the authenticated user.
+  // Wait for its rendered workspace control before tests touch browser scope.
+  await expect(
+    page.getByRole("button", { name: /Workspace|工作区/ }),
+  ).toBeVisible();
 }
 
 export const test = base.extend<AcceptanceFixtures>({

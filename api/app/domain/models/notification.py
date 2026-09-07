@@ -10,6 +10,8 @@ NotificationType = Literal[
     "job_started",
     "job_complete",
     "job_failed",
+    "execution_blocked",
+    "job_cancelled",
     "approval_waiting",
     "approval_expired",
     "clarification_waiting",
@@ -34,3 +36,20 @@ class Notification(BaseModel):
     i18n_params: dict[str, str] | None = None
     read: bool = False
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class NotificationDelivery(BaseModel):
+    id: str
+    user_id: str
+    scope: dict
+    channel: dict
+    message: str
+    subject: str = "OpenCitadel notification"
+    status: Literal["pending", "sending", "retrying", "sent", "failed"] = "pending"
+    attempts: int = 0
+    max_attempts: int = 5
+    last_error: str | None = None
+    next_attempt_at: datetime = Field(default_factory=utc_now)
+    lease_until: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    sent_at: datetime | None = None

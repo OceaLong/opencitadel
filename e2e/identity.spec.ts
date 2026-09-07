@@ -301,14 +301,9 @@ test("workspace changes isolate scoped resources and invalidate the old scope", 
     ).toContain(sessionTitle);
   } finally {
     if (sessionId) {
-      await page.evaluate((workspaceId) => {
-        window.localStorage.setItem(
-          "opencitadel-active-workspace",
-          workspaceId,
-        );
-      }, teamA.id);
       await appApi(page, `/sessions/${encodeURIComponent(sessionId)}/delete`, {
         method: "POST",
+        headers: { "X-Workspace-Id": teamA.id },
         expectStatus: [200, 404],
       });
     }

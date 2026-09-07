@@ -12,6 +12,31 @@ if [[ "$cluster_name" != opencitadel-patrol-* || "$cluster_name" =~ [Pp][Rr][Oo]
   exit 64
 fi
 created=false
+cleanup() {
+  local exit_status=$?
+  if [[ "$created" == true && "$exit_status" -ne 0 ]]; then
+    kind export logs "$repo_dir/tmp/patrol-fixture-logs" --name "$cluster_name" || true
+  fi
+  if [[ "$created" == true && "${PATROL_KEEP_DEMO_CLUSTER:-false}" != true ]]; then
+    if ! kind delete cluster --name "$cluster_name"; then
+      [[ "$exit_status" -ne 0 ]] || exit_status=1
+    fi
+  fi
+  exit "$exit_status"
+}
+trap cleanup EXIT
+pull_runtime_image() {
+  local attempt status
+  for attempt in 1 2 3; do
+    if docker pull "$1"; then
+      return 0
+    else
+      status=$?
+    fi
+    [[ "$attempt" -lt 3 ]] || return "$status"
+    sleep "$attempt"
+  done
+}
 if [[ -z "${PATROL_DEMO_CONTEXT:-}" ]]; then
   kind create cluster \
     --name "$cluster_name" \
@@ -20,7 +45,7 @@ if [[ -z "${PATROL_DEMO_CONTEXT:-}" ]]; then
   export PATROL_DEMO_CONTEXT="kind-$cluster_name"
   created=true
   for image in nginx:1.27-alpine busybox:1.36 python:3.12-alpine; do
-    docker pull "$image"
+    pull_runtime_image "$image"
     kind load docker-image --name "$cluster_name" "$image"
   done
 fi
@@ -28,14 +53,15 @@ if [[ "$PATROL_DEMO_CONTEXT" != kind-opencitadel-patrol-* ]]; then
   echo "refusing non-disposable context: $PATROL_DEMO_CONTEXT" >&2
   exit 64
 fi
-cleanup() {
-  if [[ "$created" == true && "${PATROL_KEEP_DEMO_CLUSTER:-false}" != true ]]; then
-    kind delete cluster --name "$cluster_name"
-  fi
-}
-trap cleanup EXIT
 
 "$repo_dir/deploy/patrol-demo/scripts/reset-fixture.sh"
+# Validate every resource against the actual Kubernetes API before the long
+# replay. Security scanners do not detect misplaced fields in valid YAML.
+for manifest in "$repo_dir"/deploy/patrol-demo/manifests/*.yaml \
+                "$repo_dir"/deploy/patrol-demo/fixtures/*/*.yaml; do
+  kubectl --context "$PATROL_DEMO_CONTEXT" apply --dry-run=server --validate=strict \
+    -f "$manifest" > /dev/null
+done
 "$repo_dir/deploy/patrol-demo/scripts/assert-read-only.sh"
 "$repo_dir/deploy/patrol-demo/scripts/assert-actuator-write-scope.sh"
 
@@ -51,7 +77,10 @@ deploy_ops_actuator() {
   # stays runnable standalone, same as the nginx/busybox/python images above.
   mkdir -p "$repo_dir/tmp"
   echo "building opencitadel-ops-actuator:latest (log: tmp/ops-actuator-build.log)" >&2
-  if ! docker build -t opencitadel-ops-actuator:latest "$repo_dir/ops-actuator" \
+  if ! docker build -t opencitadel-ops-actuator:latest \
+      --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.org/simple/}" \
+      --build-arg "UV_INDEX_URL=${UV_INDEX_URL:-https://pypi.org/simple/}" \
+      "$repo_dir/ops-actuator" \
       > "$repo_dir/tmp/ops-actuator-build.log" 2>&1; then
     echo "opencitadel-ops-actuator image build failed; see tmp/ops-actuator-build.log" >&2
     tail -n 100 "$repo_dir/tmp/ops-actuator-build.log" >&2
@@ -66,6 +95,22 @@ deploy_ops_actuator() {
   kubectl --context "$PATROL_DEMO_CONTEXT" create namespace opencitadel --dry-run=client -o yaml \
     | kubectl --context "$PATROL_DEMO_CONTEXT" apply -f -
   kubectl --context "$PATROL_DEMO_CONTEXT" apply -k "$repo_dir/deploy/kustomize/ops-actuator"
+
+  # The production base intentionally has an empty secret. Generate a fresh
+  # fixture-only credential and send it to Kubernetes through stdin, not logs.
+  PATROL_ACTUATOR_TOKEN=$(uv run --project "$repo_dir/ops-collector" --no-sync python \
+    -c 'import secrets; print(secrets.token_urlsafe(48))')
+  export PATROL_ACTUATOR_TOKEN
+  uv run --project "$repo_dir/ops-collector" --no-sync python - <<'PY' \
+    | kubectl --context "$PATROL_DEMO_CONTEXT" apply -f -
+import json
+import os
+print(json.dumps({
+    "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+    "metadata": {"name": "opencitadel-ops-actuator-secret", "namespace": "opencitadel"},
+    "stringData": {"OPS_ACTUATOR_TOKEN": os.environ["PATROL_ACTUATOR_TOKEN"]},
+}))
+PY
 
   # Kustomize's base env targets the production `opencitadel` namespace;
   # narrow it to the disposable fixture namespace and register the one

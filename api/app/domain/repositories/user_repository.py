@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from app.domain.models.user import User
 
@@ -52,3 +53,18 @@ class UserRepository(ABC):
 
     @abstractmethod
     async def delete_by_id(self, user_id: str) -> None: ...
+
+    @abstractmethod
+    async def replace_password(
+        self,
+        user_id: str,
+        *,
+        expected_hash: str | None,
+        expected_version: int,
+        password_hash: str,
+    ) -> bool:
+        """Compare-and-swap credentials, atomically incrementing token_version."""
+        ...
+
+    @abstractmethod
+    async def update_last_login(self, user_id: str, last_login_at: datetime) -> None: ...

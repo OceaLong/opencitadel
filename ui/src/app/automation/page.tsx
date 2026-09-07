@@ -13,6 +13,7 @@ import {
 import { JobRunsDialog } from "@/components/automation/job-runs-dialog";
 import { JobsTable } from "@/components/automation/jobs-table";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { NotificationDeliveries } from "@/components/notification-deliveries";
 import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Button } from "@/components/ui/button";
@@ -307,6 +308,7 @@ export default function AutomationPage() {
         jobId={runsJob?.id ?? null}
         jobName={runsJob?.name ?? ""}
       />
+      <NotificationDeliveries />
     </ScrollablePageContent>
   );
 }

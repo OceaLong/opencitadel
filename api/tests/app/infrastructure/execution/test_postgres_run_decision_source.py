@@ -250,3 +250,143 @@ async def test_hundred_waiting_approvals_do_not_starve_a_new_queued_run() -> Non
                 )
             )
             await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_db_schema")
+async def test_planner_retries_are_durable_bounded_and_verified_recovery_rearms():
+    from datetime import timedelta
+
+    from app.domain.models.scope import OwnerScope
+
+    run_id = uuid4()
+    state = _state(run_id, uuid4()).model_copy(update={"owner_user_id": f"recovery-{run_id}"})
+    now = datetime.now(UTC)
+    async with execution_admin_session() as session:
+        session.add(_projection(state, updated_at=now, state_hash=canonical_state_hash(state)))
+        await session.commit()
+    engine = create_async_engine(execution_kernel_database_uri())
+    sessions = authenticated_session_factory(
+        engine, signing_secret=load_deployment_settings().session_secret
+    )
+    source = PostgresRunDecisionSource(
+        session_factory=sessions, authorization=AuthorizationContext.system("recovery-test")
+    )
+    try:
+        for attempt in range(1, 4):
+            candidates = await source.load_ready(limit=1000)
+            assert run_id in [candidate.state.run_id for candidate in candidates]
+            await source.failed(run_id, error="ValueError", now=datetime.now(UTC))
+            async with execution_admin_session() as session:
+                failure = await session.get(ExecutionPoisonedRunORM, run_id)
+                assert failure.failure_count == attempt
+                assert (failure.next_attempt_at is None) == (attempt == 3)
+                assert run_id not in [c.state.run_id for c in await source.load_ready(limit=1000)]
+                if attempt < 3:
+                    projection = await session.get(ExecutionRunProjectionORM, run_id)
+                    failure.next_attempt_at = projection.decision_due_at = now - timedelta(
+                        seconds=1
+                    )
+                    await session.commit()
+        # Rebuild supplies an intact projection and restores readiness; recovery
+        # verifies its hash and needed payloads before clearing the marker.
+        async with execution_admin_session() as session:
+            projection = await session.get(ExecutionRunProjectionORM, run_id)
+            projection.decision_due_at = now
+            await session.commit()
+        assert await source.recover_scope(OwnerScope.personal(state.owner_user_id)) == (run_id,)
+        assert run_id in [c.state.run_id for c in await source.load_ready(limit=1000)]
+    finally:
+        async with execution_admin_session() as session:
+            await session.execute(
+                delete(ExecutionPoisonedRunORM).where(ExecutionPoisonedRunORM.run_id == run_id)
+            )
+            await session.execute(
+                delete(ExecutionRunProjectionORM).where(ExecutionRunProjectionORM.run_id == run_id)
+            )
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_db_schema")
+async def test_scope_recovery_keeps_missing_decision_payload_quarantined_and_releases_valid_run():
+    from app.domain.execution.run import decision_data_digest
+    from app.domain.models.scope import OwnerScope
+
+    missing_id, valid_id, missing_activity_id = uuid4(), uuid4(), uuid4()
+    owner_id = f"payload-recovery-{uuid4()}"
+    missing_state = _state(missing_id, uuid4()).model_copy(
+        update={
+            "owner_user_id": owner_id,
+            "activity_results": (
+                (
+                    missing_activity_id,
+                    0,
+                    "object://missing-decision-result",
+                    "A model decision whose required payload was lost",
+                    decision_data_digest({"tool_calls": [{"name": "required-tool"}]}),
+                ),
+            ),
+        }
+    )
+    valid_state = _state(valid_id, uuid4()).model_copy(update={"owner_user_id": owner_id})
+    run_ids = [missing_id, valid_id]
+    engine = create_async_engine(execution_kernel_database_uri())
+    sessions = authenticated_session_factory(
+        engine, signing_secret=load_deployment_settings().session_secret
+    )
+    source = PostgresRunDecisionSource(
+        session_factory=sessions,
+        authorization=AuthorizationContext.system("required-payload-recovery-test"),
+    )
+    try:
+        async with execution_admin_session() as session:
+            for state in (missing_state, valid_state):
+                # Both projections have valid hashes: rebuilding the missing
+                # payload Run's projection alone must not authorize its release.
+                session.add(
+                    _projection(state, updated_at=NOW, state_hash=canonical_state_hash(state))
+                )
+                session.add(
+                    ExecutionPoisonedRunORM(
+                        run_id=state.run_id,
+                        owner_user_id=owner_id,
+                        team_id=None,
+                        reason="planner_error",
+                        last_error="Previously isolated",
+                        failure_count=3,
+                        next_attempt_at=None,
+                        first_seen_at=NOW,
+                        last_seen_at=NOW,
+                    )
+                )
+            await session.commit()
+
+        recovered = await source.recover_scope(OwnerScope.personal(owner_id))
+        assert recovered == (valid_id,)
+        async with execution_admin_session() as session:
+            missing = await session.get(ExecutionPoisonedRunORM, missing_id)
+            assert missing is not None
+            assert missing.next_attempt_at is None
+            assert str(missing_activity_id) in missing.last_error
+            assert "decision payload" in missing.last_error
+            assert "missing" in missing.last_error
+            assert await session.get(ExecutionPoisonedRunORM, valid_id) is None
+
+        ready_ids = {candidate.state.run_id for candidate in await source.load_ready(limit=1000)}
+        assert valid_id in ready_ids
+        assert missing_id not in ready_ids
+        assert await source.recover_scope(OwnerScope.personal(owner_id)) == ()
+    finally:
+        await engine.dispose()
+        async with execution_admin_session() as session:
+            await session.execute(
+                delete(ExecutionPoisonedRunORM).where(ExecutionPoisonedRunORM.run_id.in_(run_ids))
+            )
+            await session.execute(
+                delete(ExecutionRunProjectionORM).where(
+                    ExecutionRunProjectionORM.run_id.in_(run_ids)
+                )
+            )
+            await session.commit()

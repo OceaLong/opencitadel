@@ -47,10 +47,16 @@ spec:
     metadata:
       labels: {app: patrol-mock}
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: mock
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
           image: python:3.12-alpine
-          command: ["python", "/script/server.py"]
+          command: ["python", "-B", "/script/server.py"]
           ports: [{containerPort: 8080}]
           volumeMounts:
             - {name: script, mountPath: /script, readOnly: true}

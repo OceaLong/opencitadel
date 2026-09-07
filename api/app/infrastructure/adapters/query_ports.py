@@ -27,6 +27,7 @@ from app.infrastructure.models.llm_token_usage import LLMTokenUsageORM
 from app.infrastructure.models.patrol import (
     PatrolCheckResultModel,
     PatrolFindingModel,
+    PatrolRemediationModel,
     PatrolRunModel,
 )
 from app.infrastructure.models.session import SessionModel
@@ -387,10 +388,22 @@ class SqlAlchemyPatrolRetentionStore(_SqlAlchemyQuery):
     ) -> PatrolRetentionResult:
         async with self._session_factory() as session:
             await configure_session_authorization(session)
+            active_remediation = PatrolRemediationModel.status.notin_(
+                ("verified", "failed", "cancelled")
+            )
             finding_ids = list(
                 await session.scalars(
                     select(PatrolFindingModel.id)
-                    .where(PatrolFindingModel.last_seen_at < finding_cutoff)
+                    .where(
+                        PatrolFindingModel.last_seen_at < finding_cutoff,
+                        PatrolFindingModel.status.notin_(("open", "acknowledged")),
+                        ~select(PatrolRemediationModel.id)
+                        .where(
+                            active_remediation,
+                            PatrolRemediationModel.finding_id == PatrolFindingModel.id,
+                        )
+                        .exists(),
+                    )
                     .order_by(PatrolFindingModel.last_seen_at.asc())
                     .limit(limit)
                 )
@@ -407,6 +420,18 @@ class SqlAlchemyPatrolRetentionStore(_SqlAlchemyQuery):
                         PatrolRunModel.finished_at.is_not(None),
                         PatrolRunModel.finished_at < evidence_cutoff,
                         PatrolCheckResultModel.evidence_refs != [],
+                        ~select(PatrolRemediationModel.id)
+                        .where(
+                            active_remediation,
+                            PatrolRemediationModel.check_result_id == PatrolCheckResultModel.id,
+                        )
+                        .exists(),
+                        ~select(PatrolFindingModel.id)
+                        .where(
+                            PatrolFindingModel.status.in_(("open", "acknowledged")),
+                            PatrolFindingModel.check_result_id == PatrolCheckResultModel.id,
+                        )
+                        .exists(),
                     )
                     .order_by(PatrolRunModel.finished_at.asc())
                     .limit(limit)
@@ -424,6 +449,19 @@ class SqlAlchemyPatrolRetentionStore(_SqlAlchemyQuery):
                     .where(
                         PatrolRunModel.finished_at.is_not(None),
                         PatrolRunModel.finished_at < run_cutoff,
+                        ~select(PatrolRemediationModel.id)
+                        .where(
+                            active_remediation,
+                            (PatrolRemediationModel.run_id == PatrolRunModel.id)
+                            | (PatrolRemediationModel.recheck_run_id == PatrolRunModel.id),
+                        )
+                        .exists(),
+                        ~select(PatrolFindingModel.id)
+                        .where(
+                            PatrolFindingModel.status.in_(("open", "acknowledged")),
+                            PatrolFindingModel.run_id == PatrolRunModel.id,
+                        )
+                        .exists(),
                     )
                     .order_by(PatrolRunModel.finished_at.asc())
                     .limit(limit)

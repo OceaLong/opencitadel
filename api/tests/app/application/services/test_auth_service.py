@@ -54,6 +54,9 @@ class _FakeUserRepo:
                 return user
         return None
 
+    async def update_last_login(self, user_id, last_login_at):
+        self.users[user_id].last_login_at = last_login_at
+
     async def save(self, user: User) -> None:
         self.users[user.id] = user
 

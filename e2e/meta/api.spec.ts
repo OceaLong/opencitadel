@@ -46,61 +46,71 @@ test("uses the authenticated browser transport and preserves negative status", a
   });
 });
 
-test("mirrors the product workspace and CSRF headers in browser API calls", async () => {
-  const previousDocument = globalThis.document;
-  const previousWindow = globalThis.window;
-  const previousFetch = globalThis.fetch;
-  let requestHeaders: HeadersInit | undefined;
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: { cookie: "csrf_token=csrf-value" },
-  });
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      localStorage: {
-        getItem: (key: string) =>
-          key === "opencitadel-active-workspace" ? "team-1" : null,
-      },
-    },
-  });
-  globalThis.fetch = (async (
-    _input: string | URL | Request,
-    init?: RequestInit,
-  ) => {
-    requestHeaders = init?.headers;
-    return {
-      status: 200,
-      json: async () => ({ code: 200, msg: "success", data: null }),
-    } as Response;
-  }) as typeof fetch;
-  const page = {
-    evaluate: async <TArgument, TResult>(
-      callback: (value: TArgument) => TResult | Promise<TResult>,
-      value: TArgument,
-    ) => callback(value),
-  } as unknown as Page;
-
-  try {
-    await appApi(page, "/sessions", {
-      method: "POST",
-      body: { title: "scope" },
-      headers: { "Idempotency-Key": "acceptance-request-1" },
-    });
-    expect(requestHeaders).toMatchObject({
-      "X-CSRF-Token": "csrf-value",
-      "X-Workspace-Id": "team-1",
-      "Idempotency-Key": "acceptance-request-1",
-    });
-  } finally {
+for (const explicitWorkspace of [undefined, "team-pinned"]) {
+  test(`preserves workspace and CSRF headers with explicit scope ${explicitWorkspace ?? "browser"}`, async () => {
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    const previousFetch = globalThis.fetch;
+    let requestHeaders: HeadersInit | undefined;
     Object.defineProperty(globalThis, "document", {
       configurable: true,
-      value: previousDocument,
+      value: { cookie: "csrf_token=csrf-value" },
     });
     Object.defineProperty(globalThis, "window", {
       configurable: true,
-      value: previousWindow,
+      value: {
+        localStorage: {
+          getItem: (key: string) =>
+            key === "opencitadel-active-workspace"
+              ? // Simulate AuthProvider clearing the mirror after test setup.
+                explicitWorkspace
+                ? ""
+                : "team-1"
+              : null,
+        },
+      },
     });
-    globalThis.fetch = previousFetch;
-  }
-});
+    globalThis.fetch = (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      requestHeaders = init?.headers;
+      return {
+        status: 200,
+        json: async () => ({ code: 200, msg: "success", data: null }),
+      } as Response;
+    }) as typeof fetch;
+    const page = {
+      evaluate: async <TArgument, TResult>(
+        callback: (value: TArgument) => TResult | Promise<TResult>,
+        value: TArgument,
+      ) => callback(value),
+    } as unknown as Page;
+
+    try {
+      await appApi(page, "/sessions", {
+        method: "POST",
+        body: { title: "scope" },
+        headers: {
+          "Idempotency-Key": "acceptance-request-1",
+          ...(explicitWorkspace ? { "X-Workspace-Id": explicitWorkspace } : {}),
+        },
+      });
+      expect(requestHeaders).toMatchObject({
+        "X-CSRF-Token": "csrf-value",
+        "X-Workspace-Id": explicitWorkspace ?? "team-1",
+        "Idempotency-Key": "acceptance-request-1",
+      });
+    } finally {
+      Object.defineProperty(globalThis, "document", {
+        configurable: true,
+        value: previousDocument,
+      });
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: previousWindow,
+      });
+      globalThis.fetch = previousFetch;
+    }
+  });
+}

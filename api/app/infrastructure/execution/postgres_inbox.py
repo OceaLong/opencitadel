@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import delete, select
+from sqlalchemy import String, case, cast, delete, func, select, text, union
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.execution.commands import CommandEnvelope, normalize_utc
-from app.domain.execution.errors import CommandInProgressError
+from app.domain.execution.errors import AdmissionLimitExceededError, CommandInProgressError
 from app.domain.execution.serialization import canonical_json_bytes
-from app.infrastructure.execution.models import ExecutionCommandInboxORM
+from app.infrastructure.execution.models import ExecutionCommandInboxORM, ExecutionRunProjectionORM
 
 if TYPE_CHECKING:
     from app.application.execution.orchestrator import CommandResult
@@ -47,7 +47,34 @@ class PostgresInbox:
         self._max_payload_bytes = max_payload_bytes
         self._max_claim_attempts = max_claim_attempts
 
-    async def receive(self, command: CommandEnvelope) -> bool:
+    async def receive(self, command: CommandEnvelope, *, max_active_runs: int = 0) -> bool:
+        if max_active_runs < 0:
+            raise ValueError("max_active_runs must not be negative")
+        if max_active_runs and command.command_type == "CreateRun":
+            # The inbox row itself reserves capacity. Serializing this check
+            # and insert per owner closes both the enqueue/projection gap and
+            # concurrent request race without a second reservation lifecycle.
+            scope_key = (
+                f"team:{command.team_id}" if command.team_id else f"user:{command.owner_user_id}"
+            )
+            lock_id = int.from_bytes(
+                hashlib.sha256(f"admission:{scope_key}".encode()).digest()[:8], "big", signed=True
+            )
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_id}
+            )
+            existing = await self._session.scalar(
+                select(ExecutionCommandInboxORM).where(
+                    ExecutionCommandInboxORM.command_id == command.command_id
+                )
+            )
+            if existing is not None:
+                self._assert_same_command(existing, command)
+                return False
+            active = await self._count_reserved_root_runs(command)
+            if active >= max_active_runs:
+                raise AdmissionLimitExceededError(limit=max_active_runs, active=active)
+
         if command.payload_digest is not None:
             raise ValueError("an omitted-payload envelope cannot create an inbox row")
         payload_bytes = canonical_json_bytes(command.payload)
@@ -89,6 +116,58 @@ class PostgresInbox:
             raise RuntimeError("command inbox conflict row is not visible")
         self._assert_same_command(record, command)
         return False
+
+    async def _count_reserved_root_runs(self, command: CommandEnvelope) -> int:
+        inbox = ExecutionCommandInboxORM
+        projection = ExecutionRunProjectionORM
+
+        def scope(model):
+            if command.team_id:
+                return model.team_id == command.team_id
+            return (model.owner_user_id == command.owner_user_id) & model.team_id.is_(None)
+
+        # A linked workflow occupies one slot while any member is pending or
+        # active, even after its original parent has terminated. This includes
+        # remediation proposed against an already completed Patrol run.
+        projection_group = case(
+            (projection.parent_run_id.is_(None), cast(projection.run_id, String)),
+            else_=cast(projection.correlation_id, String),
+        )
+        inbox_group = case(
+            (inbox.payload["parent_run_id"].astext.is_(None), inbox.stream_id),
+            else_=cast(inbox.correlation_id, String),
+        )
+        active_projection = select(projection_group.label("group_id")).where(
+            scope(projection),
+            projection.terminal.is_(False),
+        )
+        pending = (
+            select(inbox_group.label("group_id"))
+            .outerjoin(
+                projection,
+                cast(projection.run_id, String) == inbox.stream_id,
+            )
+            .where(
+                scope(inbox),
+                inbox.command_type == "CreateRun",
+                inbox.stream_type == "run",
+                inbox.status.in_(("received", "processing", "accepted")),
+                projection.run_id.is_(None) | projection.terminal.is_(False),
+            )
+        )
+        reserved = union(active_projection, pending).subquery()
+        group_id = (
+            str(command.correlation_id)
+            if command.payload.get("parent_run_id")
+            else command.stream_id
+        )
+        # Re-admitting the same workflow, including another command for an
+        # already pending Run, does not require a second slot.
+        existing_group = func.max(case((reserved.c.group_id == group_id, 1), else_=0))
+        # Existing groups remain admissible even if an operator lowered the
+        # ceiling below current usage; these commands consume no new capacity.
+        needed_capacity = case((existing_group == 1, 0), else_=func.count())
+        return int(await self._session.scalar(select(needed_capacity).select_from(reserved)) or 0)
 
     async def claim(
         self,
@@ -268,6 +347,19 @@ class PostgresInbox:
                 ExecutionCommandInboxORM.status.in_(statuses),
                 ExecutionCommandInboxORM.processed_at.is_not(None),
                 ExecutionCommandInboxORM.processed_at < resolved_before,
+                # Keep admission intent until its Run is terminal. Besides
+                # projection lag, this protects capacity during projection rebuilds.
+                ~(
+                    (ExecutionCommandInboxORM.status == "accepted")
+                    & (ExecutionCommandInboxORM.command_type == "CreateRun")
+                    & ~select(ExecutionRunProjectionORM.run_id)
+                    .where(
+                        cast(ExecutionRunProjectionORM.run_id, String)
+                        == ExecutionCommandInboxORM.stream_id,
+                        ExecutionRunProjectionORM.terminal.is_(True),
+                    )
+                    .exists()
+                ),
             )
             .limit(limit)
         )

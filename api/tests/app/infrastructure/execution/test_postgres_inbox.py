@@ -502,3 +502,214 @@ async def test_batch_preclaim_generations_do_not_consume_the_delivery_budget(
     assert final.status == "completed"
     assert final.result is not None
     assert final.result.rejection_code == "COMMAND_DEAD_LETTERED"
+
+
+@pytest.mark.asyncio
+async def test_admission_capacity_counts_pending_commands_and_idempotent_retry(inbox_database):
+    from app.domain.execution.errors import AdmissionLimitExceededError
+
+    session_factory, command_ids = inbox_database
+    owner = f"capacity-{uuid4()}"
+    first = command().model_copy(
+        update={
+            "command_type": "CreateRun",
+            "stream_type": "run",
+            "stream_id": str(uuid4()),
+            "owner_user_id": owner,
+            "payload": {"parent_run_id": None},
+        }
+    )
+    second = first.model_copy(update={"command_id": uuid4(), "stream_id": str(uuid4())})
+    command_ids.extend([first.command_id, second.command_id])
+    async with session_factory() as session:
+        await configure_session_authorization(session, AuthorizationContext.system("capacity-test"))
+        inbox = PostgresInbox(session)
+        assert await inbox.receive(first, max_active_runs=1)
+        await session.commit()
+    async with session_factory() as session:
+        await configure_session_authorization(session, AuthorizationContext.system("capacity-test"))
+        inbox = PostgresInbox(session)
+        assert not await inbox.receive(first, max_active_runs=1)
+        with pytest.raises(AdmissionLimitExceededError):
+            await inbox.receive(second, max_active_runs=1)
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_admission_lock_precedes_capacity_check_and_insert():
+    from unittest.mock import AsyncMock
+
+    from app.domain.execution.errors import AdmissionLimitExceededError
+
+    candidate = command().model_copy(
+        update={
+            "command_type": "CreateRun",
+            "stream_type": "run",
+            "payload": {"parent_run_id": None},
+        }
+    )
+    statements = []
+
+    async def execute(statement, *args):
+        statements.append(str(statement))
+
+    session = SimpleNamespace(execute=execute, scalar=AsyncMock(side_effect=[None, 1]))
+    with pytest.raises(AdmissionLimitExceededError):
+        await PostgresInbox(session).receive(candidate, max_active_runs=1)
+    assert "pg_advisory_xact_lock" in statements[0]
+    assert session.scalar.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_child_run_does_not_reserve_another_root_slot():
+    from unittest.mock import AsyncMock
+
+    candidate = command().model_copy(
+        update={
+            "command_type": "CreateRun",
+            "stream_type": "run",
+            "payload": {"parent_run_id": str(uuid4())},
+        }
+    )
+    session = SimpleNamespace(
+        execute=AsyncMock(), scalar=AsyncMock(side_effect=[None, 0, candidate.command_id])
+    )
+    assert await PostgresInbox(session).receive(candidate, max_active_runs=1)
+    session.execute.assert_awaited_once()
+    assert session.scalar.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_concurrent_root_admission_has_one_winner_and_rejection_releases_capacity(
+    inbox_database,
+):
+    import asyncio
+
+    from app.domain.execution.errors import AdmissionLimitExceededError
+
+    session_factory, command_ids = inbox_database
+    owner = f"capacity-race-{uuid4()}"
+    candidates = [
+        command().model_copy(
+            update={
+                "command_type": "CreateRun",
+                "stream_type": "run",
+                "stream_id": str(uuid4()),
+                "owner_user_id": owner,
+                "payload": {"parent_run_id": None},
+            }
+        )
+        for _ in range(2)
+    ]
+    command_ids.extend(item.command_id for item in candidates)
+
+    async def admit(candidate):
+        async with session_factory() as session:
+            await configure_session_authorization(
+                session, AuthorizationContext.system("capacity-race")
+            )
+            try:
+                await PostgresInbox(session).receive(candidate, max_active_runs=1)
+                await session.commit()
+                return candidate
+            except AdmissionLimitExceededError:
+                await session.rollback()
+                return None
+
+    results = await asyncio.gather(*(admit(item) for item in candidates))
+    winners = [item for item in results if item is not None]
+    assert len(winners) == 1
+    async with session_factory() as session:
+        await configure_session_authorization(session, AuthorizationContext.system("capacity-race"))
+        row = await session.get(ExecutionCommandInboxORM, winners[0].command_id)
+        row.status = "rejected"
+        await session.commit()
+    loser = next(item for item in candidates if item.command_id != winners[0].command_id)
+    assert await admit(loser) is not None
+
+
+@pytest.mark.asyncio
+async def test_existing_workflow_uses_one_slot_and_child_retains_it_after_parent_finishes(
+    inbox_database,
+):
+    from app.domain.execution.errors import AdmissionLimitExceededError
+
+    session_factory, command_ids = inbox_database
+    owner = f"workflow-capacity-{uuid4()}"
+    parent_id = uuid4()
+    parent = command().model_copy(
+        update={
+            "command_type": "CreateRun",
+            "stream_type": "run",
+            "stream_id": str(parent_id),
+            "owner_user_id": owner,
+            "correlation_id": parent_id,
+            "payload": {"parent_run_id": None},
+        }
+    )
+    duplicate = parent.model_copy(update={"command_id": uuid4()})
+    child = parent.model_copy(
+        update={
+            "command_id": uuid4(),
+            "stream_id": str(uuid4()),
+            "payload": {"parent_run_id": str(parent_id)},
+        }
+    )
+    unrelated = parent.model_copy(update={"command_id": uuid4(), "stream_id": str(uuid4())})
+    command_ids.extend(item.command_id for item in (parent, duplicate, child, unrelated))
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("workflow-capacity")
+        )
+        inbox = PostgresInbox(session)
+        assert await inbox.receive(parent, max_active_runs=1)
+        assert await inbox.receive(duplicate, max_active_runs=1)
+        assert await inbox.receive(child, max_active_runs=1)
+        await session.commit()
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("workflow-capacity")
+        )
+        # Only the child remains pending; terminal/rejected parents no longer contribute.
+        for item in (parent, duplicate):
+            row = await session.get(ExecutionCommandInboxORM, item.command_id)
+            row.status = "rejected"
+        await session.commit()
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("workflow-capacity")
+        )
+        with pytest.raises(AdmissionLimitExceededError):
+            await PostgresInbox(session).receive(unrelated, max_active_runs=1)
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_retention_keeps_accepted_admission_until_projection_exists(inbox_database):
+    session_factory, command_ids = inbox_database
+    candidate = command().model_copy(
+        update={
+            "command_type": "CreateRun",
+            "stream_type": "run",
+            "stream_id": str(uuid4()),
+            "payload": {"parent_run_id": None},
+        }
+    )
+    command_ids.append(candidate.command_id)
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("capacity-retention")
+        )
+        inbox = PostgresInbox(session)
+        await inbox.receive(candidate)
+        row = await session.get(ExecutionCommandInboxORM, candidate.command_id)
+        row.status = "accepted"
+        row.processed_at = NOW - timedelta(days=20)
+        await session.commit()
+    async with session_factory() as session:
+        await configure_session_authorization(
+            session, AuthorizationContext.system("capacity-retention")
+        )
+        await PostgresInbox(session).purge_completed(before=NOW, limit=1000)
+        assert await session.get(ExecutionCommandInboxORM, candidate.command_id) is not None
+        await session.commit()

@@ -55,12 +55,12 @@ class UserORM(Base):
     def update_from_domain(self, user: User) -> None:
         self.email = user.email
         self.username = user.username
-        self.password_hash = user.password_hash
+        # Credentials are replaced only through the repository compare-and-swap.
         self.display_name = user.display_name
         self.avatar_url = user.avatar_url
         self.global_role = user.global_role.value
         self.status = user.status.value
-        self.token_version = user.token_version
+        self.token_version = max(self.token_version, user.token_version)
         self.updated_at = user.updated_at
         self.last_login_at = user.last_login_at
 

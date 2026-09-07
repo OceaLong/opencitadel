@@ -9,11 +9,18 @@ from redis.exceptions import RedisError
 
 from app.application.ports.crypto import PasswordHashPort, TokenCodecError, TokenCodecPort
 from app.application.security.authorization_context import authorization_scope
-from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
+from app.domain.errors import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.invitation import InvitationType
 from app.domain.models.refresh_token import RefreshToken
+from app.domain.models.scope import Principal
 from app.domain.models.user import User, UserStatus
 from app.domain.repositories.uow import IUnitOfWork
 
@@ -164,6 +171,7 @@ class AuthService:
         username: str,
         password: str,
     ) -> User:
+        self.validate_password(password)
         with authorization_scope(AuthorizationContext.system("auth")):
             async with self._uow_factory() as uow:
                 invitation = await uow.invitation.get_by_token(invite_token)
@@ -219,7 +227,7 @@ class AuthService:
                 if user.status != UserStatus.ACTIVE:
                     raise UnauthorizedError("账号已被禁用")
                 user.last_login_at = datetime.now(UTC)
-                await uow.user.save(user)
+                await uow.user.update_last_login(user.id, user.last_login_at)
                 tokens = await self._issue_tokens(
                     uow, user, user_agent=user_agent, ip_address=ip_address
                 )
@@ -283,6 +291,106 @@ class AuthService:
             await self._throttle_store.reset(identity)
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("login throttle store unavailable on reset: %s", exc)
+
+    @staticmethod
+    def validate_password(password: str) -> None:
+        if not 8 <= len(password) <= 128 or not password.strip():
+            raise BadRequestError("密码须为 8–128 个字符，且不能全为空白")
+
+    async def change_password(
+        self,
+        *,
+        principal: Principal,
+        current_password: str,
+        new_password: str,
+        ip_address: str = "",
+    ) -> None:
+        await self._replace_password(
+            principal=principal,
+            user_id=principal.user_id,
+            current_password=current_password,
+            new_password=new_password,
+            admin_reset=False,
+            ip_address=ip_address,
+        )
+
+    async def reset_password(
+        self,
+        *,
+        principal: Principal,
+        user_id: str,
+        new_password: str,
+        ip_address: str = "",
+    ) -> None:
+        if not principal.is_admin:
+            raise ForbiddenError("需要管理员权限", error_key="errors.adminRequired")
+        await self._replace_password(
+            principal=principal,
+            user_id=user_id,
+            current_password=None,
+            new_password=new_password,
+            admin_reset=True,
+            ip_address=ip_address,
+        )
+
+    async def _replace_password(
+        self,
+        *,
+        principal: Principal,
+        user_id: str,
+        current_password: str | None,
+        new_password: str,
+        admin_reset: bool,
+        ip_address: str,
+    ) -> None:
+        self.validate_password(new_password)
+        with authorization_scope(AuthorizationContext.system("auth-password")):
+            async with self._uow_factory() as uow:
+                actor = await uow.user.get_by_id(principal.user_id)
+                if (
+                    not actor
+                    or not actor.is_active
+                    or actor.token_version != principal.token_version
+                ):
+                    raise UnauthorizedError("账号或会话已失效")
+                if admin_reset and not actor.is_admin:
+                    raise ForbiddenError("需要管理员权限", error_key="errors.adminRequired")
+                user = actor if user_id == actor.id else await uow.user.get_by_id(user_id)
+                if not user:
+                    raise NotFoundError("用户不存在")
+                if not admin_reset and (
+                    not user.password_hash
+                    or not self._password_hasher.verify(current_password or "", user.password_hash)
+                ):
+                    raise UnauthorizedError("当前密码错误；无本地密码请联系管理员重置")
+                if user.password_hash and self._password_hasher.verify(
+                    new_password, user.password_hash
+                ):
+                    raise BadRequestError("新密码不能与当前密码相同")
+                changed = await uow.user.replace_password(
+                    user.id,
+                    expected_hash=user.password_hash,
+                    expected_version=user.token_version,
+                    password_hash=self._password_hasher.hash(new_password),
+                )
+                if not changed:
+                    raise ConflictError("账号凭据已变更，请重新登录后重试")
+                await uow.refresh_token.revoke_all_for_user(user.id)
+                await uow.audit.add(
+                    AuditLog(
+                        actor_user_id=actor.id,
+                        actor_ip=ip_address,
+                        action="admin.user.password.reset"
+                        if admin_reset
+                        else "auth.password.change",
+                        resource_type="user",
+                        resource_id=user.id,
+                        metadata={"sessions_revoked": True},
+                    )
+                )
+                await uow.commit()
+        await self._clear_login_failures(user.email.lower())
+        await self._clear_login_failures(user.username.lower())
 
     async def refresh(
         self, refresh_token: str, *, user_agent: str = "", ip_address: str = ""

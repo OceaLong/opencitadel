@@ -1,6 +1,7 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,11 +16,21 @@ import {
 } from "@/components/ui/select";
 
 import type { MCPServer } from "@/lib/api";
+import { notificationsApi } from "@/lib/api/notifications";
 import type { PatrolNotifyChannel } from "@/lib/api/types";
 
 /** 新增渠道的空白模板（未用字段保持空字符串，对齐后端 schema 默认值）。 */
 export function emptyNotifyChannel(): PatrolNotifyChannel {
-  return { type: "mcp", server_id: "", channel_arg: "", url: "", secret: "", address: "" };
+  return {
+    type: "mcp",
+    server_id: "",
+    tool_name: "",
+    message_arg: "text",
+    arguments: {},
+    url: "",
+    secret: "",
+    address: "",
+  };
 }
 
 /**
@@ -30,12 +41,62 @@ export function NotifyChannelsField({
   value,
   onChange,
   servers,
+  onValidityChange,
 }: {
   value: PatrolNotifyChannel[];
   onChange: (channels: PatrolNotifyChannel[]) => void;
   servers: MCPServer[];
+  onValidityChange?: (valid: boolean) => void;
 }) {
   const t = useTranslations("patrol");
+  const zh = useLocale().startsWith("zh");
+  const [checking, setChecking] = useState<number | null>(null);
+  const [checkResults, setCheckResults] = useState<Record<number, boolean>>({});
+  const [testResults, setTestResults] = useState<
+    Record<number, { id: string; status: string; error?: string | null }>
+  >({});
+  const pendingIds = Object.values(testResults)
+    .filter((item) => !["sent", "failed"].includes(item.status))
+    .map((item) => item.id)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!pendingIds) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void Promise.all(pendingIds.split(",").map((id) => notificationsApi.delivery(id)))
+        .then((deliveries) => {
+          if (cancelled) return;
+          setTestResults((prev) =>
+            Object.fromEntries(
+              Object.entries(prev).map(([index, item]) => {
+                const result = deliveries.find((row) => row.id === item.id);
+                return [
+                  index,
+                  result ? { id: item.id, status: result.status, error: result.last_error } : item,
+                ];
+              }),
+            ),
+          );
+        })
+        .catch(() => {
+          /* Keep the durable delivery visible; next poll retries. */
+        });
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pendingIds]);
+  const [argumentDrafts, setArgumentDrafts] = useState<Record<number, string>>({});
+  const [invalidArguments, setInvalidArguments] = useState<Set<number>>(new Set());
+  const setArgumentValidity = (index: number, valid: boolean) => {
+    const next = new Set(invalidArguments);
+    if (valid) next.delete(index);
+    else next.add(index);
+    setInvalidArguments(next);
+    onValidityChange?.(next.size === 0);
+  };
 
   const typeLabels: Record<PatrolNotifyChannel["type"], string> = {
     mcp: t("notify.typeMcp"),
@@ -44,6 +105,12 @@ export function NotifyChannelsField({
   };
 
   const updateChannel = (index: number, patch: Partial<PatrolNotifyChannel>) => {
+    setCheckResults((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    if (patch.type && patch.type !== "mcp") setArgumentValidity(index, true);
     onChange(value.map((channel, i) => (i === index ? { ...channel, ...patch } : channel)));
   };
 
@@ -78,7 +145,26 @@ export function NotifyChannelsField({
                 size="icon-sm"
                 aria-label={t("notify.remove")}
                 title={t("notify.remove")}
-                onClick={() => onChange(value.filter((_, i) => i !== index))}
+                onClick={() => {
+                  const invalid = new Set(
+                    [...invalidArguments]
+                      .filter((i) => i !== index)
+                      .map((i) => (i > index ? i - 1 : i)),
+                  );
+                  setInvalidArguments(invalid);
+                  setArgumentDrafts(
+                    Object.fromEntries(
+                      Object.entries(argumentDrafts)
+                        .filter(([i]) => Number(i) !== index)
+                        .map(([i, draft]) => [
+                          Number(i) > index ? Number(i) - 1 : Number(i),
+                          draft,
+                        ]),
+                    ),
+                  );
+                  onValidityChange?.(invalid.size === 0);
+                  onChange(value.filter((_, i) => i !== index));
+                }}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -104,16 +190,59 @@ export function NotifyChannelsField({
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor={`notify-channel-arg-${index}`}>
-                    {t("notify.channelArgLabel")}
-                  </Label>
+                  <Label>{zh ? "发送工具名称" : "Send tool name"}</Label>
                   <Input
-                    id={`notify-channel-arg-${index}`}
-                    value={channel.channel_arg}
+                    value={channel.tool_name}
+                    placeholder="mcp_server_send_message"
                     translate="no"
-                    placeholder="#ops-alerts"
-                    onChange={(event) => updateChannel(index, { channel_arg: event.target.value })}
+                    onChange={(event) => updateChannel(index, { tool_name: event.target.value })}
                   />
+                </div>
+                <div className="grid gap-2">
+                  <Label>{zh ? "消息参数名" : "Message parameter"}</Label>
+                  <Input
+                    value={channel.message_arg}
+                    onChange={(event) => updateChannel(index, { message_arg: event.target.value })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>{zh ? "幂等参数名（可选）" : "Idempotency parameter (optional)"}</Label>
+                  <Input
+                    value={channel.idempotency_arg ?? ""}
+                    onChange={(event) =>
+                      updateChannel(index, { idempotency_arg: event.target.value })
+                    }
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>{zh ? "固定参数（JSON）" : "Fixed arguments (JSON)"}</Label>
+                  <Input
+                    aria-invalid={invalidArguments.has(index)}
+                    value={argumentDrafts[index] ?? JSON.stringify(channel.arguments)}
+                    placeholder={'{"room": "ops"}'}
+                    translate="no"
+                    onChange={(event) => {
+                      setArgumentDrafts((prev) => ({ ...prev, [index]: event.target.value }));
+                      try {
+                        const parsed: unknown = JSON.parse(event.target.value);
+                        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+                          throw new Error();
+                        event.target.setCustomValidity("");
+                        setArgumentValidity(index, true);
+                        updateChannel(index, { arguments: parsed as Record<string, unknown> });
+                      } catch {
+                        setArgumentValidity(index, false);
+                        event.target.setCustomValidity(
+                          zh ? "请输入 JSON 对象" : "Enter a JSON object",
+                        );
+                      }
+                    }}
+                  />
+                  {invalidArguments.has(index) && (
+                    <p role="alert" className="text-destructive text-sm">
+                      {zh ? "请输入有效的 JSON 对象" : "Enter a valid JSON object"}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -153,6 +282,70 @@ export function NotifyChannelsField({
                 />
               </div>
             )}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={checking !== null || invalidArguments.has(index)}
+                onClick={async () => {
+                  setChecking(index);
+                  try {
+                    await notificationsApi.validateChannel(channel);
+                    setCheckResults((prev) => ({ ...prev, [index]: true }));
+                  } catch {
+                    setCheckResults((prev) => ({ ...prev, [index]: false }));
+                  } finally {
+                    setChecking(null);
+                  }
+                }}
+              >
+                {zh ? "检查配置（不发送）" : "Validate configuration (no send)"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={checking !== null || invalidArguments.has(index)}
+                onClick={async () => {
+                  setChecking(index);
+                  try {
+                    const result = await notificationsApi.testChannel(channel, crypto.randomUUID());
+                    setTestResults((prev) => ({
+                      ...prev,
+                      [index]: { id: result.delivery_id, status: result.status },
+                    }));
+                  } catch {
+                    setCheckResults((prev) => ({ ...prev, [index]: false }));
+                  } finally {
+                    setChecking(null);
+                  }
+                }}
+              >
+                {zh ? "发送测试通知" : "Send test notification"}
+              </Button>
+              {checkResults[index] !== undefined && (
+                <span
+                  role="status"
+                  className={checkResults[index] ? "text-sm" : "text-destructive text-sm"}
+                >
+                  {checkResults[index]
+                    ? zh
+                      ? "配置有效，未发送消息"
+                      : "Configuration valid; no message sent"
+                    : zh
+                      ? "配置无效或服务不可用，请检查字段"
+                      : "Invalid configuration or unavailable service; check the fields"}
+                </span>
+              )}
+              {testResults[index] && (
+                <span role="status" className="text-sm">
+                  {zh ? "测试投递：" : "Test delivery: "}
+                  {testResults[index].status}
+                  {testResults[index].error && (
+                    <span className="text-destructive"> · {testResults[index].error}</span>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
         ))
       )}

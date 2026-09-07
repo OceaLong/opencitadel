@@ -8,6 +8,10 @@ Run `./scripts/run-patrol-fixtures.sh` from the repository root. It creates a di
 
 The setup manifests may create failing workloads and synthetic Warning events. Never apply them to a shared or production cluster.
 
+CI also sets `PATROL_RUN_REMEDIATION_FIXTURE=true` to run case 21: observe the failure, restart through the authenticated actuator, verify idempotent replay, restore the healthy workload, and recheck recovery. The runner generates a temporary actuator token and passes it to the MCP client. Fixture RBAC grants the actual actuator ServiceAccount access in the demo namespace; its base deployment permissions in `opencitadel` remain in place.
+
+Every manifest passes strict server-side schema validation before replay. On failure, the runner exports kind logs to `tmp/patrol-fixture-logs/` before deleting its cluster; CI uploads those logs and the actuator build log for diagnosis.
+
 Prerequisites: Docker, kind, kubectl, jq, uv, and enough local capacity for the pinned kind node plus fixture images. The script preloads its runtime images, writes the machine-readable score under `tmp/`, and removes the cluster on success or failure unless the explicit keep flag is set.
 
 See [Ops Patrol operations](../../docs/operations/ops-patrol.md#verification) for release-gate expectations.

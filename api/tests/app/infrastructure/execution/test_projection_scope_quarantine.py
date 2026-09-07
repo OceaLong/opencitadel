@@ -269,6 +269,7 @@ async def test_rebuild_cli_restores_a_quarantined_scope(kernel_factory, monkeypa
         # The CLI runs with the execution-kernel database credentials.
         monkeypatch.setenv("POSTGRES_USER", os.environ["POSTGRES_KERNEL_USER"])
         monkeypatch.setenv("POSTGRES_PASSWORD", os.environ["POSTGRES_KERNEL_PASSWORD"])
+        monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", execution_kernel_database_uri())
         assert await rebuild(f"user:{owner}") == 0
 
         async with execution_admin_session() as session:
@@ -339,4 +340,76 @@ async def test_scope_lock_contention_yields_busy_instead_of_queueing(kernel_fact
         assert released.busy is False
         assert released.processed == 1
     finally:
+        await _cleanup([owner])
+
+
+@pytest.mark.asyncio
+async def test_admin_request_recovers_poisoned_run_with_durable_outcome_and_audit(kernel_factory):
+    from sqlalchemy import delete, select
+
+    from app.infrastructure.execution.models import (
+        ExecutionPoisonedRunORM,
+        ExecutionRecoveryRequestORM,
+    )
+    from app.infrastructure.execution.postgres_projection_status import (
+        PostgresProjectionStatusQuery,
+    )
+    from app.infrastructure.execution.postgres_recovery import PostgresRecoveryWorker
+    from app.infrastructure.execution.postgres_run_decision_source import PostgresRunDecisionSource
+    from app.infrastructure.models.audit_log import AuditLogORM
+
+    owner = f"admin-recovery-{uuid4()}"
+    run_id = uuid4()
+    authorization = AuthorizationContext.system("recovery-test")
+    settings = load_deployment_settings()
+    source = PostgresRunDecisionSource(session_factory=kernel_factory, authorization=authorization)
+    try:
+        await _append(
+            kernel_factory, owner, run_id, (_run_created("recovery-session"), _run_started()), 0
+        )
+        await PostgresFormalProjector(
+            session_factory=kernel_factory, authorization=authorization
+        ).run_once(OwnerScope.personal(owner), limit=100)
+        await _corrupt_projection_row(run_id)
+        assert run_id not in [item.state.run_id for item in await source.load_ready(limit=1000)]
+        query = PostgresProjectionStatusQuery(
+            session_factory=kernel_factory, authorization=authorization
+        )
+        request_id = await query.request_recovery(
+            scope_key=f"user:{owner}", actor="operator", reason="Repair corrupt projection"
+        )
+        assert request_id == await query.request_recovery(
+            scope_key=f"user:{owner}", actor="operator", reason="Repeated click"
+        )
+        worker = PostgresRecoveryWorker(
+            session_factory=kernel_factory,
+            authorization=authorization,
+            audit_signing_key=settings.audit_signing_key,
+            audit_signing_key_id=settings.audit_signing_key_id,
+        )
+        assert await worker.process_pending() == 1
+        assert run_id in [item.state.run_id for item in await source.load_ready(limit=1000)]
+        async with execution_admin_session() as session:
+            from uuid import UUID
+
+            row = await session.get(ExecutionRecoveryRequestORM, UUID(request_id))
+            assert row.status == "completed"
+            assert row.result["recovered_run_ids"] == [str(run_id)]
+            assert await session.scalar(
+                select(AuditLogORM.id).where(
+                    AuditLogORM.action == "execution_recovery_completed",
+                    AuditLogORM.resource_id == f"user:{owner}",
+                )
+            )
+    finally:
+        async with execution_admin_session() as session:
+            await session.execute(
+                delete(ExecutionPoisonedRunORM).where(ExecutionPoisonedRunORM.run_id == run_id)
+            )
+            await session.execute(
+                delete(ExecutionRecoveryRequestORM).where(
+                    ExecutionRecoveryRequestORM.owner_scope_key == f"user:{owner}"
+                )
+            )
+            await session.commit()
         await _cleanup([owner])

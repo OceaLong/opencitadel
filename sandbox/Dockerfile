@@ -65,13 +65,18 @@ RUN mkdir -p /etc/apt/keyrings && \
 # 9.将npm镜像源设置为可覆盖的 registry
 RUN npm config set registry "${NPM_CONFIG_REGISTRY}"
 
-# 9.1 升级 node 自带的 npm,消除其捆绑依赖中的已知漏洞(tar/undici 等)
-RUN npm install -g npm@12 && \
-    cd /tmp && npm pack brace-expansion@5.0.8 --silent && \
-    rm -rf /usr/lib/node_modules/npm/node_modules/brace-expansion && \
-    mkdir -p /usr/lib/node_modules/npm/node_modules/brace-expansion && \
-    tar -xzf brace-expansion-5.0.8.tgz -C /usr/lib/node_modules/npm/node_modules/brace-expansion --strip-components=1 && \
-    rm -f brace-expansion-5.0.8.tgz && \
+# npm 12.0.2 still bundles vulnerable versions of these dependencies.
+# Apply compatible upstream fixes for CVE-2026-69152/69192/73566 until npm incorporates them.
+RUN npm install -g npm@12.0.2 && \
+    cd /tmp && \
+    for package in brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21; do \
+      name="${package%@*}"; \
+      archive="$(npm pack "$package" --silent)"; \
+      destination="$(npm root -g)/npm/node_modules/$name"; \
+      rm -rf "$destination" && mkdir -p "$destination" && \
+      tar -xzf "$archive" -C "$destination" --strip-components=1 && \
+      rm -f "$archive" || exit 1; \
+    done && \
     npm cache clean --force
 
 # 10.安装Google Chrome浏览器

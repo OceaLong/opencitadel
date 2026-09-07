@@ -318,3 +318,30 @@ async def test_remediation_status_counts_respects_since(db):
     counts = await db.patrol.remediation_status_counts(utc(2026, 6, 1))
 
     assert counts == {"verified": 1}
+
+
+@pytest.mark.asyncio
+async def test_pending_rechecks_selects_due_dispatch_and_terminal_children_only(db):
+    now = utc(2026, 9, 7)
+    terminal = _patrol_run(id="terminal-child", created_at=now)
+    terminal.status = "failed"
+    running = _patrol_run(id="running-child", created_at=now)
+    running.status = "running"
+    db.session.add_all([terminal, running])
+    for name in ("due", "future", "exhausted", "terminal", "running", "verified"):
+        item = _patrol_remediation(id=name, status="executed", created_at=now)
+        if name == "future":
+            item.recheck_next_attempt_at = utc(2026, 9, 8)
+        if name in ("exhausted", "terminal"):
+            item.recheck_dispatch_attempts = 5
+        if name == "terminal":
+            item.recheck_run_id = terminal.id
+        if name == "running":
+            item.recheck_run_id = running.id
+        if name == "verified":
+            item.status = "verified"
+            item.recheck_run_id = terminal.id
+        db.session.add(item)
+    db.session.flush()
+    items = await db.patrol.list_pending_rechecks(now)
+    assert {item.id for item in items} == {"due", "terminal"}

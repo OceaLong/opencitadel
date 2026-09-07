@@ -4,13 +4,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.domain.models.scheduled_job import ScheduledRunStatus
+from app.domain.models.scheduled_job import NotifyChannel, ScheduledRunStatus
 
 
-class NotifyChannelRequest(BaseModel):
-    type: str = "mcp"
-    server_id: str = ""
-    channel_arg: str = ""
+class NotifyChannelRequest(NotifyChannel):
+    pass
 
 
 class CreateScheduledJobRequest(BaseModel):

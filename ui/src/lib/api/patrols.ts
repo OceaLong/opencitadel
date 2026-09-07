@@ -77,6 +77,8 @@ export const patrolsApi = {
   ): Promise<PatrolRemediation> => post(`/patrol-findings/${findingId}/remediations`, params),
   listRemediations: (runId: string): Promise<PatrolRemediationList> =>
     get<PatrolRemediationList>(`/patrol-runs/${runId}/remediations`),
+  retryRecheck: (id: string): Promise<PatrolRemediation> =>
+    post(`/patrol-remediations/${id}/retry-recheck`, {}),
   getRemediation: (id: string): Promise<PatrolRemediation> =>
     get<PatrolRemediation>(`/patrol-remediations/${id}`),
   downloadEvidence: async (id: string): Promise<Blob> => {

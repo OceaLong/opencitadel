@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -198,6 +198,7 @@ async def run_scheduler_loop(
     patrol_retention_service: Optional["PatrolRetentionService"] = None,
     recycle_bin_retention_service: Optional["RecycleBinRetentionService"] = None,
     execution_queue_retention_service: Optional["ExecutionQueueRetentionService"] = None,
+    maintenance_tasks: tuple[Callable[[], Awaitable[object]], ...] = (),
     mcp_pool: Optional["MCPConnectionPoolPort"] = None,
     a2a_pool: Optional["A2AConnectionPoolPort"] = None,
 ) -> None:
@@ -231,9 +232,6 @@ async def run_scheduler_loop(
             continue
         operations = active.revision.policy
         sched_cfg = operations.scheduler
-        if not sched_cfg.enabled:
-            await _wait_or_stop(stop_event, sched_cfg.poll_interval_seconds)
-            continue
 
         # Recycle idle MCP/A2A connections (and their stdio subprocesses) that
         # outlived their config -- e.g. after an integration was disabled or
@@ -273,6 +271,7 @@ async def run_scheduler_loop(
                     patrol_retention_service=patrol_retention_service,
                     recycle_bin_retention_service=recycle_bin_retention_service,
                     execution_queue_retention_service=execution_queue_retention_service,
+                    maintenance_tasks=maintenance_tasks,
                 ),
                 leases=leases,
                 key=SCHEDULER_LEADER_KEY,
@@ -300,6 +299,7 @@ async def _run_scheduler_leader_tick(
     patrol_retention_service: Optional["PatrolRetentionService"],
     recycle_bin_retention_service: Optional["RecycleBinRetentionService"],
     execution_queue_retention_service: Optional["ExecutionQueueRetentionService"] = None,
+    maintenance_tasks: tuple[Callable[[], Awaitable[object]], ...] = (),
 ) -> None:
     """One leader-only tick: reconcile, GC/retention ticks, and job triggers.
 
@@ -364,6 +364,15 @@ async def _run_scheduler_leader_tick(
         except (OSError, RuntimeError, ValueError):
             logger.exception("Execution queue retention tick failed")
 
+    for maintenance in maintenance_tasks:
+        try:
+            await maintenance()
+        except (OSError, RuntimeError, ValueError):
+            logger.exception("Platform maintenance failed: %s", maintenance)
+
+    if not sched_cfg.enabled:
+        return
+
     try:
         async with uow_factory() as uow:
             due_jobs = await uow.scheduled_job.list_due(
@@ -384,6 +393,23 @@ async def _run_scheduler_leader_tick(
                 await job_service.record_trigger_failure(job, str(exc))
     except (OSError, RuntimeError, ValueError):
         logger.exception("Scheduler 轮询异常")
+
+
+async def run_maintenance_loop(
+    action: Callable[[], Awaitable[object]],
+    *,
+    stop_event: asyncio.Event,
+    interval_seconds: float = 5.0,
+) -> None:
+    """Independent supervised lane; slow delivery/rebuild never blocks schedules."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    while not stop_event.is_set():
+        try:
+            await action()
+        except (OSError, RuntimeError, ValueError, SQLAlchemyError):
+            logger.exception("Maintenance action failed: %s", action)
+        await _wait_or_stop(stop_event, interval_seconds)
 
 
 async def _wait_or_stop(stopping: asyncio.Event, seconds: float) -> None:

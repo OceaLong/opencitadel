@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { inferenceApi, type InferenceStatus } from "@/lib/api/inference";
 import { statusApi, type SystemHealthStatus } from "@/lib/api/status";
 
+import { inferenceHealth } from "./inference-health";
+
 /**
  * 管理台"系统健康"卡片：消费 GET /api/status（postgres / redis / fastapi 等
  * 组件健康）与 GET /api/inference/status（推理服务能力状态）。
@@ -66,7 +68,7 @@ export function SystemHealthCard() {
     };
   }, [reloadKey]);
 
-  const inferenceCapabilities = inference ? Object.keys(inference.capabilities) : [];
+  const health = inferenceHealth(inference);
 
   return (
     <Card>
@@ -127,15 +129,15 @@ export function SystemHealthCard() {
               <span className="flex items-center gap-2">
                 {inference ? (
                   <span className="text-muted-foreground max-w-72 truncate text-xs" translate="no">
-                    {inferenceCapabilities.join(", ")}
+                    {[...health.capabilities, ...health.breakers].join(", ")}
                   </span>
                 ) : (
                   <span className="text-destructive max-w-72 truncate text-xs">
                     {inferenceError}
                   </span>
                 )}
-                <StatusBadge variant={inference ? "success" : "destructive"}>
-                  {inference ? t("healthOk") : t("healthError")}
+                <StatusBadge variant={health.healthy ? "success" : "destructive"}>
+                  {health.healthy ? t("healthOk") : t("healthError")}
                 </StatusBadge>
               </span>
             </div>

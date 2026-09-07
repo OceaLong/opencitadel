@@ -5,7 +5,9 @@ WORKDIR /app
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 COPY package.json package-lock.json ./
-RUN npm config set registry "${NPM_CONFIG_REGISTRY}" && npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm config set registry "${NPM_CONFIG_REGISTRY}" && \
+    npm ci --fetch-retries=5 --maxsockets=5
 
 # Stage 2: 构建应用
 FROM node:22-alpine AS builder
@@ -23,6 +25,9 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+# Install OpenSSL security fixes that may not yet be included in the base image.
+RUN apk upgrade --no-cache libcrypto3 libssl3
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

@@ -436,3 +436,20 @@ async def get_remediation(
     return ApiResponse.success(
         PatrolRemediationResponse.from_domain(await service.get(remediation_id, ctx.scope))
     )
+
+
+@router.post(
+    "/patrol-remediations/{remediation_id}/retry-recheck",
+    response_model=ApiResponse[PatrolRemediationResponse],
+)
+async def retry_remediation_recheck(
+    remediation_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    service: PatrolRemediationService = Depends(get_patrol_remediation_service),
+):
+    return ApiResponse.success(
+        PatrolRemediationResponse.from_domain(
+            await service.retry_recheck(remediation_id, ctx.scope)
+        )
+    )

@@ -478,6 +478,12 @@ class PatrolRemediationModel(Base):
     recheck_run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    recheck_dispatch_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    recheck_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 投影器乐观守卫：最近应用到本行执行态列的 execution_events.position。
@@ -527,6 +533,8 @@ class PatrolRemediationModel(Base):
             if self.after_observation is not None
             else None,
             recheck_run_id=self.recheck_run_id,
+            recheck_dispatch_attempts=self.recheck_dispatch_attempts,
+            recheck_next_attempt_at=_utc(self.recheck_next_attempt_at),
             error_code=self.error_code,
             error_message=self.error_message,
             created_by=self.created_by,

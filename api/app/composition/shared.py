@@ -495,9 +495,7 @@ def build_shared_services(
         command_ingress=command_ingress,
         activity_objects=activity_objects,
         policy_heads=runtime_policy_reader,
-        # Per-scope backpressure (K2-8): refuse new Runs once a scope's
-        # non-terminal Run count reaches the ceiling (0 disables).
-        active_run_counter=run_projection,
+        # Hard per-scope root admission ceiling including pending commands (0 disables).
         max_active_runs_per_scope=settings.execution_max_active_runs_per_scope,
     )
     run_control_service = RunControlService(

@@ -214,6 +214,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/execution/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Execution Recovery */
+        post: operations["request_execution_recovery_api_admin_execution_recover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/governance/overview": {
         parameters: {
             query?: never;
@@ -455,6 +472,23 @@ export interface paths {
         patch: operations["patch_user_api_admin_users__user_id__patch"];
         trace?: never;
     };
+    "/api/admin/users/{user_id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset User Password */
+        post: operations["reset_user_password_api_admin_users__user_id__password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users/{user_id}/quota": {
         parameters: {
             query?: never;
@@ -655,6 +689,23 @@ export interface paths {
         get: operations["oauth_login_api_auth_oauth__provider__login_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Password */
+        post: operations["change_password_api_auth_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1474,6 +1525,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications/channels/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enqueue Test Notification Channel */
+        post: operations["enqueue_test_notification_channel_api_notifications_channels_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/channels/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Notification Channel */
+        post: operations["validate_notification_channel_api_notifications_channels_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notification Deliveries */
+        get: operations["list_notification_deliveries_api_notifications_deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/deliveries/{delivery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Notification Delivery */
+        get: operations["get_notification_delivery_api_notifications_deliveries__delivery_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/deliveries/{delivery_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Notification Delivery */
+        post: operations["retry_notification_delivery_api_notifications_deliveries__delivery_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications/stream": {
         parameters: {
             query?: never;
@@ -1709,6 +1845,23 @@ export interface paths {
         get: operations["get_remediation_api_patrol_remediations__remediation_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/patrol-remediations/{remediation_id}/retry-recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Remediation Recheck */
+        post: operations["retry_remediation_recheck_api_patrol_remediations__remediation_id__retry_recheck_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3099,6 +3252,13 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
         /** ChatModelSettings */
         ChatModelSettings: {
             /**
@@ -3598,6 +3758,13 @@ export interface components {
             schema_version: number;
             /** Sequence */
             sequence: number;
+        };
+        /** ExecutionRecoveryRequest */
+        ExecutionRecoveryRequest: {
+            /** Reason */
+            reason: string;
+            /** Scope Key */
+            scope_key: string;
         };
         /**
          * File
@@ -4774,6 +4941,38 @@ export interface components {
              */
             max_call_budget_seconds: number;
         };
+        /** NotificationDeliveryListResponse */
+        NotificationDeliveryListResponse: {
+            /** Deliveries */
+            deliveries: components["schemas"]["NotificationDeliveryResponse"][];
+        };
+        /** NotificationDeliveryResponse */
+        NotificationDeliveryResponse: {
+            /** Attempts */
+            attempts: number;
+            /** Channel Type */
+            channel_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Last Error */
+            last_error?: string | null;
+            /** Message */
+            message: string;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /** Sent At */
+            sent_at?: string | null;
+            /** Status */
+            status: string;
+        };
         /** NotificationListResponse */
         NotificationListResponse: {
             /** Notifications */
@@ -4818,11 +5017,20 @@ export interface components {
              * @default
              */
             address: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
             /**
-             * Channel Arg
+             * Idempotency Arg
              * @default
              */
-            channel_arg: string;
+            idempotency_arg: string;
+            /**
+             * Message Arg
+             * @default text
+             */
+            message_arg: string;
             /**
              * Secret
              * @default
@@ -4834,10 +5042,16 @@ export interface components {
              */
             server_id: string;
             /**
+             * Tool Name
+             * @default
+             */
+            tool_name: string;
+            /**
              * Type
              * @default mcp
+             * @enum {string}
              */
-            type: string;
+            type: "mcp" | "webhook" | "email";
             /**
              * Url
              * @default
@@ -4847,20 +5061,50 @@ export interface components {
         /** NotifyChannelRequest */
         NotifyChannelRequest: {
             /**
-             * Channel Arg
+             * Address
              * @default
              */
-            channel_arg: string;
+            address: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Idempotency Arg
+             * @default
+             */
+            idempotency_arg: string;
+            /**
+             * Message Arg
+             * @default text
+             */
+            message_arg: string;
+            /**
+             * Secret
+             * @default
+             */
+            secret: string;
             /**
              * Server Id
              * @default
              */
             server_id: string;
             /**
+             * Tool Name
+             * @default
+             */
+            tool_name: string;
+            /**
              * Type
              * @default mcp
+             * @enum {string}
              */
-            type: string;
+            type: "mcp" | "webhook" | "email";
+            /**
+             * Url
+             * @default
+             */
+            url: string;
         };
         /** OperationsPolicy */
         OperationsPolicy: {
@@ -5257,6 +5501,13 @@ export interface components {
             };
             /** Params Hash */
             params_hash: string;
+            /**
+             * Recheck Dispatch Attempts
+             * @default 0
+             */
+            recheck_dispatch_attempts: number;
+            /** Recheck Next Attempt At */
+            recheck_next_attempt_at?: string | null;
             /** Recheck Run Id */
             recheck_run_id: string | null;
             /** Rollback Hint */
@@ -5540,6 +5791,11 @@ export interface components {
              * @default 0
              */
             verified: number;
+        };
+        /** ResetPasswordRequest */
+        ResetPasswordRequest: {
+            /** New Password */
+            new_password: string;
         };
         /**
          * ResourceBindingProjection
@@ -7115,6 +7371,58 @@ export interface components {
              */
             msg: string;
         };
+        /** Response[NotificationDeliveryListResponse] */
+        Response_NotificationDeliveryListResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["NotificationDeliveryListResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[NotificationDeliveryResponse] */
+        Response_NotificationDeliveryResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["NotificationDeliveryResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
         /** Response[NotificationListResponse] */
         Response_NotificationListResponse_: {
             /**
@@ -8613,6 +8921,15 @@ export interface components {
          * @enum {string}
          */
         TeamRole: "owner" | "admin" | "member";
+        /** TestNotificationChannelRequest */
+        TestNotificationChannelRequest: {
+            channel: components["schemas"]["NotifyChannel"];
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+        };
         /**
          * TokenUsageRecordResponse
          * @description 单次 LLM 调用 token 记录
@@ -9363,6 +9680,39 @@ export interface operations {
             };
         };
     };
+    request_execution_recovery_api_admin_execution_recover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutionRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_governance_overview_api_admin_governance_overview_get: {
         parameters: {
             query?: {
@@ -9913,6 +10263,41 @@ export interface operations {
             };
         };
     };
+    reset_user_password_api_admin_users__user_id__password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_quota_api_admin_users__user_id__quota_get: {
         parameters: {
             query?: never;
@@ -10331,6 +10716,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_password_api_auth_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
                 };
             };
             /** @description Validation Error */
@@ -12449,6 +12867,173 @@ export interface operations {
             };
         };
     };
+    enqueue_test_notification_channel_api_notifications_channels_test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestNotificationChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_notification_channel_api_notifications_channels_validate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotifyChannel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notification_deliveries_api_notifications_deliveries_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_NotificationDeliveryListResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notification_delivery_api_notifications_deliveries__delivery_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                delivery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_NotificationDeliveryResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_notification_delivery_api_notifications_deliveries__delivery_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                delivery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     notification_stream_api_notifications_stream_get: {
         parameters: {
             query?: never;
@@ -13000,6 +13585,39 @@ export interface operations {
         };
     };
     get_remediation_api_patrol_remediations__remediation_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                remediation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_PatrolRemediationResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_remediation_recheck_api_patrol_remediations__remediation_id__retry_recheck_post: {
         parameters: {
             query?: never;
             header?: {

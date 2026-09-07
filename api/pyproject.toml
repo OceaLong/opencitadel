@@ -20,6 +20,7 @@ dependencies = [
     # itsdangerous has no direct import; it is a runtime requirement of
     # starlette.middleware.sessions.SessionMiddleware used in app/main.py
     "itsdangerous>=2.2.0",
+    "jsonschema>=4.23.0",
     "json-repair>=0.53.0",
     "openai>=1.107.2",
     "pillow>=11.0.0",

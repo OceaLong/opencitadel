@@ -4,11 +4,7 @@ import type { SSEEventData } from "./session";
 
 type ScheduledJobTriggerType = "cron" | "interval" | "webhook";
 
-type NotifyChannel = {
-  type: string;
-  server_id: string;
-  channel_arg: string;
-};
+type NotifyChannel = import("./patrols").PatrolNotifyChannel;
 
 export type ScheduledJob = {
   id: string;

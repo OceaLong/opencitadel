@@ -62,12 +62,16 @@ from app.infrastructure.adapters.redis_capabilities import (
     RedisSandboxActivityStore,
     RedisWakeupAdapter,
 )
+from app.infrastructure.execution.postgres_recovery import PostgresRecoveryWorker
 from app.infrastructure.external.knowledge.web_connector import HttpWebDocumentGateway
 from app.infrastructure.external.runtime_policy_notifier import RuntimePolicyHintListener
 from app.infrastructure.external.sandbox.factory import PooledSandboxFactory
 from app.infrastructure.external.sandbox.reclaim_coordinator import ReclaimCoordinator
 from app.infrastructure.external.sandbox.sandbox_maintenance import SandboxMaintenance
-from app.infrastructure.external.scheduler.job_scheduler import run_scheduler_loop
+from app.infrastructure.external.scheduler.job_scheduler import (
+    run_maintenance_loop,
+    run_scheduler_loop,
+)
 from app.runtime_role import ProcessRole
 from core.config import DeploymentSettings
 
@@ -231,6 +235,12 @@ async def open_kernel_runtime(
                 activity_retention_days=settings.execution_activity_retention_days,
                 batch_size=settings.execution_queue_purge_batch_size,
             )
+            recovery_worker = PostgresRecoveryWorker(
+                session_factory=resources.postgres.session_factory,
+                authorization=AuthorizationContext.system("execution-kernel"),
+                audit_signing_key=settings.audit_signing_key,
+                audit_signing_key_id=settings.audit_signing_key_id,
+            )
             sandbox_maintenance = SandboxMaintenance(
                 factory=shared.sandbox_factory,
                 reclaim=ReclaimCoordinator(
@@ -287,6 +297,16 @@ async def open_kernel_runtime(
                 ),
                 kind=TaskKind.CRITICAL,
             )
+            for name, action in (
+                ("notification-delivery", shared.notification_service.process_deliveries),
+                ("patrol-recheck", shared.patrol_remediation_service.reconcile_rechecks),
+                ("execution-recovery", recovery_worker.process_pending),
+            ):
+                await supervisor.start(
+                    name,
+                    partial(run_maintenance_loop, action, stop_event=supervisor.stop_event),
+                    kind=TaskKind.CRITICAL,
+                )
             # The kernel graph always builds the pooled factory (P2-16②);
             # the isinstance check narrows the shared field's base type and
             # guards against a future wiring regression.

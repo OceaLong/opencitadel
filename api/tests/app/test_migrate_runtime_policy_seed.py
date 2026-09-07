@@ -39,6 +39,7 @@ async def test_seed_session_factory_receives_database_authorization_secret(monke
     monkeypatch.setattr(module, "async_sessionmaker", fake_sessionmaker)
     monkeypatch.setattr(module, "PostgresRuntimePolicyRepository", FakeRepository)
 
+    monkeypatch.delenv("DATABASE_AUTHORIZATION_SIGNING_SECRET", raising=False)
     settings = DeploymentSettings(env="test", session_secret="seed-signing-secret")
 
     assert await module.seed_runtime_policy_heads(settings) is True

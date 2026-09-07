@@ -521,6 +521,8 @@ class PatrolRemediation(BaseModel):
     before_observation: dict[str, JsonValue] | None = None
     after_observation: dict[str, JsonValue] | None = None
     recheck_run_id: str | None = None
+    recheck_dispatch_attempts: int = Field(default=0, ge=0)
+    recheck_next_attempt_at: datetime | None = None
     error_code: str | None = Field(default=None, max_length=128)
     error_message: str | None = Field(default=None, max_length=2000)
     created_by: str

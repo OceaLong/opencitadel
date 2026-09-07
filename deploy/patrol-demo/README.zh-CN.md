@@ -8,6 +8,10 @@
 
 Fixture 会创建故障工作负载和合成 Warning Event，严禁用于共享或生产集群。
 
+CI 还会设置 `PATROL_RUN_REMEDIATION_FIXTURE=true` 执行第 21 个案例：观测故障、通过已认证的执行器重启、验证幂等重放、恢复健康工作负载并复检恢复结果。运行器会生成临时执行器 Token 并传给 MCP 客户端。演练 RBAC 向实际执行器 ServiceAccount 授予演练命名空间的权限；基础部署在 `opencitadel` 中的原有权限仍然保留。
+
+所有清单在回放前都要通过服务端严格 Schema 校验。运行失败时，脚本会先将 kind 日志导出到 `tmp/patrol-fixture-logs/`，再删除自己创建的集群；CI 会上传这些日志及执行器构建日志以便排障。
+
 前置工具包括 Docker、kind、kubectl、jq、uv，并需为固定版本 kind Node 与 Fixture 镜像预留足够本地资源。脚本会预载运行镜像，将机器可读评分写入 `tmp/`，并在成功或失败后删除集群；仅显式 Keep Flag 会改变清理行为。
 
 Release 门禁要求见 [Ops Patrol 运维手册](../../docs/operations/ops-patrol.zh-CN.md#验证)。

@@ -38,6 +38,21 @@ const REMEDIATION_BADGE: Record<
 export function RemediationStatusList({ remediations }: { remediations: PatrolRemediation[] }) {
   const t = useTranslations("patrol");
   const labels = usePatrolLabels();
+  const [retried, setRetried] = useState<Record<string, PatrolRemediation>>({});
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const retryRecheck = async (id: string) => {
+    setRetryingId(id);
+    try {
+      const result = await patrolsApi.retryRecheck(id);
+      setRetried((current) => ({ ...current, [id]: result }));
+      if (result.error_message) toast.error(result.error_message);
+      else toast.success(t("remediation.retryRecheckQueued"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("remediation.retryRecheckError"));
+    } finally {
+      setRetryingId(null);
+    }
+  };
   const [detail, setDetail] = useState<PatrolRemediation | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const openDetail = async (id: string) => {
@@ -59,7 +74,9 @@ export function RemediationStatusList({ remediations }: { remediations: PatrolRe
         {remediations.length === 0 ? (
           <EmptyState title={t("remediation.empty")} />
         ) : (
-          remediations.map((remediation) => {
+          remediations.map((source) => {
+            const local = retried[source.id];
+            const remediation = local && local.updated_at >= source.updated_at ? local : source;
             const badge = REMEDIATION_BADGE[remediation.status];
             return (
               <div
@@ -95,6 +112,13 @@ export function RemediationStatusList({ remediations }: { remediations: PatrolRe
                       {remediation.rollback_hint}
                     </p>
                   )}
+                  {remediation.status === "executed" && !remediation.recheck_run_id && (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      {(remediation.recheck_dispatch_attempts ?? 0) >= 5
+                        ? t("remediation.dispatchExhausted")
+                        : t("remediation.dispatchWaiting")}
+                    </p>
+                  )}
                   {remediation.error_message && (
                     <p className="text-destructive mt-1 text-xs">{remediation.error_message}</p>
                   )}
@@ -113,6 +137,16 @@ export function RemediationStatusList({ remediations }: { remediations: PatrolRe
                       t("remediation.viewDetail")
                     )}
                   </Button>
+                  {remediation.status === "executed" && !remediation.recheck_run_id && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={retryingId === remediation.id}
+                      onClick={() => void retryRecheck(remediation.id)}
+                    >
+                      {t("remediation.retryRecheck")}
+                    </Button>
+                  )}
                   {remediation.session_id && (
                     <Link
                       className="text-primary underline"

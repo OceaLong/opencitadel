@@ -95,7 +95,7 @@ class ExecutionCommandHandlerPort(Protocol):
 
 @runtime_checkable
 class CommandEnvelopeWriterPort(Protocol):
-    async def receive(self, command: CommandEnvelope) -> bool: ...
+    async def receive(self, command: CommandEnvelope, *, max_active_runs: int = 0) -> bool: ...
 
 
 @runtime_checkable

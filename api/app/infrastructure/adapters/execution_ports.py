@@ -37,11 +37,13 @@ class SqlAlchemyCommandEnvelopeWriter:
         self._session_factory = session_factory
         self._authorization = authorization
 
-    async def receive(self, command: CommandEnvelope) -> bool:
+    async def receive(self, command: CommandEnvelope, *, max_active_runs: int = 0) -> bool:
         async with self._session_factory() as session:
             try:
                 await configure_session_authorization(session, self._authorization)
-                received = await PostgresInbox(session).receive(command)
+                received = await PostgresInbox(session).receive(
+                    command, max_active_runs=max_active_runs
+                )
                 await session.commit()
                 return received
             except (OSError, RuntimeError, ValueError, SQLAlchemyError):

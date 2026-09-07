@@ -330,9 +330,12 @@ def _grant_runtime_privileges() -> None:
                 'GRANT SELECT, INSERT, UPDATE, DELETE ON {execution_mutable} '
                 'TO %I', kernel_role
             );
+            EXECUTE format(
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON execution_recovery_requests TO %I', kernel_role
+            );
             -- Kernel-internal Run quarantine (no tenant RLS); kernel-only.
             EXECUTE format(
-                'GRANT SELECT, INSERT, UPDATE ON execution_poisoned_runs '
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON execution_poisoned_runs '
                 'TO %I', kernel_role
             );
             -- Kernel-internal per-scope head watermark (no tenant RLS);
@@ -372,13 +375,16 @@ def _grant_runtime_privileges() -> None:
             EXECUTE format(
                 'GRANT SELECT ON {projections} TO %I', api_role
             );
+            EXECUTE format(
+                'GRANT SELECT, INSERT ON execution_recovery_requests TO %I', api_role
+            );
             -- Admin observability (K4-3): the API status endpoint reads
             -- per-scope projection lag (scope head vs formal checkpoint) and
             -- the quarantined-scope list. Read-only; checkpoints stay under
             -- RLS (system/admin), the two control tables carry no tenant RLS.
             EXECUTE format(
                 'GRANT SELECT ON execution_projector_checkpoints, '
-                'execution_scope_head, execution_poisoned_scopes TO %I',
+                'execution_scope_head, execution_poisoned_scopes, execution_poisoned_runs TO %I',
                 api_role
             );
 

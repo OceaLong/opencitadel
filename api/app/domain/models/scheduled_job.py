@@ -22,12 +22,39 @@ class ScheduledRunStatus(StrEnum):
 
 
 class NotifyChannel(BaseModel):
-    type: str = "mcp"  # mcp | webhook | email
+    type: Literal["mcp", "webhook", "email"] = "mcp"
     server_id: str = ""
-    channel_arg: str = ""
-    url: str = ""  # webhook target (type=webhook)
-    secret: str = ""  # webhook HMAC-SHA256 signing secret (type=webhook)
-    address: str = ""  # recipient email address (type=email)
+    tool_name: str = ""
+    message_arg: str = "text"
+    idempotency_arg: str = ""
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    url: str = ""
+    secret: str = ""
+    address: str = ""
+
+    @model_validator(mode="after")
+    def validate_channel(self) -> "NotifyChannel":
+        import re
+        from urllib.parse import urlparse
+
+        if self.type == "mcp" and not (
+            self.server_id.strip() and self.tool_name.strip() and self.message_arg.strip()
+        ):
+            raise ValueError("MCP notifications require server_id, tool_name and message_arg")
+        if self.type == "mcp" and self.idempotency_arg == self.message_arg:
+            raise ValueError("Message and idempotency parameters must be distinct")
+        if self.type == "webhook":
+            target = urlparse(self.url)
+            if (
+                target.scheme not in {"http", "https"}
+                or not target.hostname
+                or target.username
+                or target.password
+            ):
+                raise ValueError("Webhook notifications require an HTTP(S) URL without credentials")
+        if self.type == "email" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", self.address):
+            raise ValueError("Email notifications require a valid recipient address")
+        return self
 
 
 class ScheduledJob(BaseModel):

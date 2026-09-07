@@ -285,3 +285,37 @@ def test_callback_links_verified_github_email_to_existing_account():
     assert saved.email == "alice@example.com"
     assert saved.email_verified is True
     assert uow.committed is True
+
+
+def test_password_change_requires_identity_and_csrf_and_clears_cookies():
+    from unittest.mock import Mock
+
+    from app.domain.models.scope import Principal
+    from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
+
+    app = FastAPI()
+    app.include_router(auth_routes.router)
+    register_exception_handlers(app)
+    service = SimpleNamespace(change_password=AsyncMock())
+    cookies = SimpleNamespace(clear_auth_cookies=Mock())
+    app.dependency_overrides[get_auth_service] = lambda: service
+    app.dependency_overrides[get_cookie_manager] = lambda: cookies
+    app.dependency_overrides[verify_csrf] = lambda: None
+    with TestClient(app) as client:
+        response = client.post(
+            "/auth/password",
+            json={"current_password": "old-password", "new_password": "new-password"},
+        )
+        assert response.status_code == 401
+        app.dependency_overrides[get_current_principal] = lambda: Principal(user_id="alice")
+        response = client.post(
+            "/auth/password",
+            json={"current_password": "old-password", "new_password": "new-password"},
+        )
+        assert response.status_code == 200
+        assert service.change_password.call_args.kwargs["principal"].user_id == "alice"
+        cookies.clear_auth_cookies.assert_called_once()
+        response = client.post(
+            "/auth/password", json={"current_password": "old", "new_password": "short"}
+        )
+        assert response.status_code == 422

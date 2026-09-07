@@ -332,6 +332,31 @@ class DBPatrolRepository(PatrolRepository):
         ).scalar_one_or_none()
         return row.to_domain() if row else None
 
+    async def list_pending_rechecks(
+        self, now: datetime, *, limit: int = 100
+    ) -> list[PatrolRemediation]:
+        stmt = (
+            select(PatrolRemediationModel)
+            .outerjoin(PatrolRunModel, PatrolRunModel.id == PatrolRemediationModel.recheck_run_id)
+            .where(
+                PatrolRemediationModel.status == "executed",
+                (
+                    PatrolRemediationModel.recheck_run_id.is_(None)
+                    & (PatrolRemediationModel.recheck_dispatch_attempts < 5)
+                    & (
+                        PatrolRemediationModel.recheck_next_attempt_at.is_(None)
+                        | (PatrolRemediationModel.recheck_next_attempt_at <= now)
+                    )
+                )
+                | PatrolRunModel.status.in_(
+                    ("completed", "completed_with_findings", "failed", "cancelled")
+                ),
+            )
+            .order_by(PatrolRemediationModel.updated_at)
+            .limit(limit)
+        )
+        return [row.to_domain() for row in (await self.db_session.execute(stmt)).scalars().all()]
+
     async def get_remediation_by_recheck_run_id(self, run_id: str) -> PatrolRemediation | None:
         row = (
             await self.db_session.execute(

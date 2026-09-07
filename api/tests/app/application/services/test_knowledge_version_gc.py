@@ -337,9 +337,15 @@ async def test_disabled_scheduler_stops_without_waiting_for_poll_interval() -> N
         entered_wait.set()
         await stopping.wait()
 
-    with patch(
-        "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
-        side_effect=observe_wait,
+    with (
+        patch(
+            "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
+            side_effect=observe_wait,
+        ),
+        patch(
+            "app.infrastructure.external.scheduler.job_scheduler.try_become_scheduler_leader",
+            AsyncMock(return_value=False),
+        ),
     ):
         running = asyncio.create_task(
             run_scheduler_loop(
@@ -360,12 +366,12 @@ async def test_disabled_scheduler_stops_without_waiting_for_poll_interval() -> N
 @pytest.mark.parametrize(
     ("scheduler_enabled", "gc_enabled", "expected_gc_calls"),
     [
-        (False, True, 0),
+        (False, True, 1),
         (True, False, 0),
         (True, True, 1),
     ],
 )
-async def test_scheduler_respects_global_and_gc_disable_gates(
+async def test_scheduler_maintenance_ignores_business_trigger_gate(
     scheduler_enabled,
     gc_enabled,
     expected_gc_calls,
@@ -415,7 +421,7 @@ async def test_scheduler_respects_global_and_gc_disable_gates(
     assert gc_service.collect_knowledge_versions.await_count == expected_gc_calls
     assert gc_tick.await_count == expected_gc_calls
     if not scheduler_enabled:
-        leader.assert_not_awaited()
+        leader.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -626,3 +632,26 @@ async def test_leader_tick_aborts_when_lease_is_stolen_mid_flight():
     with pytest.raises(RuntimeError, match="scheduler lease lost"):
         await asyncio.wait_for(tick, timeout=1)
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_loop_recovers_after_failure_and_stops(monkeypatch):
+    from app.infrastructure.external.scheduler.job_scheduler import run_maintenance_loop
+
+    calls = []
+    stop = asyncio.Event()
+
+    async def work():
+        calls.append("work")
+        if len(calls) == 1:
+            raise RuntimeError("temporary failure")
+        stop.set()
+
+    async def no_wait(*_):
+        return None
+
+    monkeypatch.setattr(
+        "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop", no_wait
+    )
+    await run_maintenance_loop(work, stop_event=stop, interval_seconds=1)
+    assert calls == ["work", "work"]

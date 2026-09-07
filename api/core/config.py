@@ -193,8 +193,8 @@ class DeploymentSettings(BaseSettings):
     execution_timer_retention_days: int = 30
     execution_activity_retention_days: int = 30
     execution_queue_purge_batch_size: int = 500
-    # 准入背压（K2-8）：单个 owner scope（用户或团队）的活跃（非终态）Run 上限，
-    # 超限以 ADMISSION_LIMIT_EXCEEDED 拒绝新 Run。0 = 不限制。
+    # 单个空间的活跃工作流硬上限，计入待处理命令；父子 Run 共用容量，
+    # 直到组内所有 Run 终态才释放。超限返回 HTTP 429。0 = 不限制。
     execution_max_active_runs_per_scope: int = 200
 
     # 回收站保留期：软删的会话/知识库超期后由调度器 leader tick 自动物理清除

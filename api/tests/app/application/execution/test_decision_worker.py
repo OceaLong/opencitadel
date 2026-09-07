@@ -22,6 +22,8 @@ RUN_ID = UUID("60000000-0000-0000-0000-000000000001")
 class Source:
     def __init__(self, state: RunState | None = None) -> None:
         self.disarmed: list = []
+        self.failures: list = []
+        self.successes: list = []
         self.state = state or RunState(
             run_id=RUN_ID,
             family=RunFamily.ASK,
@@ -43,6 +45,12 @@ class Source:
     async def load_ready(self, *, limit):
         del limit
         return (DecisionCandidate(state=self.state),)
+
+    async def failed(self, run_id, *, error, now):
+        self.failures.append((run_id, error, now))
+
+    async def succeeded(self, run_id):
+        self.successes.append(run_id)
 
     async def disarm(self, run_ids):
         self.disarmed = list(run_ids)
@@ -291,4 +299,7 @@ async def test_one_runs_planner_defect_does_not_abort_the_batch() -> None:
     assert stats.errors == 1
     assert service.commands[0][0].command_type == "StartRun"
     # The broken Run is disarmed so it is not hot-retried every poll.
-    assert broken.run_id in source.disarmed
+    assert broken.run_id not in source.disarmed
+    assert source.failures[0][0] == broken.run_id
+    assert source.failures[0][2] == NOW
+    assert source.state.run_id in source.successes

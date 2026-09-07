@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from pydantic import BaseModel
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.ports.streams import NotificationStreamFactory
@@ -16,6 +18,8 @@ from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.notification import (
+    NotificationDeliveryListResponse,
+    NotificationDeliveryResponse,
     NotificationListResponse,
     NotificationResponse,
 )
@@ -218,6 +222,91 @@ async def list_notifications(
             notifications=[NotificationResponse.model_validate(n.model_dump()) for n in items],
             unread_count=unread,
         )
+    )
+
+
+@notification_router.post("/channels/validate", response_model=ApiResponse[dict])
+async def validate_notification_channel(
+    body: NotifyChannel,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    service: NotificationService = Depends(get_notification_service),
+):
+    try:
+        async with asyncio.timeout(20):
+            await service.validate_channel(ctx.scope, body)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise BadRequestError(
+            "Notification configuration could not be verified; check the server, tool and arguments"
+        ) from exc
+    return ApiResponse.success({"valid": True, "sent": False})
+
+
+class TestNotificationChannelRequest(BaseModel):
+    channel: NotifyChannel
+    request_id: UUID
+
+
+@notification_router.post("/channels/test", response_model=ApiResponse[dict])
+async def enqueue_test_notification_channel(
+    body: TestNotificationChannelRequest,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    service: NotificationService = Depends(get_notification_service),
+):
+    delivery_id = await service.queue_test_channel(
+        ctx.scope, body.channel, request_id=str(body.request_id)
+    )
+    return ApiResponse.success({"delivery_id": delivery_id, "status": "pending"})
+
+
+@notification_router.get(
+    "/deliveries", response_model=ApiResponse[NotificationDeliveryListResponse]
+)
+async def list_notification_deliveries(
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: NotificationService = Depends(get_notification_service),
+):
+    deliveries = await service.list_deliveries(ctx.principal.user_id)
+    return ApiResponse.success(
+        NotificationDeliveryListResponse(
+            deliveries=[
+                NotificationDeliveryResponse.model_validate(
+                    {**item.model_dump(), "channel_type": item.channel["type"]}
+                )
+                for item in deliveries
+            ]
+        )
+    )
+
+
+@notification_router.get(
+    "/deliveries/{delivery_id}", response_model=ApiResponse[NotificationDeliveryResponse]
+)
+async def get_notification_delivery(
+    delivery_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: NotificationService = Depends(get_notification_service),
+):
+    item = await service.get_delivery(delivery_id, ctx.principal.user_id)
+    if item is None:
+        raise NotFoundError("Notification delivery not found")
+    return ApiResponse.success(
+        NotificationDeliveryResponse.model_validate(
+            {**item.model_dump(), "channel_type": item.channel["type"]}
+        )
+    )
+
+
+@notification_router.post("/deliveries/{delivery_id}/retry", response_model=ApiResponse[dict])
+async def retry_notification_delivery(
+    delivery_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    service: NotificationService = Depends(get_notification_service),
+):
+    return ApiResponse.success(
+        {"retried": await service.retry_delivery(delivery_id, ctx.principal.user_id)}
     )
 
 

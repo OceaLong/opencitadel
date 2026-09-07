@@ -73,6 +73,7 @@ const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
   job_started: CalendarClock,
   job_complete: CalendarClock,
   job_failed: CalendarClock,
+  execution_blocked: ClipboardX,
   patrol_complete: ShieldCheck,
   artifact_final: FileCheck,
 };
@@ -144,7 +145,7 @@ export function NotificationInbox({ className }: { className?: string }) {
           // 后端在此流上发送 connected / notification / ping 事件，
           // 这些类型不在共享的 SSEEventData 联合里，故按字符串比较。
           const eventType = event.type as string;
-          if (eventType === "notification" || eventType === "connected") {
+          if (eventType === "notification" || eventType === "connected" || eventType === "ping") {
             void refresh();
             // 通知变化往往意味着审批集合变化（新审批到达 / 审批被处理），
             // 广播给审批角标立即重拉。触发源只有流事件，下方的事件监听回调

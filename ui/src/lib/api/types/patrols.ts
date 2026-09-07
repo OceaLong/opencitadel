@@ -11,13 +11,16 @@ type PatrolFindingStatus = "open" | "acknowledged" | "resolved" | "false_positiv
 
 /**
  * 巡检通知渠道（对齐后端 NotifyChannel schema）：
- * type=mcp 用 server_id + channel_arg；type=webhook 用 url + secret；
+ * type=mcp 用 server_id + tool_name + message_arg + arguments；type=webhook 用 url + secret；
  * type=email 用 address。其余字段留空字符串。
  */
 export type PatrolNotifyChannel = {
   type: "mcp" | "webhook" | "email";
   server_id: string;
-  channel_arg: string;
+  tool_name: string;
+  message_arg: string;
+  idempotency_arg?: string;
+  arguments: Record<string, unknown>;
   url: string;
   secret: string;
   address: string;
@@ -175,6 +178,8 @@ export type PatrolRemediation = {
   before_observation?: Record<string, unknown> | null;
   after_observation?: Record<string, unknown> | null;
   recheck_run_id?: string | null;
+  recheck_dispatch_attempts?: number;
+  recheck_next_attempt_at?: string | null;
   error_code?: string | null;
   error_message?: string | null;
   created_by: string;

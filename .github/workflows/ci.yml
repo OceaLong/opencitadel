@@ -87,6 +87,7 @@ jobs:
     env:
       ENV: test
       OPENCITADEL_REQUIRE_POSTGRES_TESTS: "1"
+      OPENCITADEL_REQUIRE_REDIS_TESTS: "1"
       POSTGRES_HOST: localhost
       POSTGRES_USER: opencitadel_app
       POSTGRES_PASSWORD: ci-postgres-app-password
@@ -144,6 +145,8 @@ jobs:
           uv run pytest -q tests/app/infrastructure/security/test_tenant_rls_integration.py
       - name: Run pytest
         run: uv run pytest
+      - name: Backup and restore tooling tests
+        run: uv run python -m unittest discover -s ../scripts/tests -v
 
   ui-test:
     name: UI tests
@@ -347,6 +350,15 @@ jobs:
           name: patrol-fixture-score
           path: tmp/patrol-fixture-score.json
           if-no-files-found: error
+      - name: Preserve fixture failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: patrol-fixture-diagnostics
+          path: |
+            tmp/patrol-fixture-logs/
+            tmp/ops-actuator-build.log
+          if-no-files-found: warn
 
   docs-check:
     name: Documentation checks

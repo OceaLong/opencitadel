@@ -11,10 +11,11 @@ from typing import Any
 class KubernetesReader:
     def __init__(self) -> None:
         from kubernetes import client, config
+        from kubernetes.config.config_exception import ConfigException
 
         try:
             config.load_incluster_config()
-        except (OSError, RuntimeError, ValueError):
+        except (ConfigException, OSError, RuntimeError, ValueError):
             config.load_kube_config(context=os.getenv("PATROL_DEMO_CONTEXT") or None)
         self.core = client.CoreV1Api()
         self.apps = client.AppsV1Api()

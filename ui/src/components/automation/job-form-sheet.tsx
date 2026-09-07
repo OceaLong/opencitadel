@@ -4,6 +4,7 @@ import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ContextSelector } from "@/components/context-selector";
+import { NotifyChannelsField } from "@/components/patrol/notify-channels-field";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,7 @@ export function JobFormSheet({
 }: JobFormSheetProps) {
   const t = useTranslations("automation");
   const tCommon = useTranslations("common");
+  const [channelsValid, setChannelsValid] = useState(true);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
 
   useEffect(() => {
@@ -201,56 +203,13 @@ export function JobFormSheet({
               />
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="notify-server">{t("fields.notifyServer")}</Label>
-              <Select
-                value={form.notify_channels?.[0]?.server_id ?? "none"}
-                onValueChange={(serverId) =>
-                  onFormChange((prev) => ({
-                    ...prev,
-                    notify_channels:
-                      serverId !== "none"
-                        ? [
-                            {
-                              type: "mcp",
-                              server_id: serverId,
-                              channel_arg: prev.notify_channels?.[0]?.channel_arg ?? "",
-                            },
-                          ]
-                        : [],
-                  }))
-                }
-              >
-                <SelectTrigger id="notify-server">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {mcpServers.map((server) => (
-                    <SelectItem key={server.id} value={server.id}>
-                      {server.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="notify-channel">{t("fields.notifyChannel")}</Label>
-              <Input
-                id="notify-channel"
-                value={form.notify_channels?.[0]?.channel_arg ?? ""}
-                onChange={(event) =>
-                  onFormChange((prev) => ({
-                    ...prev,
-                    notify_channels: prev.notify_channels?.[0]?.server_id
-                      ? [{ ...prev.notify_channels[0], channel_arg: event.target.value }]
-                      : [],
-                  }))
-                }
-              />
-            </div>
-          </div>
+          <NotifyChannelsField
+            key={editingJob?.id ?? "new"}
+            value={form.notify_channels ?? []}
+            servers={mcpServers}
+            onValidityChange={setChannelsValid}
+            onChange={(notify_channels) => onFormChange((prev) => ({ ...prev, notify_channels }))}
+          />
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <Label>{t("fields.operatorScope")}</Label>
@@ -305,7 +264,7 @@ export function JobFormSheet({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {tCommon("cancel")}
           </Button>
-          <Button onClick={onSubmit} disabled={submitting}>
+          <Button onClick={onSubmit} disabled={submitting || !channelsValid}>
             {submitting ? t("creating") : editingJob ? t("saveJob") : t("create")}
           </Button>
         </SheetFooter>

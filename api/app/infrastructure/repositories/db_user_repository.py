@@ -1,4 +1,6 @@
-from sqlalchemy import delete, func, select, text
+from datetime import datetime
+
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.user import User
@@ -106,7 +108,9 @@ class DBUserRepository(UserRepository):
 
     async def save(self, user: User) -> None:
         user.email = user.email.lower()
-        record = await self.db_session.get(UserORM, user.id)
+        record = await self.db_session.get(
+            UserORM, user.id, populate_existing=True, with_for_update=True
+        )
         if record:
             record.update_from_domain(user)
         else:
@@ -115,3 +119,32 @@ class DBUserRepository(UserRepository):
 
     async def delete_by_id(self, user_id: str) -> None:
         await self.db_session.execute(delete(UserORM).where(UserORM.id == user_id))
+
+    async def replace_password(
+        self,
+        user_id: str,
+        *,
+        expected_hash: str | None,
+        expected_version: int,
+        password_hash: str,
+    ) -> bool:
+        result = await self.db_session.execute(
+            update(UserORM)
+            .where(
+                UserORM.id == user_id,
+                UserORM.password_hash == expected_hash,
+                UserORM.token_version == expected_version,
+            )
+            .values(
+                password_hash=password_hash,
+                token_version=UserORM.token_version + 1,
+                updated_at=func.now(),
+            )
+            .returning(UserORM.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def update_last_login(self, user_id: str, last_login_at: datetime) -> None:
+        await self.db_session.execute(
+            update(UserORM).where(UserORM.id == user_id).values(last_login_at=last_login_at)
+        )

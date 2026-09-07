@@ -14,12 +14,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { authApi } from "@/lib/api/auth";
+import { useAuth } from "@/providers/auth-provider";
 import { type ThemePreference, useTheme } from "@/providers/theme-provider";
 
 import { setLocale } from "@/i18n/locale";
 import { type Locale, locales } from "@/i18n/routing";
 
+import { PasswordForm } from "./password-form";
+
 export function GeneralSettings() {
+  const { refresh } = useAuth();
+  const tPassword = useTranslations("password");
   const locale = useLocale() as Locale;
   const router = useRouter();
   const tSettings = useTranslations("settings");
@@ -81,6 +87,17 @@ export function GeneralSettings() {
           </Select>
         </Item>
       </ItemGroup>
+      <section className="mt-6 space-y-4 rounded-lg border p-4">
+        <h3 className="font-medium">{tPassword("change")}</h3>
+        <PasswordForm
+          onSubmit={async (newPassword, currentPassword) => {
+            await authApi.changePassword(currentPassword, newPassword);
+            await refresh();
+            window.location.href = "/login";
+          }}
+        />
+        <p className="text-muted-foreground text-xs">{tPassword("recovery")}</p>
+      </section>
     </div>
   );
 }

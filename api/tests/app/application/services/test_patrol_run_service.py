@@ -109,6 +109,9 @@ class PatrolRepo:
     async def get_remediation_by_recheck_run_id(self, run_id):
         return next((r for r in self.remediations.values() if r.recheck_run_id == run_id), None)
 
+    async def get_remediation(self, remediation_id, scope=None, for_update=False):
+        return self.remediations.get(remediation_id)
+
     async def save_remediation(self, remediation):
         self.remediations[remediation.id] = remediation
         return remediation
@@ -128,6 +131,7 @@ class Uow:
     def __init__(self, patrol):
         self.patrol = patrol
         self.execution_commands = object()
+        self.notification = SimpleNamespace(save=AsyncMock())
         self.inside_transaction = False
         self.session = SimpleNamespace(
             save=AsyncMock(),
@@ -910,7 +914,11 @@ async def test_finalize_dispatches_configured_notify_channels() -> None:
     uow = Uow(repo)
     notification_service = MagicMock()
     notification_service.send = AsyncMock()
-    notification_service.dispatch_notify_channels = AsyncMock()
+
+    async def queue(*args, **kwargs):
+        assert uow.inside_transaction
+
+    notification_service.queue_channels = AsyncMock(side_effect=queue)
     service = PatrolRunService(
         lambda: uow,
         run_admission_service=Admission(),
@@ -955,10 +963,108 @@ async def test_finalize_dispatches_configured_notify_channels() -> None:
         submissions=[submission],
     )
 
-    notification_service.send.assert_awaited()
-    notification_service.dispatch_notify_channels.assert_awaited_once()
-    call = notification_service.dispatch_notify_channels.await_args
-    assert call.args[0] == "user-1"
-    channels = call.args[2]
+    notification_service.send.assert_not_awaited()
+    uow.notification.save.assert_awaited_once()
+    notification_service.queue_channels.assert_awaited_once()
+    call = notification_service.queue_channels.await_args
+    assert call.args[0] is uow
+    assert call.args[1] == "user-1"
+    assert call.kwargs["idempotency_key"] == f"patrol-terminal:{run.id}"
+    channels = call.args[3]
     assert channels[0]["type"] == "webhook"
     assert channels[0]["url"] == "https://example.test/hook"
+
+
+@pytest.mark.asyncio
+async def test_recheck_uses_original_snapshot_and_links_before_admission():
+    pack = make_pack()
+    repo = PatrolRepo(pack)
+    uow = Uow(repo)
+    service = make_service(uow)
+    original = await service.trigger_pack(
+        pack.id, OwnerScope.personal("user-1"), "user-1", idempotency_key="original"
+    )
+    original.status = PatrolRunStatus.COMPLETED
+    remediation = PatrolRemediation(
+        pack_id=pack.id,
+        run_id=original.id,
+        finding_id="finding",
+        check_result_id="check",
+        fingerprint="f" * 64,
+        action=PatrolRemediationAction.RESTART_WORKLOAD,
+        target_namespace="default",
+        params_hash="hash",
+        idempotency_key="fix",
+        created_by="user-1",
+        status=PatrolRemediationStatus.EXECUTED,
+    )
+    repo.remediations[remediation.id] = remediation
+    pack.status = PatrolPackStatus.DRAFT
+    pack.config.checks[0].title = "Changed after original run"
+
+    async def admit(**kwargs):
+        linked = repo.remediations[remediation.id].recheck_run_id
+        assert linked in repo.runs
+        assert uow.inside_transaction
+        return kwargs["run_id"]
+
+    service._run_admission = SimpleNamespace(admit=admit)
+    recheck = await service.trigger_recheck(remediation.id, OwnerScope.personal("user-1"))
+    assert recheck.pack_snapshot["config"] == original.pack_snapshot["config"]
+    assert recheck.collector_capability_hash == original.collector_capability_hash
+    assert recheck.trigger_type == PatrolTriggerType.REMEDIATION
+    again = await service.trigger_recheck(remediation.id, OwnerScope.personal("user-1"))
+    assert again.id == recheck.id
+
+
+@pytest.mark.asyncio
+async def test_recheck_with_changed_definition_cannot_resolve_original_finding():
+    repo = PatrolRepo(make_pack())
+    service = make_service(Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    original, finding, check_id = await _finalize_original_failure(repo, service, scope)
+    remediation = _remediation_for(original, finding, check_id)
+    repo.remediations[remediation.id] = remediation
+    repo.pack.config.checks[0].title = "Different definition"
+    child = await service.trigger_pack(
+        repo.pack.id,
+        scope,
+        "user-1",
+        idempotency_key="drifted-recheck",
+        trigger_type=PatrolTriggerType.REMEDIATION,
+    )
+    remediation.recheck_run_id = child.id
+    observation = {"unavailable_replicas": 0, "not_ready_workloads": []}
+    await service.finalize_run(
+        run_id=child.id,
+        session_id=child.session_id,
+        idempotency_key=child.submission_idempotency_key,
+        collector_capability_hash=child.collector_capability_hash,
+        submissions=[
+            PatrolObservationSubmission(
+                check_id="k8s-workload-availability",
+                observation=observation,
+                evidence_refs=_k8s_evidence(observation, repo.pack.config.target_ref),
+            )
+        ],
+    )
+    assert repo.findings[finding.id].status == PatrolFindingStatus.OPEN
+    assert repo.remediations[remediation.id].status == PatrolRemediationStatus.FAILED
+    assert repo.remediations[remediation.id].error_code == "recheck_definition_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_recheck_closes_remediation_after_kernel_projects_child_failure():
+    repo = PatrolRepo(make_pack())
+    service = make_service(Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    original, finding, check_id = await _finalize_original_failure(repo, service, scope)
+    remediation = _remediation_for(original, finding, check_id)
+    repo.remediations[remediation.id] = remediation
+    child = await service.trigger_recheck(remediation.id, scope)
+    child.status = PatrolRunStatus.FAILED
+    child.summary = {"error_code": "execution_failed", "error_message": "kernel terminated"}
+    await service.reconcile_recheck(remediation.id, scope)
+    assert repo.remediations[remediation.id].status == PatrolRemediationStatus.FAILED
+    assert repo.remediations[remediation.id].error_code == "recheck_aborted"
+    assert repo.findings[finding.id].status == PatrolFindingStatus.OPEN

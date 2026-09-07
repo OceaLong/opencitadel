@@ -29,13 +29,6 @@ import type { PatrolNotifyChannel, PatrolPack, PatrolPackConfig } from "@/lib/ap
 
 type PatrolTemplateId = "kubernetes-baseline-v1" | "compose-services-baseline-v1";
 
-/** 通知渠道按类型的关键字段：为空的渠道行在提交时丢弃。 */
-function isNotifyChannelComplete(channel: PatrolNotifyChannel): boolean {
-  if (channel.type === "mcp") return Boolean(channel.server_id);
-  if (channel.type === "webhook") return Boolean(channel.url);
-  return Boolean(channel.address);
-}
-
 /**
  * 巡检 Pack 创建/编辑向导。传入 `pack` 时进入编辑模式：表单预填现有配置，
  * 提交走 PATCH updatePack（乐观锁 version），保存后同样走验证 → 激活流程。
@@ -124,6 +117,7 @@ export function PackWizard({ pack }: { pack?: PatrolPack }) {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [serversLoaded, setServersLoaded] = useState(false);
   const [serversError, setServersError] = useState(false);
+  const [channelsValid, setChannelsValid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => ({
     name: pack?.name ?? t("wizard.defaultName"),
@@ -189,7 +183,7 @@ export function PackWizard({ pack }: { pack?: PatrolPack }) {
       environment: form.environment as "dev" | "staging" | "production",
     },
     schedule: { cron: form.cron, enabled: form.scheduleEnabled },
-    notify_channels: form.notifyChannels.filter(isNotifyChannelComplete),
+    notify_channels: form.notifyChannels,
   });
 
   const validateAndActivate = async (packId: string) => {
@@ -477,6 +471,7 @@ export function PackWizard({ pack }: { pack?: PatrolPack }) {
                   </p>
                 </div>
                 <NotifyChannelsField
+                  onValidityChange={setChannelsValid}
                   value={form.notifyChannels}
                   onChange={(notifyChannels) => setForm({ ...form, notifyChannels })}
                   servers={servers}
@@ -500,7 +495,7 @@ export function PackWizard({ pack }: { pack?: PatrolPack }) {
               </Button>
             ) : (
               <Button
-                disabled={saving || !canContinue}
+                disabled={saving || !canContinue || !channelsValid}
                 onClick={() => void (editing ? update() : create())}
               >
                 {saving && <Loader2 className="size-4 animate-spin" />}

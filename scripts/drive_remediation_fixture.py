@@ -218,11 +218,14 @@ async def _call_tool_async(url: str, tool_name: str, arguments: dict, attempts: 
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
+    token = os.environ.get("PATROL_ACTUATOR_TOKEN", "")
+    if len(token) < 32:
+        raise HarnessError("PATROL_ACTUATOR_TOKEN must contain at least 32 characters")
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             async with (
-                streamablehttp_client(url=url) as (
+                streamablehttp_client(url=url, headers={"Authorization": f"Bearer {token}"}) as (
                     read_stream,
                     write_stream,
                     _get_session_id,

@@ -37,7 +37,8 @@ def test_stateful_resource_constructors_require_settings(resource_type: type) ->
         resource_type()
 
 
-def test_sync_uri_helper_requires_explicit_settings() -> None:
+def test_sync_uri_helper_requires_explicit_settings(monkeypatch) -> None:
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
     settings = DeploymentSettings(
         postgres_user="app",
         postgres_password="secret",

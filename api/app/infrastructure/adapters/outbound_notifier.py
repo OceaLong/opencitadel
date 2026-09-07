@@ -36,6 +36,8 @@ class HttpEmailOutboundNotifier(OutboundNotifierPort):
     async def send_webhook(self, url: str, secret: str, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json"}
+        if payload.get("delivery_id"):
+            headers["Idempotency-Key"] = str(payload["delivery_id"])
         if secret:
             signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
             headers["X-OpenCitadel-Signature"] = f"sha256={signature}"
@@ -47,7 +49,9 @@ class HttpEmailOutboundNotifier(OutboundNotifierPort):
             response = await client.post(url, content=body, headers=headers)
             response.raise_for_status()
 
-    async def send_email(self, address: str, subject: str, body: str) -> None:
+    async def send_email(
+        self, address: str, subject: str, body: str, *, delivery_id: str | None = None
+    ) -> None:
         if not self._smtp_host:
             raise RuntimeError("SMTP 未配置：请设置 SMTP_HOST 等环境变量")
 
@@ -56,6 +60,8 @@ class HttpEmailOutboundNotifier(OutboundNotifierPort):
             message["From"] = self._smtp_from or self._smtp_user
             message["To"] = address
             message["Subject"] = subject
+            if delivery_id:
+                message["Message-ID"] = f"<{delivery_id}@notifications.opencitadel>"
             message.set_content(body)
             with smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=15) as server:
                 if self._smtp_use_tls:

@@ -5,6 +5,7 @@ import secrets
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from app.application.execution.admission import RunAdmissionService
 from app.application.ports.crypto import SecretCipherError, VersionedSecretCipher
@@ -21,6 +22,7 @@ from app.application.services.resource_guard_service import (
 from app.application.services.runtime_policy_reader import OperationsPolicyReader
 from app.domain.errors import BadRequestError
 from app.domain.execution.run import RunFamily, RunStatus
+from app.domain.models.notification import Notification
 from app.domain.models.patrol import PatrolTriggerType
 from app.domain.models.scheduled_job import (
     NotifyChannel,
@@ -44,6 +46,15 @@ _TERMINAL_STATUS_MAP = {
     "completed": ScheduledRunStatus.COMPLETED,
     "failed": ScheduledRunStatus.FAILED,
     "cancelled": ScheduledRunStatus.CANCELLED,
+}
+
+
+_JOB_NOTIFICATION_FACTORIES = {
+    "job_started": partial(Notification, i18n_key="notifications.scheduledJobStarted"),
+    "job_complete": partial(Notification, i18n_key="notifications.scheduledJobCompleted"),
+    "job_failed": partial(Notification, i18n_key="notifications.scheduledJobFailed"),
+    "job_cancelled": partial(Notification, i18n_key="notifications.scheduledJobCancelled"),
+    "trigger_failed": partial(Notification, i18n_key="notifications.scheduledJobTriggerFailed"),
 }
 
 
@@ -299,6 +310,14 @@ class ScheduledJobService:
             job.next_run_at = retry_at
         async with self._uow_factory() as uow:
             await uow.scheduled_job.save(job)
+            await self._queue_job_notification(
+                uow,
+                job,
+                "job_failed",
+                f'Scheduled job "{job.name}" could not start',
+                None,
+                f"trigger-failed:{job.updated_at.isoformat()}",
+            )
             await uow.commit()
         logger.warning("定时任务触发失败 job=%s error=%s", job.id, error)
 
@@ -341,31 +360,49 @@ class ScheduledJobService:
             return
         async with self._uow_factory() as uow:
             job = await uow.scheduled_job.get_by_last_run_session_id(session_id)
-            if not job:
+            if not job or job.last_run_status != ScheduledRunStatus.RUNNING:
                 return
             job.last_run_status = normalized
             job.updated_at = datetime.now(UTC)
             await uow.scheduled_job.save(job)
+            notice_type = {
+                "completed": "job_complete",
+                "failed": "job_failed",
+                "cancelled": "job_cancelled",
+            }[normalized]
+            await self._queue_job_notification(
+                uow,
+                job,
+                notice_type,
+                f'Scheduled job "{job.name}" {normalized}',
+                session_id,
+                f"terminal:{session_id}",
+            )
             await uow.commit()
 
-        if normalized == "completed":
-            fallback_message = f'Scheduled job "{job.name}" completed'
-            await self._notification_service.send(
-                job.owner_user_id,
-                "job_complete",
-                fallback_message,
-                i18n_key="notifications.scheduledJobCompleted",
+    async def _queue_job_notification(self, uow, job, notice_type, message, session_id, event_key):
+        factory = _JOB_NOTIFICATION_FACTORIES[
+            "trigger_failed" if event_key.startswith("trigger-failed:") else notice_type
+        ]
+        await uow.notification.save(
+            factory(
                 i18n_params={"jobName": job.name},
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"scheduled:{job.id}:{event_key}")),
+                user_id=job.owner_user_id,
+                type=notice_type,
+                message=message,
                 session_id=session_id,
                 job_id=job.id,
             )
-            if job.notify_channels:
-                await self._notification_service.dispatch_notify_channels(
-                    job.owner_user_id,
-                    self._scope_for_job(job),
-                    job.notify_channels_dict(),
-                    fallback_message,
-                )
+        )
+        await self._notification_service.queue_channels(
+            uow,
+            job.owner_user_id,
+            self._scope_for_job(job),
+            job.notify_channels_dict(),
+            message,
+            idempotency_key=f"scheduled:{job.id}:{event_key}",
+        )
 
     async def trigger_job(
         self,
@@ -498,27 +535,18 @@ class ScheduledJobService:
                 )
                 job.last_execution_run_id = execution_run_id
                 await uow.scheduled_job.save(job)
+                await self._queue_job_notification(
+                    uow,
+                    job,
+                    "job_started",
+                    f'Scheduled job "{job.name}" started',
+                    session.id,
+                    f"started:{firing_id}",
+                )
                 await uow.commit()
         except _SchedulerPolicyDenied:
             return None
 
-        fallback_message = f'Scheduled job "{job.name}" started'
-        await self._notification_service.send(
-            job.owner_user_id,
-            "job_started",
-            fallback_message,
-            i18n_key="notifications.scheduledJobStarted",
-            i18n_params={"jobName": job.name},
-            session_id=session.id,
-            job_id=job.id,
-        )
-        if job.notify_channels:
-            await self._notification_service.dispatch_notify_channels(
-                job.owner_user_id,
-                self._scope_for_job(job),
-                job.notify_channels_dict(),
-                fallback_message,
-            )
         return session.id
 
     async def trigger_webhook(

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { PasswordForm } from "@/components/settings/password-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,9 +45,12 @@ import {
 import { type PaginatedFetcher, usePaginatedList } from "@/hooks/use-paginated-list";
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type AdminTeam, type AdminUser, type Quota } from "@/lib/api/admin";
+import { authApi } from "@/lib/api/auth";
 
 export default function AdminUsersPage() {
   const t = useTranslations("admin");
+  const tPassword = useTranslations("password");
+  const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null);
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const [search, setSearch] = useState("");
@@ -292,6 +296,9 @@ export default function AdminUsersPage() {
                           <DropdownMenuItem onClick={() => setEditing({ ...user })}>
                             {tCommon("edit")}
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setPasswordUser(user)}>
+                            {tPassword("reset")}
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => void openQuota(user)}>
                             {t("quota")}
                           </DropdownMenuItem>
@@ -346,6 +353,29 @@ export default function AdminUsersPage() {
         </CardContent>
       </Card>
 
+      <Dialog
+        open={!!passwordUser}
+        onOpenChange={(open) => {
+          if (!open) setPasswordUser(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {tPassword("reset")} · {passwordUser?.username}
+            </DialogTitle>
+          </DialogHeader>
+          {passwordUser && (
+            <PasswordForm
+              key={passwordUser.id}
+              adminReset
+              onSubmit={async (newPassword) => {
+                await authApi.resetPassword(passwordUser.id, newPassword);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>
           <DialogHeader>

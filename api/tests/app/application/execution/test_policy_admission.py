@@ -177,88 +177,32 @@ async def test_private_input_factory_uses_the_same_policy_as_the_run_snapshot() 
     assert policy_heads.calls == [(True, NOW)]
 
 
-class _ActiveRunCounter:
-    def __init__(self, active: int) -> None:
-        self.active = active
-        self.scopes = []
-
-    async def count_active_runs(self, *, owner_scope):
-        self.scopes.append(owner_scope)
-        return self.active
-
-
 @pytest.mark.asyncio
-async def test_admission_refuses_runs_beyond_the_per_scope_active_ceiling() -> None:
-    """K2-8: per-scope backpressure — at the ceiling, admit() raises
-    ADMISSION_LIMIT_EXCEEDED before writing anything."""
-    from app.application.execution.admission import AdmissionLimitExceededError
+async def test_admission_passes_hard_ceiling_to_transactional_command_sink():
+    from app.application.execution.command_ingress import CommandIngress
 
-    commands = _Commands()
-    objects = _Objects()
-    counter = _ActiveRunCounter(active=200)
-    admission = RunAdmissionService(
-        command_ingress=commands,
-        activity_objects=objects,
-        policy_heads=_PolicyHeads(_active_execution()),
-        active_run_counter=counter,
-        max_active_runs_per_scope=200,
-        clock=lambda: NOW,
-    )
+    class Sink:
+        def __init__(self):
+            self.limits = []
 
-    with pytest.raises(AdmissionLimitExceededError, match="ADMISSION_LIMIT_EXCEEDED"):
-        await admission.admit(
-            family=RunFamily.AGENT,
-            source_entity_type="session",
-            source_entity_id="session-1",
-            owner_scope=OwnerScope.personal("user-1"),
-            private_input={"message": "hello"},
-            public_input={"message": "hello"},
-        )
+        async def receive(self, command, *, max_active_runs=0):
+            self.limits.append(max_active_runs)
+            return True
 
-    assert commands.commands == []  # nothing enqueued
-    assert objects.payloads == []  # nothing persisted to object storage
-    assert counter.scopes[0].user_id == "user-1"
-
-
-@pytest.mark.asyncio
-async def test_admission_below_the_ceiling_and_with_zero_limit_admits_normally() -> None:
-    commands = _Commands()
-    counter = _ActiveRunCounter(active=199)
-    admission = RunAdmissionService(
-        command_ingress=commands,
+    sink = Sink()
+    service = RunAdmissionService(
+        command_ingress=CommandIngress(writer=sink),
         activity_objects=_Objects(),
         policy_heads=_PolicyHeads(_active_execution()),
-        active_run_counter=counter,
-        max_active_runs_per_scope=200,
-        clock=lambda: NOW,
+        max_active_runs_per_scope=1,
     )
-    await admission.admit(
+    await service.admit(
         family=RunFamily.AGENT,
         source_entity_type="session",
-        source_entity_id="session-1",
-        owner_scope=OwnerScope.personal("user-1"),
-        private_input={"message": "hello"},
-        public_input={"message": "hello"},
+        source_entity_id="s",
+        owner_scope=OwnerScope.personal("u"),
+        private_input={},
+        public_input={},
+        command_sink=sink,
     )
-    assert len(commands.commands) == 1
-
-    # limit=0 disables the gate entirely: the counter is never consulted.
-    unlimited_counter = _ActiveRunCounter(active=10_000)
-    unlimited = RunAdmissionService(
-        command_ingress=commands,
-        activity_objects=_Objects(),
-        policy_heads=_PolicyHeads(_active_execution()),
-        active_run_counter=unlimited_counter,
-        max_active_runs_per_scope=0,
-        clock=lambda: NOW,
-    )
-    await unlimited.admit(
-        family=RunFamily.AGENT,
-        source_entity_type="session",
-        source_entity_id="session-1",
-        owner_scope=OwnerScope.personal("user-1"),
-        private_input={"message": "hello"},
-        public_input={"message": "hello"},
-    )
-    assert len(commands.commands) == 2
-    assert unlimited_counter.scopes == []
+    assert sink.limits == [1]

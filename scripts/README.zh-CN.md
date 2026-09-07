@@ -8,6 +8,8 @@
 
 | 脚本 | 用途 |
 |------|------|
+| [`backup.sh`](backup.sh) / [`backup_tool.py`](backup_tool.py) | 停写后的 Compose 数据库与对象备份，含完整性 Manifest |
+| [`verify-backup.sh`](verify-backup.sh) / [`restore.sh`](restore.sh) | 离线校验与全新卷恢复演练；参见[操作手册](../docs/operations/deployment.zh-CN.md#本地-compose-备份与隔离恢复) |
 | [`quickstart.sh`](quickstart.sh) | 首次体验：创建 `.env`、构建 `opencitadel-sandbox`、启动 Compose 栈 |
 | [`check-docs.sh`](check-docs.sh) | CI 文档检查：双语配对、索引覆盖、过期内容防护 |
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh) | 管理隔离的全栈验收、证据 Manifest 与精确 Label 清理 |

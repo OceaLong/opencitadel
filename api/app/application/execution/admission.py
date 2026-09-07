@@ -2,13 +2,13 @@
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.command_ingress import CommandIngress, CommandSink
 from app.application.services.runtime_policy_reader import PolicyHeadReader
 from app.domain.execution.commands import CommandContext, JsonValue, RegisteredCommand
+from app.domain.execution.errors import AdmissionLimitExceededError
 from app.domain.execution.run import RunFamily
 from app.domain.models.scope import OwnerScope
 from app.domain.runtime_policy import ExecutionPolicy
@@ -21,24 +21,6 @@ def run_id_for_idempotency_key(idempotency_key: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"opencitadel:run:{idempotency_key}")
 
 
-class AdmissionLimitExceededError(ValueError):
-    """Per-scope active-Run ceiling reached; new Runs are refused (K2-8).
-
-    A ValueError subclass so existing admission error handling (which surfaces
-    admit()'s ValueErrors to the caller) needs no new plumbing; the message is
-    the stable machine-readable code.
-    """
-
-    def __init__(self, *, limit: int, active: int) -> None:
-        super().__init__("ADMISSION_LIMIT_EXCEEDED")
-        self.limit = limit
-        self.active = active
-
-
-class ActiveRunCounter(Protocol):
-    async def count_active_runs(self, *, owner_scope: OwnerScope) -> int: ...
-
-
 class RunAdmissionService:
     def __init__(
         self,
@@ -46,7 +28,6 @@ class RunAdmissionService:
         command_ingress: CommandIngress,
         activity_objects: ActivityObjectStore,
         policy_heads: PolicyHeadReader,
-        active_run_counter: ActiveRunCounter | None = None,
         max_active_runs_per_scope: int = 0,
         clock=None,
     ) -> None:
@@ -55,9 +36,6 @@ class RunAdmissionService:
         self._commands = command_ingress
         self._objects = activity_objects
         self._policy_heads = policy_heads
-        # Explicit backpressure boundary (K2-8): 0 (or no counter) disables the
-        # per-scope active-Run ceiling.
-        self._active_run_counter = active_run_counter
         self._max_active_runs_per_scope = max_active_runs_per_scope
         self._clock = clock or (lambda: datetime.now(UTC))
 
@@ -89,17 +67,6 @@ class RunAdmissionService:
             else uuid4()
         )
         now = self._clock()
-        if self._active_run_counter is not None and self._max_active_runs_per_scope > 0:
-            # Check-then-act on the projection is intentionally advisory: a
-            # concurrent admit may overshoot the ceiling by a few Runs, which is
-            # acceptable for a backpressure boundary (the invariant guard is the
-            # database, not this counter).
-            active = await self._active_run_counter.count_active_runs(owner_scope=owner_scope)
-            if active >= self._max_active_runs_per_scope:
-                raise AdmissionLimitExceededError(
-                    limit=self._max_active_runs_per_scope,
-                    active=active,
-                )
         active_policy = await self._policy_heads.active_execution(
             require_fresh=True,
             now=now,
@@ -150,12 +117,16 @@ class RunAdmissionService:
                 issued_at=now,
             ),
             sink=command_sink,
+            **(
+                {"max_active_runs": self._max_active_runs_per_scope}
+                if self._max_active_runs_per_scope > 0
+                else {}
+            ),
         )
         return resolved_run_id
 
 
 __all__ = [
-    "ActiveRunCounter",
     "AdmissionLimitExceededError",
     "RunAdmissionService",
     "run_id_for_idempotency_key",

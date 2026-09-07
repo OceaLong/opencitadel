@@ -230,6 +230,8 @@ class PatrolRemediationResponse(BaseModel):
     before_observation: dict[str, Any] | None
     after_observation: dict[str, Any] | None
     recheck_run_id: str | None
+    recheck_dispatch_attempts: int = 0
+    recheck_next_attempt_at: datetime | None = None
     error_code: str | None
     error_message: str | None
     created_by: str

@@ -68,7 +68,7 @@ class ChildRunActivityHandler:
             workflow={"retrieval_required": False, "tool_required": False},
             idempotency_key=f"child:{request.aggregate_id}",
             parent_run_id=UUID(request.aggregate_id),
-            correlation_id=UUID(request.aggregate_id),
+            correlation_id=context.run.correlation_id,
         )
         status = await self._runs.status_for_run(
             run_id=child_run_id,

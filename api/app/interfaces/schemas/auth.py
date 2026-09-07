@@ -41,3 +41,11 @@ class UserResponse(BaseModel):
             created_at=user.created_at,
             last_login_at=user.last_login_at,
         )
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(ResetPasswordRequest):
+    current_password: str = Field(min_length=1, max_length=128)

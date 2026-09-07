@@ -7,11 +7,13 @@ import pytest
 
 from app.application.services.notification_service import NotificationService
 from app.domain.models.scope import OwnerScope
+from tests.app.application.services.test_notification_delivery import MemoryUow
 
 
 def _service(outbound: object) -> NotificationService:
+    uow = MemoryUow()
     return NotificationService(
-        uow_factory=lambda: None,
+        uow_factory=lambda: uow,
         mcp_servers=SimpleNamespace(),
         mcp_connection_pool=SimpleNamespace(),
         policy_reader=SimpleNamespace(),
@@ -37,8 +39,10 @@ async def test_dispatch_routes_webhook_and_email() -> None:
         "hello",
     )
 
+    await service.process_deliveries()
     outbound.send_webhook.assert_awaited_once()
     assert outbound.send_webhook.await_args.args[0] == "https://example.com/hook"
+    await service.process_deliveries()
     outbound.send_email.assert_awaited_once()
     assert outbound.send_email.await_args.args[0] == "ops@example.com"
 
@@ -62,4 +66,5 @@ async def test_dispatch_isolates_webhook_failure_from_email() -> None:
         "hi",
     )
 
+    await service.process_deliveries()
     outbound.send_email.assert_awaited_once()
