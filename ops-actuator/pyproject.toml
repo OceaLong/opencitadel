@@ -5,7 +5,7 @@ description = "Bounded, registered-write MCP actions for OpenCitadel Ops Patrol 
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "kubernetes>=31.0.0",
-  "mcp>=1.22.0,<2",
+  "mcp>=1.22.0,<3",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.12.0",
 ]
