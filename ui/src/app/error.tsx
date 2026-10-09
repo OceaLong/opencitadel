@@ -29,7 +29,13 @@ export default function GlobalError({
       </p>
       <div className="flex gap-2">
         <Button onClick={() => reset()}>{tCommon("retry")}</Button>
-        <Button variant="outline" onClick={() => (window.location.href = "/")}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Recover with a new document after the route boundary fails.
+            window.location.href = "/";
+          }}
+        >
           {tCommon("backHome")}
         </Button>
       </div>

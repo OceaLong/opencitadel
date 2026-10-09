@@ -90,6 +90,7 @@ class A2ATool(BaseTool):
         if self._initialized:
             return
         filtered = filter_enabled_a2a_runtime(runtime) if runtime else A2ARuntime()
+        self.recording_runtime = filtered
         self._tool_policies = {
             name: self._aggregate_policy(filtered.servers, name)
             for name in ("get_remote_agent_cards", "call_remote_agent")

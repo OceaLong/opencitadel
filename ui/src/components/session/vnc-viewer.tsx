@@ -22,6 +22,10 @@ export function VNCViewer({ url, viewOnly, onStatusChange }: VNCViewerProps) {
     onStatusChange?.("connecting");
 
     let rfb: RFB | null = null;
+    let active = true;
+    const report = (status: VNCStatus, detail?: string) => {
+      if (active) onStatusChange?.(status, detail);
+    };
     try {
       rfb = new RFB(displayRef.current, url, {
         credentials: { password: "", username: "", target: "" },
@@ -31,22 +35,23 @@ export function VNCViewer({ url, viewOnly, onStatusChange }: VNCViewerProps) {
       rfb.scaleViewport = true;
       rfb.background = "#000";
 
-      rfb.addEventListener("connect", () => onStatusChange?.("connected"));
+      rfb.addEventListener("connect", () => report("connected"));
       rfb.addEventListener("disconnect", (e: CustomEvent) => {
         if (e.detail?.clean) {
-          onStatusChange?.("disconnected", t("connectionDisconnected"));
+          report("disconnected", t("connectionDisconnected"));
         } else {
-          onStatusChange?.("error", t("sandboxDisconnectedAbnormal"));
+          report("error", t("sandboxDisconnectedAbnormal"));
         }
       });
       rfb.addEventListener("securityfailure", () => {
-        onStatusChange?.("error", t("authFailed"));
+        report("error", t("authFailed"));
       });
     } catch {
-      onStatusChange?.("error", t("connectionFailedNotStarted"));
+      report("error", t("connectionFailedNotStarted"));
     }
 
     return () => {
+      active = false;
       try {
         rfb?.disconnect();
       } catch {

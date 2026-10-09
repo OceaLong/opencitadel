@@ -1,0 +1,25 @@
+[Unit]
+Description=Fixed private Opencitadel capacity network calibration fixture
+After=network.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 -I /opt/opencitadel-capacity/calibration.py serve
+User=root
+Group=root
+Restart=no
+MemoryMax=268435456
+MemorySwapMax=0
+CPUQuota=100%
+TasksMax=1
+TimeoutStartSec=5
+TimeoutStopSec=5
+RuntimeMaxSec=600
+KillMode=control-group
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET
+StandardOutput=null
+StandardError=null

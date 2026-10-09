@@ -249,13 +249,15 @@ class SessionService:
         await self._publish_session_list_hint()
         logger.info("恢复会话[%s]成功", session_id)
 
-    async def purge_session(self, session_id: str, scope: OwnerScope | None = None) -> None:
+    async def purge_session(
+        self, session_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> None:
         """物理清除回收站中的会话（不可恢复）。"""
         if scope is None:
             raise ValueError("session purge requires an owner scope")
         logger.info("正在清除会话, 会话id: %s", session_id)
         async with self._uow_factory() as uow:
-            purged = await uow.session.purge(session_id, scope=scope)
+            purged = await uow.session.purge(session_id, scope=scope, force=force)
             if not purged:
                 raise NotFoundError(f"回收站中不存在会话[{session_id}]")
             await uow.commit()

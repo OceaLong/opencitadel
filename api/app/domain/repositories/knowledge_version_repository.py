@@ -30,6 +30,7 @@ class KnowledgeVersionGCResult:
     retained_shared_revisions: int = 0
     protected_active_versions: int = 0
     protected_bound_versions: int = 0
+    protected_pinned_versions: int = 0
     protected_building_versions: int = 0
     protected_age_versions: int = 0
     protected_retention_versions: int = 0
@@ -52,6 +53,7 @@ class KnowledgeVersionGCResult:
             self.retained_shared_revisions,
             self.protected_active_versions,
             self.protected_bound_versions,
+            self.protected_pinned_versions,
             self.protected_building_versions,
             self.protected_age_versions,
             self.protected_retention_versions,
@@ -67,6 +69,7 @@ class KnowledgeVersionGCResult:
     def retained_reference_count(self) -> int:
         return (
             self.protected_bound_versions
+            + self.protected_pinned_versions
             + self.protected_building_versions
             + self.retained_shared_revisions
         )
@@ -86,6 +89,7 @@ class KnowledgeVersionGCResult:
             "protected_active_versions": self.protected_active_versions,
             "protected_age_versions": self.protected_age_versions,
             "protected_bound_versions": self.protected_bound_versions,
+            "protected_pinned_versions": self.protected_pinned_versions,
             "protected_retention_versions": (self.protected_retention_versions),
             "reclaimed_logical_bytes": self.reclaimed_logical_bytes,
             "retained_reference_count": self.retained_reference_count,

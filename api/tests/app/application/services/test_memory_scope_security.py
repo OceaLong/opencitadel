@@ -18,7 +18,7 @@ class _FakeMemoryRepo:
         self.owner_scope = kwargs.get("owner_scope")
         return []
 
-    async def save(self, entry):
+    async def save(self, entry, **kwargs):
         self.saved = entry
 
     async def recall_for_session(self, session_id, limit):
@@ -80,3 +80,63 @@ async def test_memory_recall_limit_comes_from_explicit_run_policy():
 
     assert result == ""
     assert repo.last_limit == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update", "recall"])
+async def test_memory_embedding_never_borrows_open_business_transaction(operation):
+    from unittest.mock import AsyncMock
+
+    active = 0
+    repo = _FakeMemoryRepo()
+    repo.get_by_id = AsyncMock(return_value=MemoryEntry(id="entry-1"))
+    repo.update_embedding = AsyncMock()
+    repo.vector_search_entries = AsyncMock(return_value=[])
+
+    class TrackingUow(_FakeUow):
+        async def __aenter__(self):
+            nonlocal active
+            active += 1
+            return self
+
+        async def __aexit__(self, *args):
+            nonlocal active
+            active -= 1
+            return False
+
+    async def embed(*args, **kwargs):
+        assert active == 0, "provider send holds caller transaction / pool connection"
+        return [[0.1] * 1536]
+
+    service = MemoryService(lambda: TrackingUow(repo), SimpleNamespace(embed=embed))
+    scope = OwnerScope.personal("user-1")
+    policy = MemoryExecutionPolicy(vector_enabled=True)
+    if operation == "recall":
+        await service.recall_for_session("session-1", owner_scope=scope, policy=policy)
+    elif operation == "update":
+        await service.update_entry("entry-1", MemoryEntry(content="new"), scope, policy=policy)
+    else:
+        await service.create_entry(MemoryEntry(content="new"), scope, policy=policy)
+    assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_update_revalidates_entry_after_embedding_before_save():
+    from unittest.mock import AsyncMock
+
+    from app.domain.errors import NotFoundError
+
+    repo = _FakeMemoryRepo()
+    repo.get_by_id = AsyncMock(side_effect=[MemoryEntry(id="entry-1"), None])
+    service = MemoryService(
+        lambda: _FakeUow(repo),
+        SimpleNamespace(embed=AsyncMock(return_value=[[0.1] * 1536])),
+    )
+    with pytest.raises(NotFoundError):
+        await service.update_entry(
+            "entry-1",
+            MemoryEntry(content="new"),
+            OwnerScope.personal("user-1"),
+            policy=MemoryExecutionPolicy(vector_enabled=True),
+        )
+    assert repo.saved is None

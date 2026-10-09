@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mockNavigation, mockNextIntl } from "@/test-utils/mocks";
@@ -149,7 +149,9 @@ vi.mock("@/components/session/chat-input", () => ({
 }));
 
 vi.mock("@/components/session/session-header", () => ({
-  SessionHeader: () => <div>session header</div>,
+  SessionHeader: ({ leadingActions }: { leadingActions?: ReactNode }) => (
+    <div>{leadingActions}</div>
+  ),
 }));
 
 vi.mock("@/components/session/operator-scope-dialog", () => ({
@@ -212,13 +214,18 @@ describe("SessionDetailView resource version integration", () => {
     await settle();
     await settle();
 
-    const current = container.querySelector("section[aria-label='资源版本上下文']");
+    const context = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "contextPanel",
+    );
+    expect(context).toBeTruthy();
+    await act(async () => context!.click());
+    const current = document.querySelector("section[aria-label='资源版本上下文']");
     const historical = container.querySelector("span[aria-label='资源版本上下文']");
     expect(current?.textContent).toContain("knowledge_base: v1");
     expect(historical?.textContent).toBe("v1");
     expect(container.textContent).toContain("历史回答");
 
-    const upgrade = Array.from(container.querySelectorAll("button")).find(
+    const upgrade = Array.from(document.querySelectorAll("button")).find(
       (button) => button.textContent === "升级上下文",
     );
     expect(upgrade).toBeTruthy();
@@ -243,3 +250,44 @@ describe("SessionDetailView resource version integration", () => {
     await unmount();
   });
 });
+
+// The session composition now requires an authenticated, authorized workbench cut.
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { id: "owner", global_role: "user" }, loading: false }),
+}));
+vi.mock("@/providers/client-data-provider", () => ({
+  useClientDataScope: () => ({
+    scope: { userId: "owner", workspaceId: "personal" },
+    scopeRevision: 1,
+  }),
+}));
+vi.mock("@/providers/page-title-provider", () => ({ useReportPageTitle: () => {} }));
+vi.mock("@/hooks/use-session-runs", () => ({
+  useSessionRuns: () => ({
+    items: [{ run_id: "run", status: "completed" }],
+    state: "ready",
+    refresh: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/use-execution-workbench", () => ({
+  useExecutionWorkbench: () => ({
+    selection: {
+      runId: "run",
+      at: null,
+      view: "task",
+      stepId: null,
+      panel: null,
+      artifactId: null,
+      version: null,
+      citationId: null,
+    },
+    layout: { conversationOpen: true },
+    loadState: "ready",
+    view: null,
+    setLayout: vi.fn(),
+    setSelection: vi.fn(),
+    refresh: vi.fn(),
+    returnLive: vi.fn(),
+    revokeContent: vi.fn(),
+  }),
+}));

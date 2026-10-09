@@ -85,3 +85,22 @@ describe("ApprovalActionsBar", () => {
     await unmount();
   });
 });
+
+it("an open reject form is destroyed when authority is lost", async () => {
+  const onSend = vi.fn(),
+    approval = makeApproval();
+  const r = await renderComponent(<ApprovalActionsBar approval={approval} onSend={onSend} />);
+  await act(async () =>
+    buttonsOf(r.container)
+      .find((b) => b.textContent === "Reject")!
+      .click(),
+  );
+  expect(r.container.querySelector("textarea")).not.toBeNull();
+  await act(async () =>
+    r.root.render(<ApprovalActionsBar approval={approval} onSend={onSend} disabled />),
+  );
+  expect(r.container.querySelector("textarea")).toBeNull();
+  expect(buttonsOf(r.container).every((b) => b.disabled)).toBe(true);
+  expect(onSend).not.toHaveBeenCalled();
+  await r.unmount();
+});

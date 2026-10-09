@@ -76,6 +76,41 @@ async def test_storage_factory_passes_one_settings_object_to_client(
         await client.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_acceptance_test_environment_uses_real_minio_client(monkeypatch) -> None:
+    objects: dict[str, bytes] = {}
+    created_buckets: list[str] = []
+
+    class FakeMinioClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def bucket_exists(self, bucket: str) -> bool:
+            return False
+
+        def make_bucket(self, bucket: str) -> None:
+            created_buckets.append(bucket)
+
+        def put_object(self, bucket: str, key: str, stream, *, length: int) -> None:
+            objects[f"{bucket}/{key}"] = stream.read(length)
+
+    monkeypatch.setattr("app.infrastructure.storage.minio.MinioClient", FakeMinioClient)
+    settings = DeploymentSettings(
+        env="test",
+        storage_provider="minio",
+        minio_bucket="acceptance-bucket",
+        evaluation_acceptance_enabled=True,
+    )
+
+    client = await storage_factory.create_storage_client(settings)
+    try:
+        await client.put_bytes("case.json", b"strict")
+        assert created_buckets == ["acceptance-bucket"]
+        assert objects == {"acceptance-bucket/case.json": b"strict"}
+    finally:
+        await client.shutdown()
+
+
 def test_storage_factory_has_no_active_client_registry() -> None:
     assert not hasattr(storage_factory, "set_active_storage_client")
     assert not hasattr(storage_factory, "get_active_storage_client")

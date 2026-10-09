@@ -4,8 +4,8 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | -------------------- |
+| Version        | Supported          |
+| -------------- | ------------------ |
 | latest release | :white_check_mark: |
 | main branch    | :white_check_mark: |
 

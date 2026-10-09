@@ -18,6 +18,7 @@ from app.application.execution.activity_registry import (
 from app.application.execution.orchestrator import CommandResult
 from app.application.execution.progress import ActivityProgressRecord, ActivityProgressSink
 from app.application.execution.run_context import RunContextSource, RunContextUnavailableError
+from app.domain.evaluation.errors import ReplayMismatch
 from app.domain.execution.activity import (
     ActivityClaim,
     ActivityContext,
@@ -114,6 +115,8 @@ class ActivityWorker:
         claim_ttl: timedelta = timedelta(seconds=30),
         max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
         progress_sink: ActivityProgressSink | None = None,
+        content_writer=None,
+        execution_gate=None,
         infrastructure_errors: tuple[type[Exception], ...] = DEFAULT_INFRASTRUCTURE_ERRORS,
     ) -> None:
         if not worker_id.strip():
@@ -130,6 +133,8 @@ class ActivityWorker:
         self._claim_ttl = claim_ttl
         self._max_concurrency = max_concurrency
         self._progress_sink = progress_sink
+        self._content_writer = content_writer
+        self._execution_gate = execution_gate
         self._infrastructure_errors = infrastructure_errors
         # Bounds concurrent claim execution (and therefore concurrent connection
         # demand) regardless of the claim batch size. See module docstring above.
@@ -273,7 +278,17 @@ class ActivityWorker:
             result = await self._submit_outcome(claim, outcome, now=now)
             return "failed" if result.status == "accepted" else "stale"
 
-        if claim.recovered_after_call_started and not handler.idempotent:
+        recovery_safe = False
+        if not handler.idempotent:
+            check_recovery = getattr(handler, "recovery_safe", None)
+            if check_recovery is not None:
+                try:
+                    recovery_safe = await check_recovery(claim.request, run_context)
+                except ReplayMismatch:
+                    outcome = ActivityOutcome.failed(failure_code=ReplayMismatch.code)
+                    result = await self._submit_outcome(claim, outcome, now=now)
+                    return "failed" if result.status == "accepted" else "stale"
+        if claim.recovered_after_call_started and not handler.idempotent and not recovery_safe:
             outcome = ActivityOutcome.unknown(failure_code="NON_IDEMPOTENT_OUTCOME_UNKNOWN")
             result = await self._submit_outcome(claim, outcome, now=now)
             return "unknown" if result.status == "accepted" else "stale"
@@ -282,6 +297,9 @@ class ActivityWorker:
             outcome = ActivityOutcome.failed(failure_code="ACTIVITY_TIMEOUT")
             result = await self._submit_outcome(claim, outcome, now=now)
             return "failed" if result.status == "accepted" else "stale"
+
+        if self._execution_gate is not None:
+            await self._execution_gate.before_activity(claim, run_context)
 
         if not await self._store.mark_call_started(claim, now=now):
             return "stale"
@@ -292,15 +310,29 @@ class ActivityWorker:
             payload={
                 "activity_id": str(claim.request.activity_id),
                 "generation": claim.request.generation,
+                "claim_generation": claim.claim_generation,
                 "result_ref": None,
                 "result_summary": None,
             },
             now=now,
+            dedupe_suffix=f"{claim.request.generation}:{claim.claim_generation}",
         )
         if started.status != "accepted":
             return "stale"
 
+        trusted_citations = []
+
+        async def record_citations(items):
+            from app.domain.models.knowledge_citation import KnowledgeCitation
+
+            if not all(isinstance(item, KnowledgeCitation) for item in items):
+                raise ValueError("only typed retrieval citations may be captured")
+            trusted_citations.extend(items)
+
         context = ActivityContext(
+            record_citations=record_citations,
+            activity_id=claim.request.activity_id,
+            generation=claim.request.generation,
             worker_id=self._worker_id,
             claim_generation=claim.claim_generation,
             idempotency_key=str(claim.request.activity_id),
@@ -340,11 +372,18 @@ class ActivityWorker:
                 timeout=remaining_seconds,
             )
         except TimeoutError:
-            outcome = ActivityOutcome.failed(failure_code="ACTIVITY_TIMEOUT")
+            # Cancellation of a Python task cannot prove an external write stopped.
+            outcome = (
+                ActivityOutcome.failed(failure_code="ACTIVITY_TIMEOUT")
+                if handler.idempotent or recovery_safe
+                else ActivityOutcome.unknown(failure_code="NON_IDEMPOTENT_OUTCOME_UNKNOWN")
+            )
         except asyncio.CancelledError:
             if claim_lost.is_set():
                 return "stale"
             raise
+        except ReplayMismatch:
+            outcome = ActivityOutcome.failed(failure_code=ReplayMismatch.code)
         except Exception as error:
             if isinstance(error, self._infrastructure_errors):
                 # A persistence/infrastructure fault during execution is not a
@@ -357,7 +396,11 @@ class ActivityWorker:
                 claim.request.activity_id,
                 claim.request.activity_type,
             )
-            outcome = ActivityOutcome.failed(failure_code="ACTIVITY_HANDLER_ERROR")
+            outcome = (
+                ActivityOutcome.failed(failure_code="ACTIVITY_HANDLER_ERROR")
+                if handler.idempotent or recovery_safe
+                else ActivityOutcome.unknown(failure_code="NON_IDEMPOTENT_OUTCOME_UNKNOWN")
+            )
         finally:
             stop_heartbeat.set()
             heartbeat_task.cancel()
@@ -375,7 +418,9 @@ class ActivityWorker:
                 return "stale"
             return "deferred"
 
-        result = await self._submit_outcome(claim, outcome, now=datetime.now(UTC))
+        result = await self._submit_outcome(
+            claim, outcome, now=datetime.now(UTC), content_citations=trusted_citations
+        )
         if result.status != "accepted":
             return "stale"
         return outcome.status
@@ -427,12 +472,14 @@ class ActivityWorker:
         outcome: ActivityOutcome,
         *,
         now: datetime,
+        content_citations=(),
     ) -> CommandResult:
         if outcome.status == "succeeded":
             command_type = "CompleteActivity"
             payload = {
                 "activity_id": str(claim.request.activity_id),
                 "generation": claim.request.generation,
+                "claim_generation": claim.claim_generation,
                 "result_ref": outcome.result_ref,
                 "result_summary": outcome.result_summary,
                 "decision_data": outcome.decision_data,
@@ -445,6 +492,7 @@ class ActivityWorker:
             payload = {
                 "activity_id": str(claim.request.activity_id),
                 "generation": claim.request.generation,
+                "claim_generation": claim.claim_generation,
                 "failure_code": outcome.failure_code,
             }
         return await self._submit(
@@ -452,6 +500,7 @@ class ActivityWorker:
             command_type=command_type,
             payload=payload,
             now=now,
+            content_citations=content_citations,
         )
 
     def _progress_reporter(self, claim: ActivityClaim, run_context: RunExecutionContext):
@@ -502,6 +551,7 @@ class ActivityWorker:
         payload: dict,
         now: datetime,
         dedupe_suffix: str | None = None,
+        content_citations=(),
     ) -> CommandResult:
         command_id = uuid5(
             NAMESPACE_URL,
@@ -516,10 +566,15 @@ class ActivityWorker:
                 if part is not None
             ),
         )
+        if self._content_writer is not None:
+            await self._content_writer.prepare(
+                claim, command_id, command_type, payload, citations=content_citations
+            )
         return await self._run_service.submit(
             RegisteredCommand(
                 command_id=command_id,
                 command_type=command_type,
+                command_schema_version=2,
                 run_id=claim.request.aggregate_id,
                 expected_stream_version=None,
                 payload=payload,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { MessageCircleQuestion, X } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,15 @@ export type ClarificationCardProps = {
 };
 
 /** 澄清选项卡片：渲染 ask 事件的问题与推荐选项（独立于审批）。 */
-export function ClarificationCard({
+export function ClarificationCard(props: ClarificationCardProps) {
+  return (
+    <ClarificationActions
+      key={JSON.stringify([props.question, props.choices, Boolean(props.disabled)])}
+      {...props}
+    />
+  );
+}
+function ClarificationActions({
   question,
   choices,
   onChoose,
@@ -28,15 +36,28 @@ export function ClarificationCard({
 }: ClarificationCardProps) {
   const t = useTranslations("approvalActions");
   const [submitting, setSubmitting] = useState(false);
+  const mounted = useRef(true),
+    busy = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const run = async (action: () => Promise<void> | void) => {
+    if (disabled || busy.current || !mounted.current) return;
+    busy.current = true;
     setSubmitting(true);
     try {
       await action();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("sendFailed"));
+      if (mounted.current) toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {
-      setSubmitting(false);
+      if (mounted.current) {
+        busy.current = false;
+        setSubmitting(false);
+      }
     }
   };
 

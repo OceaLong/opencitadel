@@ -100,6 +100,10 @@ RUN_STATE_FIELDS_BY_SERIALIZER_VERSION = {
     ),
 }
 
+RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[6] = tuple(
+    sorted((*RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[5], "started_activity_claims"))
+)
+
 
 def test_canonical_state_hash_golden_bytes() -> None:
     state = RunState(
@@ -110,7 +114,13 @@ def test_canonical_state_hash_golden_bytes() -> None:
         owner_user_id="user-golden",
     )
 
-    assert canonical_state_hash(state) == GOLDEN_STATE_HASH
+    # Frozen v5 form remains byte-identical; the added nullable claim state is v6.
+    historical = state.model_dump(mode="json", exclude={"started_activity_claims"})
+    assert canonical_state_hash(historical) == GOLDEN_STATE_HASH
+    assert (
+        canonical_state_hash(state)
+        == "d43fbc202289e7315f0abcd4d4e84e16c0b75a15c3881ae8f0feb998f6fe2d26"
+    )
 
 
 def test_canonical_json_bytes_golden_for_every_scalar_shape() -> None:

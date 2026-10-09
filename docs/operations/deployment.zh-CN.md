@@ -3,19 +3,20 @@
 [English](deployment.md)
 
 OpenCitadel 只部署一个无状态 API 与一个数据库权威执行内核。PostgreSQL 是必需组件；
-Redis 只降低唤醒延迟。当前 schema 是单 revision 的全新设计，应部署到新数据库，不导入
-早期开发 catalog。
+Redis 只降低唤醒延迟。当前 Schema 使用从 `0001greenfield` 到
+`0030evaluation_judge_history` 的单一绿地迁移链，包含执行、分析和评测的增量迁移。
+应部署到新数据库，由 `app.migrate` 升级至当前 Head，不导入早期开发 Catalog。
 
 ## 进程
 
-| 进程 | Compose 服务 | 数据库凭据 |
-| --- | --- | --- |
-| Migration | `opencitadel-migrate` | `POSTGRES_MIGRATION_*` |
-| API | `opencitadel-api` | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
-| 执行内核 | `opencitadel-execution-kernel` | `POSTGRES_KERNEL_*` |
-| UI | `opencitadel-ui` | 无 |
+| 进程      | Compose 服务                   | 数据库凭据                            |
+| --------- | ------------------------------ | ------------------------------------- |
+| Migration | `opencitadel-migrate`          | `POSTGRES_MIGRATION_*`                |
+| API       | `opencitadel-api`              | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
+| 执行内核  | `opencitadel-execution-kernel` | `POSTGRES_KERNEL_*`                   |
+| UI        | `opencitadel-ui`               | 无                                    |
 
-PostgreSQL 管理员凭据只用于初始化，运行时容器不得接收。执行内核运行 Command Inbox、
+PostgreSQL 管理员凭据用于初始化及可选的 Helm 数据库备份 Job；API 与执行内核运行时容器不得接收。执行内核运行 Command Inbox、
 Run 决策、Activity、Timer、Outbox、正式投影、自动化与维护 Tick；不存在第二执行服务。
 
 每个角色只加载一次部署配置，并且只构建自己的手工强类型对象图：API 持有 `ApiRuntime`，
@@ -26,7 +27,10 @@ Provider 和连接池资源完全独立。
 
 ```bash
 cp .env.example .env
-# 替换 .env 中全部必填 Secret 与密码。
+# 替换 .env 中全部必填 Secret 与密码；本地 HTTP 设置 COOKIE_SECURE=false。
+# 设置 FRONTEND_BASE_URL=http://localhost:8088、OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth。
+# 将 OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS 设为 30，与 Compose 45s 宽限期协调。
+docker compose build opencitadel-sandbox
 docker compose --profile local up -d --build
 docker compose ps
 ```
@@ -34,7 +38,7 @@ docker compose ps
 打开 `http://localhost:8088`。`local` profile 启用内置 MinIO。云部署可设置
 `STORAGE_PROVIDER=cos` 与 `COS_*` 使用 COS。
 
-至少为以下变量设置强且互不相同的值：
+配置以下部署项；密码与密钥使用独立强值，ID/用户名/超时不作为密钥：
 
 - `POSTGRES_ADMIN_USER`、`POSTGRES_ADMIN_PASSWORD`、
   `POSTGRES_MIGRATION_USER`、`POSTGRES_MIGRATION_PASSWORD`、
@@ -95,7 +99,7 @@ Marker，并在关闭时删除。Readiness 还会校验 Runtime Policy、Schema 
 Compose 将 Docker 访问隔离在 `opencitadel-sandbox-broker`。API 和内核只拿到窄化、
 Token 认证的 HTTP 端点，不接触 Docker Socket。原生 Linux 需把 `DOCKER_SOCK_GID`
 设为 Socket Group。Kubernetes 使用执行内核专用 ServiceAccount 与受限 Sandbox Pod RBAC。
-保持 Squid 沙箱 Egress Proxy 与 Allowlist 开启。每个沙箱的数据面 Token 在 API 与内核两侧派生为
+保持 Squid 沙箱 Egress Proxy 开启；当前静态配置使用私网/元数据黑名单与 Safe_ports，并没有域名 Allowlist。每个沙箱的数据面 Token 在 API 与内核两侧派生为
 `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`；Seed 绝不进入沙箱容器，任何副本都能无共享 Token 状态
 地重新附着并认证。
 
@@ -117,7 +121,7 @@ Admin 通过 **设置 → 运行时策略** 或 `/api/runtime-policies` 管理�
 `JWT_PREVIOUS_SECRETS` 轮换：把旧 Key 按其 ID 移入 previous map，设置新的 `JWT_SECRET`，
 再重启副本；在途 Token 在过期前继续验证。`DATABASE_AUTHORIZATION_SIGNING_SECRET` 默认回退
 `SESSION_SECRET`，保持现有部署与其 Seed 的 RLS `app.rls_signing_secret` 值不变；仅当需要把
-数据库授权信任域与 Session Cookie 拆分时才设置为独立强值，并与数据库签名密钥同步轮换。不得
+数据库授权信任域与 Session Cookie 拆分时才设置为独立强值。数据库在首次迁移时记录该 Secret；已有数据库的值发生变化时，先执行 `python -m app.rotate_db_signing_secret`（可重复执行，同一事务内更新并校验签名探针），再重启 API 与执行内核。不得
 记录明文 Secret，也不得把它们写进 Runtime Policy。
 
 Bootstrap 后，通过 **设置 → 推理** 或 `/api/inference` 配置 Endpoint、类型化 Model 与用途
@@ -144,7 +148,7 @@ Binding。Chat、Embedding、Rerank 消费者不存在环境变量 Key 回退；
 Chart 位于 `deploy/helm/opencitadel`。
 
 ```bash
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
   --values values.production.yaml
@@ -152,16 +156,11 @@ helm upgrade --install opencitadel deploy/helm/opencitadel \
 
 通过 Secret Manager 或受保护 values 文件提供全部 Secret。保持
 `networkPolicy.enabled=true`，分离 API/Kernel/Migration 数据库用户，并按 Activity 负载
-配置 `executionKernel.replicas` 与 HPA。可选 Ops Collector 与 Actuator 必须网络隔离；
+配置 `executionKernel.replicas` 与 HPA，并把 `env.SANDBOX_K8S_NAMESPACE` 设为 Release Namespace（此例为 `opencitadel`），与沙箱 Role 和 NetworkPolicy 对齐。可选 Ops Collector 与 Actuator 必须网络隔离；
 Actuator 只允许 API/Kernel 到达，且仍要求持久审批。其 RBAC 是按允许 Namespace 渲染的
 Namespaced `Role`/`RoleBinding`，而非集群级 `ClusterRole`。
 
-Chart 以模板形式提供韧性与可观测基线：按工作负载的 `NetworkPolicy`（PostgreSQL、Redis、
-执行内核、Ops Collector/Actuator、Egress Proxy、Sandbox）、API 与执行内核的
-PodDisruptionBudget、将沙箱出站限制到 Allowlist 的 Squid `egress-proxy` Deployment、
-PostgreSQL 备份 `CronJob`，以及带审批超时、审计链验证失败、Outbox Lag、沙箱准入拒绝、5xx
-率、限流拒绝告警的 `PrometheusRule`。Reverse Proxy 还设置 HSTS/CSP/nosniff 响应头与
-`server_tokens off`。
+Chart 提供这些模板，但并非全部默认开启：`networkPolicy.enabled=true` 与 `egressProxy.enabled=true` 默认启用；`pdb.enabled`、`backup.enabled`、`monitoring.serviceMonitor.enabled`、`monitoring.prometheusRule.enabled` 默认关闭。备份 CronJob 还要求 Chart 托管 PostgreSQL。Squid 仅使用当前静态地址/端口 ACL，`egressProxy.allowedDomains` 尚未消费。Prometheus Operator CRD、Selector 与实际抓取必须配置后才有告警数据；API 抓取还需强 `secrets.metricsToken`。Compose Nginx 模板设置 CSP/nosniff 与 HTTPS HSTS；Helm 只在启用 Ingress 时通过 ingress-nginx Annotation 提供安全响应头，Controller 必须允许该配置。
 
 Chart 托管 PostgreSQL 时，`files/postgres/init-app-role.sh` 会在绿地迁移前创建互相独立的
 Migration、API 与 Kernel 角色。外部数据库必须在安装前配置等价角色。验证运行时角色的
@@ -170,14 +169,18 @@ Migration、API 与 Kernel 角色。外部数据库必须在安装前配置等�
 
 ## 发布产物与供应链
 
-Release Tag 发布七个镜像：`api`、`execution-kernel`、`migrate`、`ui`、`sandbox`、
-`ops-collector` 和 `ops-actuator`。`.github/workflows/security.yml` 执行 Gitleaks、CodeQL
+Release Tag 发布八个镜像：`api`、`execution-kernel`、`migrate`、`sandbox-broker`、
+`ui`、`sandbox`、`ops-collector` 和 `ops-actuator`。`.github/workflows/security.yml` 执行 Gitleaks、CodeQL
 与 Trivy；Release Workflow 在发布前扫描每个镜像，并附加 SBOM 与签名 provenance。
 部署时应验证 provenance 并使用不可变 Digest，不依赖 `latest`。
 
 `e2e/fixtures/` 下的确定性推理 Provider 不是发布产物。它只存在于 Compose
 `acceptance` Profile，禁止加入 Helm、Kustomize、Quickstart、生产设置或 Release
 镜像矩阵。
+
+## 评测运行时部署
+
+评测由同一个执行内核持有四个关键循环：`evaluation-scheduler`、`evaluation-reconciler`、`evaluation-scoring`、`evaluation-cleanup`；API 只做授权、校验与持久化准入。循环异常会撤下内核 Readiness 并请求关闭。录制/隔离 Subject 与 Judge 都提交正式 Run，没有独立执行服务。默认部署不启用受控物理环境 Adapter；本地 Docker Adapter 需非生产 `ENV`、`EVALUATION_LOCAL_DOCKER_ENABLED=true` 与只读管理员清单 `EVALUATION_TEST_INVENTORY_PATH`，并配置物理预算库存。验收 Profile 的清单与 Broker Journal 卷由专用覆盖文件注入，不应复制到生产。详见[评测控制面](../architecture/evaluation-control-plane.zh-CN.md)与[受控评测环境](../evaluation-environments.md)。
 
 ## 确定性验收门禁
 
@@ -202,11 +205,17 @@ Schema 为 `contracts/acceptance-evidence.schema.json`；任一必需 ID 缺失�
 重试前检查 Manifest 的 `failure_reason`、`logs/stack.log` 和 Playwright Trace/截图。
 不得用宽泛 Docker Prune 替代 Runner 清理。
 
+完整 Execution 验收还要求 `ACCEPTANCE_CAPACITY_REPORT` 与 `ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` 提供并通过 AC21 实测证据校验；只跑 UI/单元测试不代表容量通过。AC21 全容量验收目前尚未完成，不应把部署成功或其他用例通过描述为全部门禁通过。
+
 ## 发布门禁
+
+下列 API 命令只排除 `test_execution_visualization_closed_loop.py` 的六项当次验收消费者。
+验收 Runner 在原生 strict 报告与恢复回执校验后执行这些断言，保留 `strict-pytest.xml`，
+要求六项全部通过且零跳过。
 
 ```bash
 cd api
-uv run pytest -q
+uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 uv run lint-imports
 uv run ruff check --select F821 app tests
 
@@ -219,7 +228,7 @@ npm run build
 
 cd ..
 docker compose config
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 ./scripts/run-acceptance-e2e.sh --disposable
 ```
 
@@ -317,4 +326,5 @@ planner 异常分别在 5 秒、10 秒后重试，第三次失败隔离该 Run�
 返回 HTTP 429，已有执行链重试不重复占用。
 
 本次模型变更按新项目初始化数据库。已经应用初始迁移的数据库不会因再次运行
-同一迁移自动新增表或字段；禁止将新建库验收指向生产数据。
+同一迁移自动新增表或字段。`app.migrate` 会将当前迁移链的未应用 Revision 升级到
+Head；禁止将新建库验收指向生产数据。

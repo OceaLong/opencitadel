@@ -2,7 +2,7 @@ import { FILE_UPLOAD_TIMEOUT_MS } from "@/lib/constants";
 
 import { translate } from "@/i18n/translate";
 
-import { API_CONFIG, authenticatedFetch, del, get, post } from "./fetch";
+import { API_CONFIG, authenticatedFetch, del, get, post, type RequestOptions } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
 /**
@@ -14,7 +14,7 @@ export const fileApi = {
    * @param params 上传参数，包含文件和可选的会话 ID
    * @returns 文件信息
    */
-  uploadFile: async (params: FileUploadParams): Promise<FileInfo> => {
+  uploadFile: async (params: FileUploadParams, options?: RequestOptions): Promise<FileInfo> => {
     const formData = new FormData();
     formData.append("file", params.file);
 
@@ -22,7 +22,7 @@ export const fileApi = {
       formData.append("session_id", params.session_id);
     }
 
-    return post<FileInfo>("/files", formData, { timeout: FILE_UPLOAD_TIMEOUT_MS });
+    return post<FileInfo>("/files", formData, { timeout: FILE_UPLOAD_TIMEOUT_MS, ...options });
   },
 
   /**

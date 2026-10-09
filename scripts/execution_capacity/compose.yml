@@ -1,0 +1,25 @@
+# Fixed trusted entrypoints; operator provisions exact owned storage/bindings first.
+# Combine with the ordinary dedicated deployment and evaluation inventory overlay.
+services:
+  opencitadel-api:
+    user: "${CAPACITY_UID:?}:${CAPACITY_GID:?}"
+    entrypoint: ["/app/.venv/bin/python"]
+    command: ["-m", "uvicorn", "scripts.execution_capacity.api_main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      PYTHONPATH: /capacity/api:/capacity
+    volumes:
+      - ${CAPACITY_SOURCE_ROOT:?}:/capacity:ro
+      - ${CAPACITY_BINDING_FILE:?}:/capacity-binding.json:ro
+      - ${CAPACITY_WRITER_DIR:?}:/capacity-writers:rw
+  opencitadel-execution-kernel:
+    user: "${CAPACITY_UID:?}:${CAPACITY_GID:?}"
+    entrypoint: ["/app/.venv/bin/python"]
+    command: ["-m", "scripts.execution_capacity.kernel_main"]
+    environment:
+      PYTHONPATH: /capacity/api:/capacity
+    volumes: !override
+      - ${CAPACITY_SOURCE_ROOT:?}:/capacity:ro
+      - ${CAPACITY_BINDING_FILE:?}:/capacity-binding.json:ro
+      - ${CAPACITY_WRITER_DIR:?}:/capacity-writers:rw
+      - ${ACCEPTANCE_EVIDENCE_DIR:?}/evaluation-environment.json:/etc/opencitadel-evaluation/environment.json:ro
+      - ${ACCEPTANCE_EVIDENCE_DIR:?}/evaluation-budget.json:/etc/opencitadel-evaluation/budget.json:ro

@@ -41,7 +41,9 @@ class RemediationActivityHandler:
         objects: ActivityObjectStore,
         executor: RemediationExecutor,
         policy_reader: OperationsPolicyReader,
+        isolated=None,
     ) -> None:
+        self._isolated = isolated
         self._objects = objects
         self._executor = executor
         self._policy_reader = policy_reader
@@ -51,6 +53,10 @@ class RemediationActivityHandler:
         request: ActivityRequest,
         context: ActivityContext,
     ) -> ActivityOutcome:
+        if self._isolated is not None and await self._isolated.active(context):
+            return await self._isolated.remediation(context)
+        if getattr(context.run, "source_entity_type", None) == "evaluation_isolated_case":
+            raise ValueError("environment_binding_missing")
         if request.input_ref is None:
             return ActivityOutcome.failed(failure_code="ACTIVITY_INPUT_MISSING")
         payload = await self._objects.load_input(

@@ -8,6 +8,7 @@ class KnowledgeCitation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    knowledge_base_id: str | None = None
     version_id: str
     document_revision_id: str
     doc_id: str
@@ -33,9 +34,10 @@ def deduplicate_citations(
 ) -> list[KnowledgeCitation]:
     """Return stable first-seen citation order with exact identity deduping."""
     out: list[KnowledgeCitation] = []
-    seen: set[tuple[str, str, str, int | None, str]] = set()
+    seen: set[tuple[str | None, str, str, str, int | None, str]] = set()
     for citation in citations:
         key = (
+            citation.knowledge_base_id,
             citation.version_id,
             citation.document_revision_id,
             citation.doc_id,

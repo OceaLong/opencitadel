@@ -15,6 +15,10 @@
    两半 payload（`EventPayloads`），internal 结构（policy_snapshot、
    input_payload、decision_digest）与 public 走同一条演进管道，没有旁路。
 
+当前 `RunAggregate.snapshot_serializer_version=6`，对应
+`test_schema_guards.py` 的追加式 `RUN_STATE_FIELDS_BY_SERIALIZER_VERSION` 快照。
+2026-09 的 greenfield 重置形成当前 v1 基线；后续已持久化的版本不得再次重定基线。
+
 ## 配套机制（改动时同步检查）
 
 - upcast 统一发生在 `PostgresEventStore` 读取边界（hash 校验之后），

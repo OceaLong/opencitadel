@@ -1,4 +1,19 @@
+import asyncio
+
+import pytest
 from fastapi.testclient import TestClient
+
+from app.main import create_app
+from app.migrate_runtime_policy_seed import seed_runtime_policy_heads
+from core.config import DeploymentSettings
+
+
+@pytest.fixture
+def client(_db_schema):
+    settings = DeploymentSettings(env="test")
+    asyncio.run(seed_runtime_policy_heads(settings))
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
 
 
 def test_get_status(client: TestClient) -> None:

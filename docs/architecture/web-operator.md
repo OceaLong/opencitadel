@@ -13,16 +13,20 @@ Before session creation, the user declares:
 - `operator_scope`: `owned` or `third_party_saas`;
 - `operator_domains`: one or more exact hostnames.
 
-Domains are normalized to lowercase IDNA hostnames. URLs, paths, credentials,
-queries, fragments, and wildcards are rejected. The values are stored on the
-session and frozen into Run input. A session with an Operator declaration
-cannot be edited to an empty domain list.
+Domains are normalized to unique lowercase IDNA hostnames with trailing dots
+removed. The current normalizer accepts bare hosts and URL-form inputs with
+an empty or `/` path, and retains only the hostname; credentials, non-root
+paths, queries, fragments, and wildcards are rejected. Ports do not become
+part of the allowlist. Session metadata may update the nonempty domain list;
+each admitted Run freezes its own list, so later edits do not change that Run.
 
 ## Navigation and actions
 
-Every absolute HTTP(S) navigation and redirect is checked against the exact
-allowlist inside the browser adapter. DNS/private-network outbound rules still
-apply. Page text is wrapped as untrusted external content before returning to
+Every absolute HTTP(S) navigation, redirect, and intercepted network request
+(including subresources) is checked against the exact hostname allowlist inside
+the browser adapter. `about:`, `blob:`, and `data:` requests are exempt from
+that route check. This host check does not perform DNS/IP or port validation;
+sandbox network controls provide the separate deployment boundary. Page text is wrapped as untrusted external content before returning to
 the model.
 
 Browser reads are read-only. Navigation, click, input, and other interactive

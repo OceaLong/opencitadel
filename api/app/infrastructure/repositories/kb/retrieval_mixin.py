@@ -6,6 +6,7 @@ from sqlalchemy import and_, func, or_, select, text
 
 from app.domain.models.knowledge_base import (
     ChunkLevel,
+    DocStatus,
     KnowledgeChunk,
     KnowledgeDocument,
 )
@@ -19,6 +20,7 @@ from app.domain.repositories.knowledge_base_repository import (
     DocumentPageItem,
     VersionedKnowledgeChunk,
 )
+from app.infrastructure.execution.original_evidence import retain_read
 from app.infrastructure.models.knowledge_base import (
     KnowledgeBaseModel,
     KnowledgeChunkModel,
@@ -35,6 +37,51 @@ from app.infrastructure.repositories.kb._shared import (
     _is_cursor_int,
     build_versioned_vector_search_statement,
 )
+
+
+def document_version_statement(kb_id, version_id, doc_id):
+    return (
+        select(
+            KnowledgeDocumentModel,
+            KnowledgeDocumentRevisionORM.id,
+            KnowledgeDocumentRevisionORM.page_count,
+            KnowledgeDocumentRevisionORM.warning,
+            KnowledgeDocumentRevisionORM.error,
+            KnowledgeDocumentRevisionORM.created_at,
+        )
+        .join(
+            KnowledgeVersionDocumentORM,
+            (KnowledgeVersionDocumentORM.document_id == KnowledgeDocumentModel.id)
+            & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeDocumentModel.kb_id),
+        )
+        .join(
+            KnowledgeBaseVersionORM,
+            (KnowledgeBaseVersionORM.id == KnowledgeVersionDocumentORM.version_id)
+            & (
+                KnowledgeBaseVersionORM.knowledge_base_id
+                == KnowledgeVersionDocumentORM.knowledge_base_id
+            ),
+        )
+        .join(
+            KnowledgeDocumentRevisionORM,
+            (KnowledgeDocumentRevisionORM.id == KnowledgeVersionDocumentORM.document_revision_id)
+            & (KnowledgeDocumentRevisionORM.document_id == KnowledgeVersionDocumentORM.document_id),
+        )
+        .where(
+            KnowledgeDocumentModel.id == doc_id,
+            KnowledgeDocumentModel.kb_id == kb_id,
+            KnowledgeVersionDocumentORM.version_id == version_id,
+            KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
+            KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
+            KnowledgeBaseVersionORM.state.in_(
+                (
+                    KnowledgeVersionState.READY.value,
+                    KnowledgeVersionState.DEGRADED.value,
+                )
+            ),
+            KnowledgeBaseVersionORM.published_at.is_not(None),
+        )
+    )
 
 
 class KBRetrievalMixin:
@@ -311,54 +358,39 @@ class KBRetrievalMixin:
         doc_id: str,
     ) -> tuple[KnowledgeDocument, str] | None:
         result = await self.db_session.execute(
-            select(
-                KnowledgeDocumentModel,
-                KnowledgeVersionDocumentORM.document_revision_id,
-            )
-            .join(
-                KnowledgeVersionDocumentORM,
-                (KnowledgeVersionDocumentORM.document_id == KnowledgeDocumentModel.id)
-                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeDocumentModel.kb_id),
-            )
-            .join(
-                KnowledgeBaseVersionORM,
-                (KnowledgeBaseVersionORM.id == KnowledgeVersionDocumentORM.version_id)
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeVersionDocumentORM.knowledge_base_id
-                ),
-            )
-            .join(
-                KnowledgeDocumentRevisionORM,
-                (
-                    KnowledgeDocumentRevisionORM.id
-                    == KnowledgeVersionDocumentORM.document_revision_id
-                )
-                & (
-                    KnowledgeDocumentRevisionORM.document_id
-                    == KnowledgeVersionDocumentORM.document_id
-                ),
-            )
-            .where(
-                KnowledgeDocumentModel.id == doc_id,
-                KnowledgeDocumentModel.kb_id == kb_id,
-                KnowledgeVersionDocumentORM.version_id == version_id,
-                KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
-                KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
-                KnowledgeBaseVersionORM.state.in_(
-                    (
-                        KnowledgeVersionState.READY.value,
-                        KnowledgeVersionState.DEGRADED.value,
-                    )
-                ),
-                KnowledgeBaseVersionORM.published_at.is_not(None),
-            )
+            document_version_statement(kb_id, version_id, doc_id)
         )
-        row = result.one_or_none()
+        try:
+            row = result.one_or_none()
+            retain_read(
+                self.db_session,
+                "resource-source",
+                "knowledge.document_version",
+                {"kb_id": kb_id, "version_id": version_id, "doc_id": doc_id},
+                row,
+                source_result=result,
+            )
+        finally:
+            result.close()
+            synchronous = getattr(self.db_session, "sync_session", self.db_session)
+            forget_result = getattr(synchronous, "forget_result", None)
+            if callable(forget_result):
+                forget_result(result)
         if row is None:
             return None
-        document, revision_id = row
-        return document.to_domain(), str(revision_id)
+        document, revision_id, page_count, warning, error, revised_at = row
+        # The logical document is mutable as later versions ingest it. Keep
+        # historical reads anchored to the manifest's immutable revision.
+        historical = document.to_domain().model_copy(
+            update={
+                "page_count": page_count,
+                "status": DocStatus.READY,
+                "warning": warning,
+                "error": error,
+                "updated_at": revised_at,
+            }
+        )
+        return historical, str(revision_id)
 
     async def list_chunks_for_document_for_version(
         self,

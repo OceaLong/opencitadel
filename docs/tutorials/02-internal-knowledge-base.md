@@ -1,3 +1,5 @@
+[简体中文](02-internal-knowledge-base.zh-CN.md)
+
 # Build and Use an Internal Knowledge Base
 
 This tutorial creates a versioned knowledge base, follows its build, starts
@@ -31,19 +33,19 @@ The library view shows the active version and active candidate. You can also
 inspect:
 
 ```text
-GET /knowledge-bases/{kb_id}/versions
-GET /knowledge-bases/{kb_id}/versions/{version_id}
+GET /api/knowledge-bases/{kb_id}/versions
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}
 ```
 
 The pipeline reports parse, chunk, keyword-index, vector, graph, validate, and
 publish progress. Interpret status as follows:
 
-| Status | Meaning |
-| --- | --- |
-| `building` | Candidate is incomplete and cannot be used by Ask or Agent |
-| `ready` | Published with all configured capabilities |
+| Status     | Meaning                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `building` | Candidate is incomplete and cannot be used by Ask or Agent                                      |
+| `ready`    | Published with all configured capabilities                                                      |
 | `degraded` | Published; mandatory keyword/source reads work, and disabled optional capabilities are explicit |
-| `failed` | Candidate was not published; the previous active version remains readable |
+| `failed`   | Candidate was not published; the previous active version remains readable                       |
 
 A revision at `parsed` is still not searchable. Wait for the candidate version
 to publish; do not use `ready_doc_count` as a shortcut.
@@ -89,7 +91,7 @@ Answers cite the precise indexed evidence:
 uses the versioned source endpoint:
 
 ```text
-GET /knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
 ```
 
 Use either a page filter or the returned `next_cursor` to continue. The response
@@ -105,10 +107,10 @@ new version is published.
 For a published version with `graph_search=true`, open the Graph panel or call:
 
 ```text
-GET /knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
 ```
 
-Continue with `cursor` when present. Nodes are extracted entities, edges connect
+Pass the returned `next_cursor` as `cursor` when present. Nodes are extracted entities, edges connect
 real returned entity endpoints, and edge evidence links back to exact source
 chunks. If `capability=false`, use keyword/vector search rather than treating
 the empty graph as “no relationships found.”
@@ -138,7 +140,7 @@ same command is idempotent.
 For a failed build, choose **Retry** or call:
 
 ```text
-POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
+POST /api/knowledge-bases/{kb_id}/builds/{build_id}/retry
 ```
 
 Retry creates a new candidate from the failed candidate's immutable manifest.
@@ -147,7 +149,7 @@ The failed version remains part of audit history.
 For an active queued/running build, choose **Cancel** or call:
 
 ```text
-POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
+POST /api/knowledge-bases/{kb_id}/builds/{build_id}/cancel
 ```
 
 The request records cancellation in the Run and stops at an Activity boundary.

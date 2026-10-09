@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1010" viewBox="0 0 1440 1010" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Automation · Trigger and execution flow</title>
+<desc id="desc">Redis leases coordinate scheduled polling; PostgreSQL persists each accepted firing and its Run. Manual and signed webhook triggers invoke ScheduledJobService directly; they do not wait for the cron lease. Leases reduce duplicate polling. Database locks and idempotency remain authoritative for accepted work.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1010" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Automation · Trigger and execution flow</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Redis leases coordinate scheduled polling; PostgreSQL persists each accepted firing and its Run.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="triggers" data-target="lease" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="lease" data-target="service" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="service" data-target="inbox" d="M 1110.0,280 L 1110.0,450" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="inbox" data-target="kernel" d="M 900,500 L 780,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="kernel" data-target="automation" d="M 480,500 L 360,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="automation" data-target="child" d="M 210.0,550 L 210.0,720" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="child" data-target="projection" d="M 360,770 L 480,770" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-7" data-edge-id="edge-7" data-graph-role="edge" data-source="projection" data-target="notify" d="M 780,770 L 900,770" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<g id="triggers" data-node-id="triggers" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Trigger sources</text>
+<text x="78" y="240" font-size="15" class="secondary">Cron / interval; signed webhook</text>
+<text x="78" y="262" font-size="14" class="secondary">Explicit manual firing identity</text>
+</g>
+<g id="lease" data-node-id="lease" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Leased scheduler tick</text>
+<text x="498" y="240" font-size="15" class="secondary">Redis polling / maintenance lease</text>
+<text x="498" y="262" font-size="14" class="secondary">Redis outage pauses leased polling</text>
+</g>
+<g id="service" data-node-id="service" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">ScheduledJobService</text>
+<text x="918" y="240" font-size="15" class="secondary">Validate resources; lock job summary</text>
+<text x="918" y="262" font-size="14" class="secondary">Atomic firing admission</text>
+</g>
+<g id="inbox" data-node-id="inbox" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,473 V 486 Q 921,493 931,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="944" y="483" font-size="20" font-weight="600">Persisted firing</text>
+<text x="918" y="510" font-size="15" class="secondary">Job / session / typed Run command</text>
+<text x="918" y="532" font-size="14" class="secondary">Deterministic idempotency key</text>
+</g>
+<g id="kernel" data-node-id="kernel" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Execution kernel</text>
+<text x="498" y="510" font-size="15" class="secondary">Claim durable PostgreSQL work</text>
+<text x="498" y="532" font-size="14" class="secondary">Process death does not imply outcome</text>
+</g>
+<g id="automation" data-node-id="automation" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Automation Run</text>
+<text x="78" y="510" font-size="15" class="secondary">One parent Run per firing</text>
+<text x="78" y="532" font-size="14" class="secondary">Decision handler admits linked child</text>
+</g>
+<g id="child" data-node-id="child" data-graph-role="node" data-bounds="60,720,360,820">
+<rect x="60" y="720" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="753" font-size="20" font-weight="600">Agent / Patrol child</text>
+<text x="78" y="780" font-size="15" class="secondary">Original six-family Run protocol</text>
+<text x="78" y="802" font-size="14" class="secondary">Pinned resource bindings</text>
+</g>
+<g id="projection" data-node-id="projection" data-graph-role="node" data-bounds="480,720,780,820">
+<rect x="480" y="720" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="501" cy="743" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 491,743 V 756 Q 501,763 511,756 V 743" fill="none" stroke="#16a34a"/>
+<text x="524" y="753" font-size="20" font-weight="600">Formal Run projection</text>
+<text x="498" y="780" font-size="15" class="secondary">Terminal state from verified events</text>
+<text x="498" y="802" font-size="14" class="secondary">Rebuildable job summaries</text>
+</g>
+<g id="notify" data-node-id="notify" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">Reconciliation</text>
+<text x="918" y="780" font-size="15" class="secondary">Firing history + inbox notification</text>
+<text x="918" y="802" font-size="14" class="secondary">Optional configured MCP IM</text>
+</g>
+<text x="420.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">cron tick</text>
+<text x="840.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">admit</text>
+<text x="1144.2" y="370.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">commit</text>
+<text x="840.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">claim</text>
+<text x="420.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">decide</text>
+<text x="262.7" y="640.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">admit child</text>
+<text x="420.0" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">project</text>
+<text x="840.0" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-7">reconcile</text>
+<g data-graph-role="legend">
+<line x1="60" y1="882" x2="96" y2="882" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="887" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="882" x2="536" y2="882" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="887" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="882" x2="976" y2="882" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="887" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="930" font-size="15" class="secondary" data-graph-role="label">Manual and signed webhook triggers invoke ScheduledJobService directly; they do not wait for the cron lease.</text>
+<text x="60" y="954" font-size="15" class="secondary" data-graph-role="label">Leases reduce duplicate polling. Database locks and idempotency remain authoritative for accepted work.</text>
+</svg>

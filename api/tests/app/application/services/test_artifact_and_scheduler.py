@@ -22,6 +22,7 @@ from app.domain.runtime_policy import OperationsPolicy, SchedulerPolicy
 from app.domain.utils.schedule_utils import compute_next_run, render_prompt_template
 from app.infrastructure.adapters.redis_capabilities import RedisLeaseManager
 from app.infrastructure.external.scheduler.job_scheduler import try_become_scheduler_leader
+from tests.app.artifact_test_support import UnitOfWorkUploadIntents
 from tests.runtime_policy_support import MutablePolicyReader
 
 _SECRET_CIPHER = SimpleNamespace(
@@ -69,7 +70,11 @@ def test_get_content_text_returns_incomplete_for_corrupt_storage():
     object_storage = AsyncMock()
     object_storage.get_bytes = AsyncMock(return_value="partial 中文".encode()[:-1])
 
-    service = ArtifactService(lambda: uow, object_storage=object_storage)
+    service = ArtifactService(
+        lambda: uow,
+        object_storage=object_storage,
+        upload_intents=UnitOfWorkUploadIntents(lambda: uow),
+    )
 
     async def _run():
         text, incomplete = await service.get_content_text("a1", auto_repair=False)
@@ -125,13 +130,19 @@ def test_get_content_text_recovers_from_session_attachment():
         return_value=(MagicMock(read=lambda: recovered.encode("utf-8")), File(id="file-1"))
     )
 
-    service = ArtifactService(lambda: uow, object_storage=object_storage, file_storage=file_storage)
+    service = ArtifactService(
+        lambda: uow,
+        object_storage=object_storage,
+        file_storage=file_storage,
+        upload_intents=UnitOfWorkUploadIntents(lambda: uow),
+    )
 
     async def _run():
         text, incomplete = await service.get_content_text("a1")
         assert incomplete is False
         assert "完整成都自驾游指南" in text
-        assert any(key.endswith("v2.md") for key in stored)
+        assert len(artifact.version_refs) == 2
+        assert stored[artifact.version_refs[1]] == recovered.encode("utf-8")
 
     asyncio.run(_run())
 
@@ -148,7 +159,11 @@ def test_write_content_rejects_upload_mismatch():
     object_storage.put_bytes = AsyncMock()
     object_storage.get_bytes = AsyncMock(return_value=b"short")
 
-    service = ArtifactService(lambda: uow, object_storage=object_storage)
+    service = ArtifactService(
+        lambda: uow,
+        object_storage=object_storage,
+        upload_intents=UnitOfWorkUploadIntents(lambda: uow),
+    )
 
     async def _immediate_sleep(_seconds: float) -> None:
         return None
@@ -190,7 +205,11 @@ def test_write_content_retries_verify_until_match():
 
     object_storage.get_bytes = AsyncMock(side_effect=get_bytes)
 
-    service = ArtifactService(lambda: uow, object_storage=object_storage)
+    service = ArtifactService(
+        lambda: uow,
+        object_storage=object_storage,
+        upload_intents=UnitOfWorkUploadIntents(lambda: uow),
+    )
 
     async def _immediate_sleep(_seconds: float) -> None:
         return None
@@ -264,7 +283,9 @@ def test_artifact_write_uploads_to_object_storage():
     def factory():
         return uow
 
-    service = ArtifactService(factory, object_storage=object_storage)
+    service = ArtifactService(
+        factory, object_storage=object_storage, upload_intents=UnitOfWorkUploadIntents(factory)
+    )
 
     async def _run():
         artifact = await service.write_content(
@@ -283,7 +304,9 @@ def test_artifact_write_uploads_to_object_storage():
 
 
 def _artifact_service_without_storage(uow):
-    return ArtifactService(lambda: uow, object_storage=AsyncMock())
+    return ArtifactService(
+        lambda: uow, object_storage=AsyncMock(), upload_intents=UnitOfWorkUploadIntents(lambda: uow)
+    )
 
 
 def test_artifact_scope_denied_without_session_access():

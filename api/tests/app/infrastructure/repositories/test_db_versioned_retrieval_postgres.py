@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -197,6 +197,21 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
             document = await repository.get_document_for_version(ids["kb"], ids["v1"], ids["doc"])
             assert document is not None
             assert document[1] == ids["rev1"]
+            await session.execute(
+                text(
+                    "UPDATE knowledge_documents SET updated_at=:later, page_count=9, "
+                    "status='failed', warning='new version only' WHERE id=:doc"
+                ),
+                {"later": now + timedelta(days=1), "doc": ids["doc"]},
+            )
+            await session.flush()
+            historical = await repository.get_document_for_version(ids["kb"], ids["v1"], ids["doc"])
+            assert historical is not None
+            assert historical[1] == ids["rev1"]
+            assert historical[0].updated_at == document[0].updated_at == now
+            assert historical[0].page_count == document[0].page_count == 1
+            assert historical[0].status == document[0].status == "ready"
+            assert historical[0].warning == document[0].warning is None
     finally:
         async with sessions() as cleanup:
             await configure_session_authorization(cleanup, system)

@@ -227,6 +227,7 @@ class AgentService:
                         },
                         idempotency_key=idempotency_key,
                         command_sink=uow.execution_commands,
+                        inference_read_context=uow,
                     )
                     locked_session.attach_run(admitted_run_id, request_id)
                     await uow.session.save(locked_session)

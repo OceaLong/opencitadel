@@ -114,3 +114,32 @@ describe("SessionContextPanel", () => {
     await unmount();
   });
 });
+
+it("a fixed source reference survives movement of the current knowledge pin", async () => {
+  const fixed = {
+    versionId: "immutable-v1",
+    documentId: "doc",
+    revisionId: "r1",
+    chunkId: "chunk",
+    page: 2,
+  };
+  const { unmount } = await renderComponent(
+    <SessionContextPanel
+      knowledgeBaseId="kb1"
+      fixedSource={fixed}
+      resourceBindings={[
+        {
+          binding_id: "current",
+          resource_kind: "knowledge_base",
+          resource_id: "kb1",
+          version_id: "v2",
+          is_current: true,
+        },
+      ]}
+    />,
+  );
+  expect(mocks.knowledgeProps).toHaveBeenLastCalledWith(
+    expect.objectContaining({ versionId: "immutable-v1", fixedSource: fixed }),
+  );
+  await unmount();
+});

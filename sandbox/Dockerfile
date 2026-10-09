@@ -53,7 +53,7 @@ RUN pip3 install --no-cache-dir \
     --retries="${PIP_RETRIES}" \
     "uv==${UV_VERSION}"
 
-# 8.安装node.js 24.12.0版本(LTS)
+# 8.安装 Node.js 24 LTS（使用 NodeSource 24.x 渠道）
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
@@ -66,10 +66,10 @@ RUN mkdir -p /etc/apt/keyrings && \
 RUN npm config set registry "${NPM_CONFIG_REGISTRY}"
 
 # npm 12.0.2 still bundles vulnerable versions of these dependencies.
-# Apply compatible upstream fixes for CVE-2026-69152/69192/73566 until npm incorporates them.
+# Apply compatible upstream fixes until npm incorporates them.
 RUN npm install -g npm@12.0.2 && \
     cd /tmp && \
-    for package in brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21; do \
+    for package in brace-expansion@5.0.11 undici@6.28.1 ip-address@10.3.1 tar@7.5.21; do \
       name="${package%@*}"; \
       archive="$(npm pack "$package" --silent)"; \
       destination="$(npm root -g)/npm/node_modules/$name"; \
@@ -88,10 +88,12 @@ RUN add-apt-repository ppa:xtradeb/apps -y && \
 
 # 11.安装中文字体和语言支持
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     language-pack-zh-hans \
     locales \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libssl3)" ge 3.0.2-0ubuntu1.30 \
     && locale-gen zh_CN.UTF-8 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

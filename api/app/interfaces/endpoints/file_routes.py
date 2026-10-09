@@ -65,12 +65,13 @@ async def get_file_info(
 )
 async def delete_file(
     file_id: str,
+    force: bool = False,
     ctx: WorkspaceContext = Depends(get_workspace_context),
     _write_guard=Depends(require_non_auditor),
     file_service: FileService = Depends(get_file_service),
 ) -> Response[dict]:
     """删除指定文件"""
-    await file_service.delete_file(file_id, scope=ctx.scope)
+    await file_service.delete_file(file_id, scope=ctx.scope, force=force)
     return Response.success(data={"deleted": True})
 
 

@@ -6,8 +6,11 @@ Run the OpsConsole demo and reconcile refund tickets under the formal Web
 Operator approval/evidence protocol.
 
 ```bash
-docker compose --profile local --profile demo up -d --build
+./scripts/quickstart.sh --demo
 ```
+
+Configure a tool-capable `chat` binding in Settings → Inference. The host browser
+uses `http://localhost:9099`; the Agent sandbox uses `http://ops-console:9099`.
 
 1. Select Skill `refund-reconciliation`.
 2. Declare enterprise-owned hosts `ops-console, localhost`.

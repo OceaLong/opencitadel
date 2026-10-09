@@ -19,6 +19,10 @@ from app.infrastructure.execution.postgres_run_decision_source import (
     PostgresRunDecisionSource,
 )
 from core.config import load_deployment_settings
+from tests.app.alembic.test_execution_view_migration import isolated_database  # noqa: F401
+from tests.app.execution_database_fixture import (
+    isolated_execution_database as _db_schema,  # noqa: F401
+)
 from tests.app.execution_test_support import (
     authenticated_session_factory,
     execution_admin_session,

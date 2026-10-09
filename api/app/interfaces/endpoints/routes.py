@@ -9,6 +9,18 @@ from . import (
     auth_routes,
     capability_routes,
     compliance_routes,
+    evaluation_archive_routes,
+    evaluation_batch_routes,
+    evaluation_configuration_routes,
+    evaluation_dataset_routes,
+    evaluation_environment_routes,
+    evaluation_recording_routes,
+    evaluation_review_routes,
+    evaluation_summary_routes,
+    execution_analysis_routes,
+    execution_comparison_routes,
+    execution_export_routes,
+    execution_view_routes,
     file_routes,
     inference_routes,
     integration_routes,
@@ -46,6 +58,18 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(team_routes.invitation_router)
     authenticated_router.include_router(service_api_key_routes.router)
     authenticated_router.include_router(file_routes.router)
+    authenticated_router.include_router(execution_view_routes.router)
+    authenticated_router.include_router(execution_comparison_routes.router)
+    authenticated_router.include_router(execution_analysis_routes.router)
+    authenticated_router.include_router(execution_export_routes.router)
+    authenticated_router.include_router(evaluation_dataset_routes.router)
+    authenticated_router.include_router(evaluation_recording_routes.router)
+    authenticated_router.include_router(evaluation_environment_routes.router)
+    authenticated_router.include_router(evaluation_archive_routes.router)
+    authenticated_router.include_router(evaluation_batch_routes.router)
+    authenticated_router.include_router(evaluation_summary_routes.router)
+    authenticated_router.include_router(evaluation_review_routes.router)
+    authenticated_router.include_router(evaluation_configuration_routes.router)
     authenticated_router.include_router(session_routes.router)
     authenticated_router.include_router(approval_routes.router)
     authenticated_router.include_router(approval_routes.inbox_router)

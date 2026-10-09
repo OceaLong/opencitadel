@@ -69,8 +69,15 @@ def build_execution_kernel_runtime(
     activity_max_claim_attempts: int = DEFAULT_ACTIVITY_MAX_CLAIM_ATTEMPTS,
     inbox_max_claim_attempts: int = DEFAULT_INBOX_MAX_CLAIM_ATTEMPTS,
     approval_ttl_minutes=None,
+    content_writer=None,
+    evaluation_execution=None,
+    progress_sink_wrapper=None,
 ) -> ExecutionKernelRuntime:
+    from app.infrastructure.execution.postgres_activity_timeout import PostgresActivityTimeoutGuard
+
     command_handler = SqlAlchemyExecutionOrchestrator(
+        activity_timeout=PostgresActivityTimeoutGuard(activity_registry),
+        evaluation_execution=evaluation_execution,
         session_factory=session_factory,
         aggregates={"run": RunAggregate()},
         authorization=authorization,
@@ -80,6 +87,12 @@ def build_execution_kernel_runtime(
         ),
     )
     run_service = RunService(orchestrator=command_handler)
+    progress_sink = PostgresActivityProgressSink(
+        session_factory=session_factory,
+        authorization=authorization,
+    )
+    if progress_sink_wrapper is not None:
+        progress_sink = progress_sink_wrapper(progress_sink)
     return ExecutionKernelRuntime(
         command_handler=command_handler,
         inbox_worker=InboxWorker(
@@ -90,6 +103,8 @@ def build_execution_kernel_runtime(
             handler=command_handler,
         ),
         activity_worker=ActivityWorker(
+            execution_gate=evaluation_execution,
+            content_writer=content_writer,
             store=PostgresActivityStore(
                 session_factory=session_factory,
                 authorization=authorization,
@@ -107,10 +122,7 @@ def build_execution_kernel_runtime(
             # faults (defer + backoff) rather than activity failures; the
             # SQLAlchemy driver family is contributed here at the wiring seam.
             infrastructure_errors=(SQLAlchemyError, OSError, TimeoutError),
-            progress_sink=PostgresActivityProgressSink(
-                session_factory=session_factory,
-                authorization=authorization,
-            ),
+            progress_sink=progress_sink,
         ),
         decision_worker=DecisionWorker(
             source=PostgresRunDecisionSource(

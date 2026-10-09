@@ -28,3 +28,7 @@ pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.uv]
+# Kubernetes/MCP pull these transitively; enforce their fixed security versions.
+constraint-dependencies = ["pyjwt>=2.14.0", "urllib3>=2.8.0"]

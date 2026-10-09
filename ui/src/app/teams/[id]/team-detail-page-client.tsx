@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Copy, Loader2, LogOut, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +35,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { useClientDataScope } from "@/providers/client-data-provider";
 
 export function TeamDetailPageClient({ teamId }: { teamId: string }) {
+  const router = useRouter();
   const { user } = useAuth();
   const { resetWorkspaceIfMatches } = useClientDataScope();
   const t = useTranslations("teams");
@@ -138,7 +140,7 @@ export function TeamDetailPageClient({ teamId }: { teamId: string }) {
       await teamApi.remove(teamId);
       resetWorkspaceIfMatches(teamId);
       toast.success(t("deleteSuccess"));
-      window.location.href = "/teams";
+      router.push("/teams");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("deleteFailed"));
     } finally {
@@ -152,7 +154,7 @@ export function TeamDetailPageClient({ teamId }: { teamId: string }) {
       await teamApi.leave(teamId);
       resetWorkspaceIfMatches(teamId);
       toast.success(t("leaveSuccess"));
-      window.location.href = "/teams";
+      router.push("/teams");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("leaveFailed"));
     } finally {

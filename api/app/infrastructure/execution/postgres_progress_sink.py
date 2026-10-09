@@ -10,11 +10,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.execution.progress import ActivityProgressRecord
+from app.application.execution.view_facts import safe_text
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.execution.models import (
     ExecutionPublicEventORM,
     ExecutionResourceBuildProjectionORM,
 )
+from app.infrastructure.execution.postgres_view_observations import observe_progress
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
 logger = logging.getLogger(__name__)
@@ -50,14 +52,18 @@ class PostgresActivityProgressSink:
             "persist": True,
             "activity_id": str(record.activity_id),
             "kind": record.kind,
-            "phase": record.phase,
+            "phase": safe_text(record.phase, 64),
             "status": record.status,
             "progress": record.progress,
-            "message": record.message,
+            "message": safe_text(record.message),
         }
         try:
             async with self._session_factory() as session:
                 await configure_session_authorization(session, self._authorization)
+                observation = await observe_progress(session, record)
+                if not observation.new_source:
+                    await session.commit()
+                    return True
                 await session.execute(
                     pg_insert(ExecutionPublicEventORM)
                     .values(
@@ -77,31 +83,8 @@ class PostgresActivityProgressSink:
                     )
                     .on_conflict_do_nothing(index_elements=["event_id"])
                 )
-                await session.execute(
-                    update(ExecutionResourceBuildProjectionORM)
-                    .where(
-                        ExecutionResourceBuildProjectionORM.run_id == record.run_id,
-                        ExecutionResourceBuildProjectionORM.status.not_in(_TERMINAL_BUILD_STATUSES),
-                    )
-                    .values(
-                        progress=func.greatest(
-                            ExecutionResourceBuildProjectionORM.progress,
-                            record.progress,
-                        ),
-                        phase=(
-                            record.phase
-                            if record.phase is not None
-                            else ExecutionResourceBuildProjectionORM.phase
-                        ),
-                        updated_at=case(
-                            (
-                                ExecutionResourceBuildProjectionORM.updated_at < record.occurred_at,
-                                record.occurred_at,
-                            ),
-                            else_=ExecutionResourceBuildProjectionORM.updated_at,
-                        ),
-                    )
-                )
+                if observation.public_payload.get("applied", True):
+                    await self._update_build(session, record)
                 await session.commit()
             return True
         except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
@@ -113,6 +96,34 @@ class PostgresActivityProgressSink:
                 exc,
             )
             return False
+
+    @staticmethod
+    async def _update_build(session, record):
+        await session.execute(
+            update(ExecutionResourceBuildProjectionORM)
+            .where(
+                ExecutionResourceBuildProjectionORM.run_id == record.run_id,
+                ExecutionResourceBuildProjectionORM.status.not_in(_TERMINAL_BUILD_STATUSES),
+            )
+            .values(
+                progress=func.greatest(
+                    ExecutionResourceBuildProjectionORM.progress,
+                    record.progress,
+                ),
+                phase=(
+                    safe_text(record.phase, 64)
+                    if record.phase is not None
+                    else ExecutionResourceBuildProjectionORM.phase
+                ),
+                updated_at=case(
+                    (
+                        ExecutionResourceBuildProjectionORM.updated_at < record.occurred_at,
+                        record.occurred_at,
+                    ),
+                    else_=ExecutionResourceBuildProjectionORM.updated_at,
+                ),
+            )
+        )
 
 
 __all__ = ["PostgresActivityProgressSink"]

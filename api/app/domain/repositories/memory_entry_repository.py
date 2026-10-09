@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope
 from app.domain.models.scope import OwnerScope
@@ -25,7 +26,13 @@ class MemoryEntryRepository(ABC):
     async def recall_for_session(self, session_id: str, limit: int = 20) -> list[MemoryEntry]: ...
 
     @abstractmethod
-    async def save(self, entry: MemoryEntry) -> None: ...
+    async def save(
+        self,
+        entry: MemoryEntry,
+        *,
+        expected_updated_at: datetime | None = None,
+        owner_scope: OwnerScope | None = None,
+    ) -> None: ...
 
     @abstractmethod
     async def delete_by_id(self, entry_id: str, owner_scope: OwnerScope | None = None) -> None: ...

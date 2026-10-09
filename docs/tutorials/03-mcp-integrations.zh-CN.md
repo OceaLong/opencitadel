@@ -15,19 +15,20 @@ MCP Server 是一等、Owner Scope 的 Integration Resource。通过 **设置 �
 
 ## 示例：添加远程 MCP 服务器
 
-打开 **设置 → 集成 → 添加服务器**，提交：
+将示例 URL 替换为已评审服务器的真实 Endpoint。在 **设置 → 集成 → 添加服务器** 中提交：
 
 ```json
 {
-  "name": "jina-mcp-server",
+  "name": "docs-reader",
   "transport": "streamable_http",
-  "url": "https://mcp.jina.ai/sse",
+  "url": "https://mcp.example.com/mcp",
   "enabled": true,
   "visibility": "private"
 }
 ```
 
-无需重启服务。Integration List 会投影连接状态与发现的工具；Agent 工具使用 `mcp_` 前缀。
+无需重启服务。Integration List 展示持久化配置；执行内核在构建获授权 Agent Catalog 时
+连接并发现工具，Agent 工具使用 `mcp_` 前缀。注册成功不代表连接探测成功。
 
 ## 示例：内部 HTTP MCP 网关
 
@@ -37,12 +38,16 @@ MCP Server 是一等、Owner Scope 的 Integration Resource。通过 **设置 �
 {
   "name": "internal-crm",
   "transport": "streamable_http",
-  "url": "http://mcp-gateway.internal:8080/sse",
+  "url": "http://mcp-gateway.internal:8080/mcp",
   "enabled": true,
   "visibility": "private",
-  "headers": {"Authorization": "Bearer <token>"}
+  "headers": { "Authorization": "Bearer <token>" }
 }
 ```
+
+部署必须通过 `OUTBOUND_PRIVATE_HOST_ALLOWLIST` 显式允许该内部 Host；注册仍须通过
+出站 URL 校验。Transport 应匹配服务端协议：`/sse` Endpoint 可能需要 `sse`，
+本示例假定使用 `streamable_http`。
 
 Credential 使用当前 API 加密密钥加密存储，读取时脱敏。不要把 Integration Credential 放入部署变量或 Runtime Policy。
 
@@ -64,8 +69,11 @@ Credential 使用当前 API 加密密钥加密存储，读取时脱敏。不要�
 ## 验证工具
 
 1. 创建会话
-2. 询问：*你有哪些 MCP 工具可用？*
-3. 调用工具：*用 Jina reader 总结 https://example.com/docs*
+2. 询问：_你有哪些 MCP 工具可用？_
+3. 对获准来源调用一个已发现工具。
+4. 复核出现的持久审批卡。没有管理员声明 Policy 的工具采用保守的 Interactive/Always
+   Approval Policy；注册资源本身不授予只读执行权。只有管理员可通过管理 API 声明
+   `tool_policies`。
 
 ## 安全清单
 
@@ -76,7 +84,8 @@ Credential 使用当前 API 加密密钥加密存储，读取时脱敏。不要�
 
 ## 通过 UI 管理
 
-打开 **设置 → 集成** 管理 MCP 与 A2A Resource。修改会立即持久化到 PostgreSQL；连接健康与能力发现由 Read-side Projection 提供。
+打开 **设置 → 集成** 管理 MCP 与 A2A Resource。修改会立即持久化到 PostgreSQL；连接错误和已发现工具来自 Runtime Catalog，
+应通过真正获授权的 Agent 任务验证。
 
 ## 下一步
 

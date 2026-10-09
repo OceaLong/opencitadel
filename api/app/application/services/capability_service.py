@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from functools import cache
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,7 +12,7 @@ from app.application.services.inference_binding_service import InferenceBindingS
 from app.application.services.runtime_policy_reader import PolicyHeadReader
 from app.domain.errors import BadRequestError, ConflictError
 from app.domain.models.inference import InferencePurpose
-from app.domain.models.scope import OwnerScope
+from app.domain.models.scope import OwnerScope, WorkspaceContext
 from app.domain.models.search import SearchCapability, SearchProviderAvailability
 from app.domain.runtime_policy import (
     PatrolAdmissionMode,
@@ -234,3 +234,28 @@ class CapabilityService:
             state=CapabilityStateValue.AVAILABLE,
             model_id=resolved.id,
         )
+
+
+ExecutionGrant = Literal[
+    "execution.read",
+    "evaluation.read",
+    "evaluation.manage",
+    "evaluation.run",
+    "evaluation.review",
+    "evaluation.environment.manage",
+]
+
+
+def execution_grants(ctx: WorkspaceContext) -> list[ExecutionGrant]:
+    """Authorization only; it never implies a provider or feature is available."""
+    principal, scope = ctx.principal, ctx.scope
+    if scope.user_id != principal.user_id or (
+        scope.team_id and scope.team_id not in principal.team_roles
+    ):
+        return []
+    grants: list[ExecutionGrant] = ["execution.read", "evaluation.read"]
+    if not principal.is_auditor:
+        grants.extend(["evaluation.manage", "evaluation.run", "evaluation.review"])
+    if principal.is_admin:
+        grants.append("evaluation.environment.manage")
+    return grants

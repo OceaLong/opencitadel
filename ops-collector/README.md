@@ -6,42 +6,45 @@ The Ops Collector is a separately deployable, read-only MCP service for Ops Patr
 
 ## Operations
 
-| Tool | Upstream access | Bounded input |
-|------|-----------------|---------------|
-| `get_capabilities` | None | Returns tool/schema/capability hashes |
-| `k8s_workload_summary` | Kubernetes read API | Allowlisted namespace and workloads |
-| `k8s_recent_events` | Kubernetes read API | Allowlisted namespace, time window, limit |
-| `k8s_pod_logs` | Kubernetes pod logs | Allowlisted namespace, bounded tail/window |
-| `prom_query` | Prometheus HTTP API | Registered query id only |
-| `http_probe` | HTTP | Registered probe id only |
-| `certificate_status` | TLS | Registered HTTPS probe id only |
-| `backup_status` | Backup status endpoint | Registered backup id only; never reads backup data |
-| `dependency_status` | TCP connectivity | Registered dependency id only |
+| Tool                   | Upstream access        | Bounded input                                      |
+| ---------------------- | ---------------------- | -------------------------------------------------- |
+| `get_capabilities`     | None                   | Returns tool/schema/capability hashes              |
+| `k8s_workload_summary` | Kubernetes read API    | Allowlisted namespace and workloads                |
+| `k8s_recent_events`    | Kubernetes read API    | Allowlisted namespace, time window, limit          |
+| `k8s_pod_logs`         | Kubernetes pod logs    | Allowlisted namespace, bounded tail/window         |
+| `prom_query`           | Prometheus HTTP API    | Registered query id only                           |
+| `http_probe`           | HTTP                   | Registered probe id only                           |
+| `certificate_status`   | TLS                    | Registered HTTPS probe id only                     |
+| `backup_status`        | Backup status endpoint | Registered backup id only; never reads backup data |
+| `dependency_status`    | TCP connectivity       | Registered dependency id only                      |
 
-Every operation is annotated read-only, non-destructive, idempotent, and closed-world. Each response uses the same envelope with `target_ref`, status, duration, bounded data, evidence references, warnings, and a stable error code.
+Every operation is annotated read-only, non-destructive, idempotent, and closed-world. The eight probe responses use the same envelope with `target_ref`, status, duration, bounded data, evidence references, warnings, and a stable error code.
+
+`get_capabilities` returns a separate capability manifest with tool/schema hashes.
 
 ## Configuration reference
 
 Configuration is environment-only and uses the `OPS_COLLECTOR_` prefix. Structured values are JSON.
 
-| Variable | Default / range | Purpose |
-|----------|-----------------|---------|
-| `TARGET_REF` | `opencitadel-local` | Stable identity matched by the Pack |
-| `ALLOWED_NAMESPACES` | `["opencitadel"]` | Non-empty namespace allowlist |
-| `ALLOWED_WORKLOADS` | `{}` | JSON map of namespace to allowed workload ids; an empty list allows all workloads in an allowed namespace |
-| `PROMETHEUS_QUERIES` | `{}` | Map of query id to `base_url`, fixed `promql`, and optional timeout |
-| `HTTP_PROBES` | `{}` | Map of probe id to `url`, expected status list, and optional timeout |
-| `CERTIFICATE_PROBES` | `{}` | Map of probe id to HTTPS `url` and optional timeout |
-| `BACKUPS` | `{}` | Map of backup id to `status_url` and optional timeout |
-| `DEPENDENCIES` | `{}` | Map of id to one target or a list of `{kind,host,port,timeout_seconds}` |
-| `TRANSPORT` | `streamable-http` | `streamable-http` or development-only `stdio` |
-| `ALLOW_STDIO` | `false` | Must also be true before stdio can start |
-| `HOST` / `PORT` | `0.0.0.0` / `8090` | Listener for streamable HTTP (`/mcp`) |
-| `CONCURRENCY` | `4`, range 1–8 | Maximum simultaneous probes |
-| `MAX_OUTPUT_BYTES` | `65536`, max 1 MiB | Serialized response cap |
-| `MAX_ROWS` | `200`, max 1000 | Tabular/sample cap |
-| `MAX_ARRAY_ITEMS` | `200`, max 1000 | Per-array cap |
-| `MAX_STRING_CHARS` | `32768`, max 131072 | Per-string cap |
+| Variable             | Default / range                          | Purpose                                                                                                   |
+| -------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `TARGET_REF`         | `opencitadel-local`                      | Stable identity matched by the Pack                                                                       |
+| `ALLOWED_NAMESPACES` | `["opencitadel"]`                        | Non-empty namespace allowlist                                                                             |
+| `ALLOWED_WORKLOADS`  | `{}`                                     | JSON map of namespace to allowed workload ids; an empty list allows all workloads in an allowed namespace |
+| `PROMETHEUS_QUERIES` | `{}`                                     | Map of query id to `base_url`, fixed `promql`, and optional timeout                                       |
+| `HTTP_PROBES`        | `{}`                                     | Map of probe id to `url`, expected status list, and optional timeout                                      |
+| `CERTIFICATE_PROBES` | `{}`                                     | Map of probe id to HTTPS `url` and optional timeout                                                       |
+| `BACKUPS`            | `{}`                                     | Map of backup id to `status_url` and optional timeout                                                     |
+| `DEPENDENCIES`       | `{}`                                     | Map of id to one target or a list of `{kind,host,port,timeout_seconds}`                                   |
+| `TOKEN`              | No valid default; at least 32 characters | Required for streamable HTTP; every request needs `Authorization: Bearer <token>`                         |
+| `TRANSPORT`          | `streamable-http`                        | `streamable-http` or development-only `stdio`                                                             |
+| `ALLOW_STDIO`        | `false`                                  | Must also be true before stdio can start                                                                  |
+| `HOST` / `PORT`      | `0.0.0.0` / `8090`                       | Listener for streamable HTTP (`/mcp`)                                                                     |
+| `CONCURRENCY`        | `4`, range 1–8                           | Maximum simultaneous probes                                                                               |
+| `MAX_OUTPUT_BYTES`   | `65536`, max 1 MiB                       | Serialized response cap                                                                                   |
+| `MAX_ROWS`           | `200`, max 1000                          | Tabular/sample cap                                                                                        |
+| `MAX_ARRAY_ITEMS`    | `200`, max 1000                          | Per-array cap                                                                                             |
+| `MAX_STRING_CHARS`   | `32768`, max 131072                      | Per-string cap                                                                                            |
 
 The complete variable name is the prefix plus the table name, for example `OPS_COLLECTOR_HTTP_PROBES`.
 
@@ -70,8 +73,8 @@ opsCollector:
       status_url: https://backup-status.example.internal/latest
   registeredDependencies:
     primary-dependencies:
-      - {kind: postgres, host: postgres.database.svc, port: 5432}
-      - {kind: redis, host: redis.cache.svc, port: 6379}
+      - { kind: postgres, host: postgres.database.svc, port: 5432 }
+      - { kind: redis, host: redis.cache.svc, port: 6379 }
 ```
 
 The built-in Kubernetes baseline references `pvc-utilization`, `app-5xx-ratio`, `primary-tls`, `primary-database`, `primary-dependencies`, and `primary-endpoint`. The UI wizard enables every baseline check, so register every id before validation. Custom API clients may instead submit a full Pack config with selected checks disabled.
@@ -85,6 +88,8 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 ```
 
 The Compose profile is useful for transport/configuration checks and non-Kubernetes registered probes. It does not mount a host kubeconfig. For real Kubernetes observations, deploy with the Helm or Kustomize ServiceAccount instead of adding a privileged host credential mount.
+
+Set a strong `OPS_COLLECTOR_TOKEN` in `.env` first. Compose passes namespace, HTTP-probe, and dependency registrations only; use an override or Helm/Kustomize for Prometheus, certificate, backup, and workload registries. The Collector joins both the application and Ops networks for local probes and publishes no host port; bearer authentication is its primary access boundary.
 
 For development-only stdio:
 
@@ -104,6 +109,8 @@ Never enable stdio in the production deployment.
 
 The container runs as UID/GID 10001 with a read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, and only a bounded writable `/tmp`.
 
+The HTTP process refuses to start if the token is missing or shorter than 32 characters. Helm uses `opsCollector.token`; the Kustomize base Secret is empty and must be provisioned before apply. Configure `Authorization: Bearer <token>` in encrypted integration headers. TCP health probes verify only listener reachability, not Kubernetes/registered-target readiness or authenticated calls. Kubernetes manifests set `RuntimeDefault` seccomp; Compose sets non-root, read-only root, dropped capabilities, and `no-new-privileges`.
+
 ## Authentication and data handling
 
 Kubernetes access uses the Pod ServiceAccount; that credential never becomes a tool argument or response field. The Developer Preview does not accept arbitrary authorization headers for registered Prometheus/HTTP/backup probes. Use network-internal, least-data status endpoints that do not require application credentials, or disable the check. Never place credentials in a registered URL.
@@ -113,6 +120,7 @@ The Collector redacts authorization-shaped values, passwords, API keys, tokens, 
 ## Development and verification
 
 ```bash
+cd ops-collector
 uv sync --frozen
 uv run pytest -q
 ```

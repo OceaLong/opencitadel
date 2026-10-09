@@ -1,3 +1,4 @@
+import { prepareStrictDriver } from "./support/strict-driver";
 import { appApi, expect, test } from "./fixtures/acceptance.fixture";
 import type { components } from "../ui/src/lib/api/generated/schema";
 import {
@@ -60,6 +61,7 @@ test.describe.configure({ mode: "serial" });
 test("bootstrap deterministic inference through the public control plane", async ({
   operatorPage: page,
 }) => {
+  test.setTimeout(2_700_000);
   const state: BootstrapState = {
     schema_version: 1,
     run_id: process.env.ACCEPTANCE_RUN_ID as string,
@@ -216,4 +218,5 @@ test("bootstrap deterministic inference through the public control plane", async
     after: capabilityProjection(status),
   };
   writeBootstrapState(state);
+  await prepareStrictDriver(page, state);
 });

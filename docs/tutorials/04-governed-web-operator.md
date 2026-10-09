@@ -8,13 +8,13 @@ target.
 ## Start
 
 ```bash
-cp .env.example .env
-# Set required secrets and configure a tool-capable model.
-docker compose --profile local --profile demo up -d --build
+./scripts/quickstart.sh --demo
 ```
 
 OpenCitadel is at `http://localhost:8088`; OpsConsole is at
-`http://localhost:9099` (`agent` / `agent123`).
+`http://localhost:9099` (`agent` / `agent123`). Configure a tool-capable `chat`
+binding in Settings → Inference. Inside the Agent sandbox, use
+`http://ops-console:9099`; `localhost` there refers to the sandbox itself.
 
 ## Run
 

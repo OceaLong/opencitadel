@@ -1,9 +1,9 @@
-import { del, get, post, put } from "./fetch";
+import { del, get, post, put, type RequestOptions } from "./fetch";
 import type { CreateSkillParams, Skill, SkillsData } from "./types";
 
 export const skillsApi = {
-  list: (enabledOnly = false): Promise<SkillsData> =>
-    get<SkillsData>(`/skills?enabled_only=${enabledOnly}`),
+  list: (enabledOnly = false, options?: RequestOptions): Promise<SkillsData> =>
+    get<SkillsData>(`/skills?enabled_only=${enabledOnly}`, undefined, options),
 
   get: (id: string): Promise<Skill> => get<Skill>(`/skills/${id}`),
 

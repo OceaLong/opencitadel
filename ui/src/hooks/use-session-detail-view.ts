@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import type { ChatInputRef } from "@/components/session/chat-input";
 
+import { useExecutionWorkbench } from "@/hooks/use-execution-workbench";
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { useSessionDetail } from "@/hooks/use-session-detail";
@@ -22,8 +23,12 @@ import type {
   SSEEventData,
   ToolEvent,
 } from "@/lib/api/types";
+import { clientDataScopeKey } from "@/lib/data/client-data-scope";
+import { removeInitialMessage } from "@/lib/execution-view/url-state";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 import { getTaskObservationSummary } from "@/lib/session-events";
+import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 import type { Locale } from "@/i18n/routing";
 
@@ -89,6 +94,20 @@ export function useSessionDetailView({
   const t = useTranslations("sessionDetail");
   const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
+  const workbench = useExecutionWorkbench();
+  const { user, loading: authLoading } = useAuth();
+  const { scope, scopeRevision } = useClientDataScope();
+  const identity =
+    !authLoading && user && scope?.userId === user.id
+      ? JSON.stringify([clientDataScopeKey(scope), scopeRevision, sessionId])
+      : null;
+  const artifactGeneration = useRef(0);
+  useLayoutEffect(() => {
+    artifactGeneration.current += 1;
+    return () => {
+      artifactGeneration.current += 1;
+    };
+  }, [identity]);
   const detail = useSessionDetail(sessionId, hasInitialMessage);
   const {
     session,
@@ -102,8 +121,9 @@ export function useSessionDetailView({
     loadEarlierEvents,
     refreshFiles,
     sendMessage,
-    resumeAfterExternalCommand,
     updateSessionConfig,
+    admissionPending,
+    admissionRevision,
     streaming,
     streamStatus,
     streamError,
@@ -113,7 +133,14 @@ export function useSessionDetailView({
   const [fileListOpen, setFileListOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null);
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null);
-  const [sessionArtifacts, setSessionArtifacts] = useState<ArtifactEventSummary[]>([]);
+  const [artifactSnapshot, setArtifactSnapshot] = useState<{
+    identity: string;
+    items: ArtifactEventSummary[];
+  } | null>(null);
+  const sessionArtifacts = useMemo(
+    () => (identity && artifactSnapshot?.identity === identity ? artifactSnapshot.items : []),
+    [identity, artifactSnapshot],
+  );
   const [dismissedArtifactsKey, setDismissedArtifactsKey] = useState<string | null>(null);
   const [vncOpen, setVncOpen] = useState(false);
   const initialMessageSentRef = useRef(false);
@@ -133,12 +160,20 @@ export function useSessionDetailView({
   const artifactsPreviewDismissed =
     sessionArtifactsKey !== "" && dismissedArtifactsKey === sessionArtifactsKey;
   const latestApproval = useMemo(
-    () => getLatestApprovalFromEvents(events, session?.status === "waiting"),
-    [events, session?.status],
+    () =>
+      getLatestApprovalFromEvents(
+        events.filter((event) => event.data.run_id === workbench.selection.runId),
+        session?.status === "waiting",
+      ),
+    [events, session?.status, workbench.selection.runId],
   );
   const latestAsk = useMemo(
-    () => getLatestAskFromEvents(events, session?.status === "waiting"),
-    [events, session?.status],
+    () =>
+      getLatestAskFromEvents(
+        events.filter((event) => event.data.run_id === workbench.selection.runId),
+        session?.status === "waiting",
+      ),
+    [events, session?.status, workbench.selection.runId],
   );
   const observationSummary = useMemo(
     () => getTaskObservationSummary(events, session?.status),
@@ -162,29 +197,48 @@ export function useSessionDetailView({
   }, [events]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!identity) {
+      const generation = artifactGeneration.current;
+      queueMicrotask(() => {
+        if (artifactGeneration.current === generation) setArtifactSnapshot(null);
+      });
+      return;
+    }
+    const generation = ++artifactGeneration.current;
+    const controller = new AbortController();
+    const current = () => generation === artifactGeneration.current && !controller.signal.aborted;
     void artifactsApi
-      .listBySession(sessionId)
+      .listBySession(sessionId, {
+        signal: controller.signal,
+        workspaceId: scope?.workspaceId ?? "",
+      })
       .then(({ artifacts }) => {
-        if (cancelled) return;
-        setSessionArtifacts(
-          artifacts.map((artifact) => ({
-            artifact_id: artifact.id,
-            kind: artifact.kind,
-            title: artifact.title,
-            status: artifact.status,
-            storage_ref: artifact.storage_ref,
-            version: artifact.version_refs.length,
-          })),
+        if (!current()) return;
+        setArtifactSnapshot((previous) =>
+          current()
+            ? {
+                identity,
+                items: artifacts.map((artifact) => ({
+                  artifact_id: artifact.id,
+                  kind: artifact.kind,
+                  title: artifact.title,
+                  status: artifact.status,
+                  storage_ref: artifact.storage_ref,
+                  version: artifact.version_refs.length,
+                })),
+              }
+            : previous,
         );
       })
       .catch(() => {
-        if (!cancelled) setSessionArtifacts([]);
+        if (current())
+          setArtifactSnapshot((previous) => (current() ? { identity, items: [] } : previous));
       });
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (artifactGeneration.current === generation) artifactGeneration.current += 1;
     };
-  }, [sessionId, artifactBuildSignal, session?.status]);
+  }, [identity, sessionId, artifactBuildSignal, session?.status, scope?.workspaceId]);
 
   const resolvedPreviewTool = useMemo(() => {
     if (!previewTool) return null;
@@ -228,7 +282,9 @@ export function useSessionDetailView({
       sendMessage(initialMessage, initialAttachments || [])
         .then(() => {
           setTimeout(() => {
-            router.replace(`/sessions/${sessionId}`);
+            if (window.location.pathname === `/sessions/${sessionId}`) {
+              router.replace(removeInitialMessage(window.location.href));
+            }
           }, 100);
         })
         .catch((e) => {
@@ -277,38 +333,6 @@ export function useSessionDetailView({
       t,
       tAuth,
     ],
-  );
-
-  const handleApprovalSend = useCallback(
-    async (message: string, feedback?: string) => {
-      if (!requireAuth(tAuth("loginToSendMessage"))) return;
-      if (!latestApproval) throw new Error("Approval is no longer pending");
-      const rejected = message.startsWith("reject") || message === "skip";
-      const parsedFeedback =
-        rejected && message.includes(":") ? message.slice(message.indexOf(":") + 1).trim() : "";
-      await sessionApi.decideApproval(
-        latestApproval.approval_id,
-        rejected ? "rejected" : "approved",
-        feedback ?? parsedFeedback,
-      );
-      resumeAfterExternalCommand();
-    },
-    [latestApproval, requireAuth, resumeAfterExternalCommand, tAuth],
-  );
-
-  const handleAskSend = useCallback(
-    async (choice: string | null) => {
-      if (!requireAuth(tAuth("loginToSendMessage"))) return;
-      if (!latestAsk) throw new Error("Ask is no longer pending");
-      // ask_id 复用审批决定 API（ask_id 即 approval_id）。
-      if (choice === null) {
-        await sessionApi.decideApproval(latestAsk.ask_id, "rejected");
-      } else {
-        await sessionApi.decideApproval(latestAsk.ask_id, "approved", choice);
-      }
-      resumeAfterExternalCommand();
-    },
-    [latestAsk, requireAuth, resumeAfterExternalCommand, tAuth],
   );
 
   const handleThinkingChange = useCallback(
@@ -397,6 +421,7 @@ export function useSessionDetailView({
   }, [session, sessionId, refresh, t]);
 
   return {
+    workbench,
     session,
     files,
     events,
@@ -409,6 +434,8 @@ export function useSessionDetailView({
     refresh,
     loadEarlierEvents,
     refreshFiles,
+    admissionPending,
+    admissionRevision,
     streaming,
     activeSkill,
     setActiveSkill,
@@ -427,8 +454,6 @@ export function useSessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
-    handleApprovalSend,
-    handleAskSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,

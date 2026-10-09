@@ -8,20 +8,7 @@ OpenCitadel 将模型输出、上传内容、检索文本、远程 Integration �
 
 ## 信任边界
 
-```mermaid
-flowchart LR
-  User[Browser / API Client] --> Proxy[Reverse Proxy]
-  Proxy --> API[Stateless API]
-  API --> PG[(PostgreSQL)]
-  Kernel[Execution Kernel] --> PG
-  Kernel -. Wake-up .-> Redis[(Redis)]
-  Kernel --> Broker[Sandbox Broker]
-  Broker --> Sandbox[Isolated Sandbox]
-  Sandbox --> Egress[Filtered Egress Proxy]
-  Kernel --> Providers[LLM / MCP / A2A / Object Storage]
-  Kernel --> Collector[Ops Collector: Read Only]
-  Kernel --> Actuator[Ops Actuator: Narrow Writes]
-```
+![security boundaries](../assets/diagrams/security-boundaries.png)
 
 - 只有 Reverse Proxy 对公网开放。API、Kernel Metrics、PostgreSQL、Redis、对象存储、
   Broker、Sandbox、Collector 与 Actuator 均在内网。
@@ -68,6 +55,12 @@ Claim Generation 与 call-start。过期 Claim Generation 不能报告完成。�
 正式投影可重建，不能追加事实。SSE 读取脱敏公开投影；私有输入、Provider 原始 Body、Secret
 与内部 Event Metadata 不进入浏览器 Stream。
 
+执行分析、比较 Capture 与导出不会把历史访问权变成永久能力。数据库权限检查通过短期签名
+操作绑定实际 Principal 与事务 Scope，在读取和 Worker I/O 边界重新验证当前成员身份与资源
+访问权。捕获的来源 Revision 保持固定，权限撤销则关闭失败。评测表与已捕获分析/导出事实
+同样使用 FORCE RLS。未知模型调用效果在 Sandbox 清理或 Admission 关闭后仍保留预算 Hold；
+清理不能断言 Provider 结果。
+
 ## 工具与审批 Policy
 
 工具暴露取以下条件交集：
@@ -98,7 +91,7 @@ Session Workspace。
 沙箱数据面 Bearer Token 无状态派生为 `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`。API 与执行
 内核用同一部署级 Seed 计算相同值，任何副本重新附着到运行中的沙箱都无需共享 Token 状态；
 Seed 本身绝不注入不可信沙箱容器。沙箱侧以恒定时间比较 Token，缺 Seed 时拒绝启动。Egress
-被限制到一个默认拒绝、按域名 Allowlist 的 Squid 正向代理（Compose 服务与 Helm
+被限制到 Squid 正向代理：先拒绝私网/元数据目的地与不安全端口，再放行其他目的地；`egressProxy.allowedDomains` 是保留字段，不会渲染域名白名单（Compose 服务与 Helm
 `egress-proxy` Deployment），Kubernetes NetworkPolicy 只允许沙箱出站到该代理。
 
 出站 HTTP 校验 Scheme、Hostname、DNS/IP、Private Network 与 Port；DNS 解析使用异步
@@ -134,20 +127,21 @@ Failure、Policy Denial、Resource Binding 与 Chain Verification。Evidence Pac
 
 ## 网络暴露
 
-| Surface | 所需暴露 |
-| --- | --- |
-| Reverse Proxy | 公网 HTTP/HTTPS |
-| API/UI | Proxy 后内网 |
-| PostgreSQL/Redis/Object Storage | 仅内网 |
-| Execution-Kernel Metrics | 仅内网抓取 |
-| Sandbox Broker/Sandbox | 仅 API/Kernel 私网 |
-| Ops Collector/Actuator | 仅 API/Kernel；Actuator 默认关闭 |
-| 远程 LLM/MCP/A2A | 显式 Outbound Policy 与 TLS |
+| Surface                         | 所需暴露                         |
+| ------------------------------- | -------------------------------- |
+| Reverse Proxy                   | 公网 HTTP/HTTPS                  |
+| API/UI                          | Proxy 后内网                     |
+| PostgreSQL/Redis/Object Storage | 仅内网                           |
+| Execution-Kernel Metrics        | 仅内网抓取                       |
+| Sandbox Broker/Sandbox          | 仅 API/Kernel 私网               |
+| Ops Collector/Actuator          | 仅 API/Kernel；Actuator 默认关闭 |
+| 远程 LLM/MCP/A2A                | 显式 Outbound Policy 与 TLS      |
 
 Reverse Proxy 在每个响应上设置加固响应头（HTTPS 上 `Strict-Transport-Security`、
 `X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`，
 以及带 `frame-ancestors 'none'` 与 `object-src 'none'` 的 `Content-Security-Policy`），并以
-`server_tokens off` 运行。分享的 Artifact HTML 在该 CSP 下由独立沙箱化 Origin 提供。
+`server_tokens off` 运行。分享 Artifact HTML 重建为静态 `srcDoc` 文档，位于空权限 Sandbox
+iframe 的 Opaque Origin 中，并使用自身的 `default-src 'none'` CSP。
 
 生产必须启用 NetworkPolicy、强 Redis 认证、Secure Cookie、精确 Trusted Proxy CIDR 与独立
 数据库凭据。生产环境 `TRUSTED_PROXY_CIDRS` 在启动时校验，拒绝与沙箱/Pod 网络重叠的宽私网

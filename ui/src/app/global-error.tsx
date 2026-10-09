@@ -42,6 +42,7 @@ export default function GlobalError({
             <Button
               variant="outline"
               onClick={() => {
+                // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Recover with a new document when the root layout has failed.
                 window.location.href = "/";
               }}
             >

@@ -144,6 +144,7 @@ def next_agent_command(
                 return request_activity(
                     state,
                     activity_id=tool_id,
+                    parent_activity_id=model_id,
                     activity_type=activity_types.TOOL_CALL,
                     now=now,
                     timeout_seconds=timeout,

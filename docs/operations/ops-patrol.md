@@ -29,9 +29,7 @@ operations for allowlisted Deployments/StatefulSets. It is never exposed to a
 model. A `remediation` Run must persist approval before its
 `remediation.execute` Activity can call the Actuator.
 
-Both containers run non-root with a read-only root filesystem, dropped Linux
-capabilities, `RuntimeDefault` seccomp, bounded `/tmp`, and internal-only
-Services.
+Both deployment modes use non-root, read-only root, dropped capabilities, bounded `/tmp`, and internal listeners. Kubernetes manifests explicitly set `RuntimeDefault` seccomp and ClusterIP; Compose sets `no-new-privileges` and publishes no host port.
 
 ## Deploy Collector and Actuator
 
@@ -41,6 +39,8 @@ Compose can validate transport and non-Kubernetes probes:
 docker compose --profile patrol up -d --build opencitadel-ops-collector
 docker compose --profile actuator up -d --build opencitadel-ops-actuator
 ```
+
+First set distinct strong `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN` values (at least 32 characters) and matching `Authorization: Bearer <token>` in encrypted integration headers. Helm uses `opsCollector.token` / `opsActuator.token`; Kustomize base Secrets are empty and must be provisioned. The Compose Actuator does not inject a workload registry and supports transport/authentication checks only.
 
 Compose does not mount host Kubernetes credentials. Use Helm or Kustomize with
 dedicated ServiceAccounts for real cluster checks.
@@ -72,9 +72,7 @@ kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 Patch image tags, target reference, allowlists, registered target maps,
 namespace, resource limits, and exact egress before applying either base.
 Collector ingress permits only API/execution-kernel on 8090; Actuator ingress
-permits only API/execution-kernel on 8091. Collector egress is limited to DNS,
-Kubernetes, and registered probe ports. Actuator egress is limited to DNS and
-Kubernetes.
+permits only API/execution-kernel on 8091. Default Collector egress permits DNS plus ports 443/5432/6379/9000/9090 to any destination; Actuator permits DNS plus 443/6443 to any destination. These port-only rules do not pin IPs/selectors. Narrow them to real API endpoints and registered probes. Collector defaults omit 8000/8090/8080 and 6443, so internal HTTP probes or post-DNAT API access may need adjustment. Registries and RBAC remain the application/resource authorization boundaries.
 
 ## Register the MCP Server
 
@@ -123,8 +121,9 @@ all produce formal Runs.
 ```bash
 make test-patrol
 make test-actuator
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 helm template opencitadel deploy/helm/opencitadel \
+  --namespace opencitadel --values values.production.yaml \
   --set opsCollector.enabled=true \
   --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
@@ -132,9 +131,7 @@ kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 docker compose --env-file .env.example config --quiet
 ```
 
-After deployment, verify the Collector can read Pods but cannot create Pods or
-read Secrets. Verify the Actuator can patch only explicitly registered
-workloads and cannot read Secrets.
+After deployment, verify Collector Pod reads without Pod writes or Secret reads. Actuator namespaced Roles permit Deployment/StatefulSet patch in each namespace; the service enforces exact workload registration. Check RBAC denial outside the namespace, `TARGET_DENIED` for unregistered workloads, and no Secret access separately. After TCP health passes, verify authenticated capabilities and actual registered targets.
 
 The destructive fixture suite must run only through
 `./scripts/run-patrol-fixtures.sh`; it owns and removes its disposable kind
@@ -164,18 +161,18 @@ as a recovery shortcut.
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| New Runs rejected | global `patrol_policy.admission`, Pack activation |
-| Collector unavailable | MCP URL, DNS, Service, NetworkPolicy, readiness |
-| Capability mismatch | image/tool schema changed; revalidate Pack |
-| Target denied | target ref and namespace/workload/endpoint allowlists |
-| Evidence incomplete | required type, SHA-256, expiry, truncation |
-| Run queued/running | execution-kernel health, PostgreSQL claims, model/Collector availability |
-| Scheduled Runs absent | Pack activation, schedule, timezone, scheduler leader |
-| Retention stalled | execution-kernel scheduler, leader lease, retention limits |
-| Remediation rejected | approval decision, frozen parameter hash, capability baseline |
-| Actuator failure | 8091 policy, readiness, exact workload allowlist |
+| Symptom               | Check                                                                    |
+| --------------------- | ------------------------------------------------------------------------ |
+| New Runs rejected     | global `patrol_policy.admission`, Pack activation                        |
+| Collector unavailable | MCP URL, DNS, Service, NetworkPolicy, readiness                          |
+| Capability mismatch   | image/tool schema changed; revalidate Pack                               |
+| Target denied         | target ref and namespace/workload/endpoint allowlists                    |
+| Evidence incomplete   | required type, SHA-256, expiry, truncation                               |
+| Run queued/running    | execution-kernel health, PostgreSQL claims, model/Collector availability |
+| Scheduled Runs absent | Pack activation, schedule, timezone, scheduler leader                    |
+| Retention stalled     | execution-kernel scheduler, leader lease, retention limits               |
+| Remediation rejected  | approval decision, frozen parameter hash, capability baseline            |
+| Actuator failure      | 8091 policy, readiness, exact workload allowlist                         |
 
 Logs must include Run, Pack, Session, check, request, target, and error-code
 identifiers, but never credentials or raw authorization headers.

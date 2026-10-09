@@ -323,6 +323,42 @@ async def test_rerank_llm_is_wired_when_kb_bound() -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_wrapped_knowledge_tool_records_exact_citations(monkeypatch) -> None:
+    from app.domain.models.knowledge_citation import KnowledgeCitation
+    from app.domain.models.tool_result import ToolResult
+    from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
+
+    citation = KnowledgeCitation(
+        knowledge_base_id="kb-1",
+        version_id="v1",
+        document_revision_id="revision-1",
+        doc_id="document-1",
+        chunk_id="chunk-1",
+    )
+
+    async def invoke(_self, _name, **_arguments):
+        return ToolResult(data="public result", citations=[citation])
+
+    monkeypatch.setattr(KnowledgeBaseTool, "invoke", invoke)
+    record = AsyncMock()
+    context = CONTEXT.model_copy(update={"record_citations": record})
+    catalog, _, _ = _catalog(None)
+    payload = {
+        "session_id": "session-1",
+        "mode": "ask",
+        "resource_bindings": [
+            {"resource_kind": "knowledge_base", "resource_id": "kb-1", "version_id": "v1"}
+        ],
+    }
+
+    result = await catalog.retrieve(payload, context, query="beacon")
+    assert len(result["sources"]) == 1
+    await catalog.invoke(payload, context, name="kb_search", arguments={"query": "beacon"})
+    assert record.await_count == 2
+    assert all(call.args == ([citation],) for call in record.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_catalog_drift_after_definitions_yields_not_found_tool_error() -> None:
     # 快照漂移（D9）：definitions 之后 skill 白名单收紧（禁全部工具），
     # invoke 得到 not_found tool error 喂回模型，而不是击穿 Run。

@@ -34,6 +34,11 @@ class ArtifactShareResponse(BaseModel):
 
 
 class ArtifactContentResponse(BaseModel):
+    artifact_id: str | None = None
+    version: int | None = None
+    truncated: bool = False
+    next_cursor: str | None = None
+    at: str | None = None
     content: str
     content_type: str
     incomplete: bool = False

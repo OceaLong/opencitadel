@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="740" viewBox="0 0 1440 740" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Teams · Server-side workspace scope</title>
+<desc id="desc">Workspace headers select a scope; authenticated membership and database authorization decide access. Current membership remains mandatory for historical captures, comparisons, exports and evaluation work. Personal ownership and team ownership are mutually exclusive; global roles do not erase stream scope.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="740" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Teams · Server-side workspace scope</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Workspace headers select a scope; authenticated membership and database authorization decide access.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="principal" data-target="header" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="header" data-target="authorize" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="authorize" data-target="scope" d="M 1110.0,280 L 1110.0,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="scope" data-target="rls" d="M 900,500 L 780,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="rls" data-target="resource" d="M 480,500 L 360,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<g id="principal" data-node-id="principal" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Authenticated principal</text>
+<text x="78" y="240" font-size="15" class="secondary">User identity + accepted team roles</text>
+<text x="78" y="262" font-size="14" class="secondary">Server-derived authorization context</text>
+</g>
+<g id="header" data-node-id="header" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Workspace request</text>
+<text x="498" y="240" font-size="15" class="secondary">X-Workspace-Id, or no header</text>
+<text x="498" y="262" font-size="14" class="secondary">A header is a selector, not a grant</text>
+</g>
+<g id="authorize" data-node-id="authorize" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Membership validation</text>
+<text x="918" y="240" font-size="15" class="secondary">Reject an inaccessible team</text>
+<text x="918" y="262" font-size="14" class="secondary">Personal scope when header omitted</text>
+</g>
+<g id="scope" data-node-id="scope" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">OwnerScope</text>
+<text x="918" y="510" font-size="15" class="secondary">Exactly personal owner or team</text>
+<text x="918" y="532" font-size="14" class="secondary">Freeze authorization in the request</text>
+</g>
+<g id="rls" data-node-id="rls" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="501" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 491,473 V 486 Q 501,493 511,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="524" y="483" font-size="20" font-weight="600">Database authorization</text>
+<text x="498" y="510" font-size="15" class="secondary">Transaction-local signed context</text>
+<text x="498" y="532" font-size="14" class="secondary">FORCE RLS + repository filters</text>
+</g>
+<g id="resource" data-node-id="resource" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="81" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 71,473 V 486 Q 81,493 91,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="104" y="483" font-size="20" font-weight="600">Scoped resource query</text>
+<text x="78" y="510" font-size="15" class="secondary">Runs / sessions / product resources</text>
+<text x="78" y="532" font-size="14" class="secondary">Foreign and absent resources fail closed</text>
+</g>
+<text x="420.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">request</text>
+<text x="840.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">authorize</text>
+<text x="1144.2" y="370.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">derive</text>
+<text x="840.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">configure</text>
+<text x="420.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">read</text>
+<g data-graph-role="legend">
+<line x1="60" y1="612" x2="96" y2="612" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="617" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="612" x2="536" y2="612" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="617" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="612" x2="976" y2="612" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="617" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="660" font-size="15" class="secondary" data-graph-role="label">Current membership remains mandatory for historical captures, comparisons, exports and evaluation work.</text>
+<text x="60" y="684" font-size="15" class="secondary" data-graph-role="label">Personal ownership and team ownership are mutually exclusive; global roles do not erase stream scope.</text>
+</svg>

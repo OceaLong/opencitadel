@@ -1,0 +1,40 @@
+{
+  "revision": "native-text-client-tools-2026-09-10",
+  "endpoints": {
+    "openai-native": {
+      "provider": "openai",
+      "origin": "https://api.openai.com/v1",
+      "pool": "openai-native-account"
+    },
+    "anthropic-native": {
+      "provider": "anthropic",
+      "origin": "https://api.anthropic.com",
+      "pool": "anthropic-native-account"
+    },
+    "gemini-native": {
+      "provider": "gemini",
+      "origin": "https://generativelanguage.googleapis.com",
+      "pool": "gemini-native-account"
+    }
+  },
+  "profiles": [
+    {
+      "endpoint_id": "openai-native",
+      "model": "gpt-4.1-2025-04-14",
+      "profile": "openai-gpt41-chat-v1",
+      "price": null
+    },
+    {
+      "endpoint_id": "anthropic-native",
+      "model": "claude-haiku-4-5-20251001",
+      "profile": "anthropic-haiku45-messages-v1",
+      "price": null
+    },
+    {
+      "endpoint_id": "gemini-native",
+      "model": "gemini-2.5-flash",
+      "profile": "gemini25-flash-generate-content-v1",
+      "price": null
+    }
+  ]
+}

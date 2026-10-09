@@ -16,14 +16,14 @@
 
 ## 只读 REST API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/tickets` | 工单列表（JSON） |
-| GET | `/api/settlements` | 结算台账 |
-| GET | `/api/reconciliation/expected` | 对账期望值 |
-| GET | `/health` | 健康检查 |
+| 方法 | 路径                           | 说明             |
+| ---- | ------------------------------ | ---------------- |
+| GET  | `/api/tickets`                 | 工单列表（JSON） |
+| GET  | `/api/settlements`             | 结算台账         |
+| GET  | `/api/reconciliation/expected` | 对账期望值       |
+| GET  | `/health`                      | 健康检查         |
 
-所有写操作仅通过 HTML 表单 POST，无写 REST API。开发环境提供 `POST /api/_seed/reset` 用于重置演示数据。
+业务写操作通过需要登录的 HTML 表单 POST。`POST /api/_seed/reset` 是额外的重置写接口，会重建 SQLite 演示数据；它与上述 JSON 读取接口均不检查登录，也没有环境开关。此服务只用于可信本地演示与测试，不承载生产数据。
 
 ## 本地运行
 
@@ -39,10 +39,12 @@ uvicorn app:app --host 0.0.0.0 --port 9099
 ## Docker（与 OpenCitadel 一起）
 
 ```bash
-docker compose --profile local --profile demo up ops-console
+docker compose --profile local --profile demo up -d --build ops-console
 ```
 
 Docker 网络内服务名：`ops-console:9099`
+
+默认 Compose 同时加入应用网与沙箱网，并把宿主 `${OPS_CONSOLE_PORT:-9099}` 发布到容器 9099。会话保存在进程内，重启后需要重新登录。SQLite 数据位于容器工作目录，当前 Compose 不挂载持久卷。
 
 ## 稳定元素 ID
 

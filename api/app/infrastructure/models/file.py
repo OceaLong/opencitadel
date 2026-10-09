@@ -2,12 +2,15 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     PrimaryKeyConstraint,
     String,
+    Uuid,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,6 +24,10 @@ class FileModel(Base):
 
     __tablename__ = "files"
     __table_args__ = (
+        CheckConstraint(
+            "(content_digest IS NULL AND object_identity IS NULL) OR (content_digest IS NOT NULL AND content_digest ~ '^[0-9a-f]{64}$' AND object_identity IS NOT NULL)",
+            name="ck_files_content_identity",
+        ),
         PrimaryKeyConstraint("id", name="pk_files_id"),
         # RLS predicate shape; leading team_id also serves the teams FK scan.
         Index("ix_files_team_created", "team_id", "created_at"),
@@ -33,6 +40,11 @@ class FileModel(Base):
         ),
     )
 
+    content_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    object_identity: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    content_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

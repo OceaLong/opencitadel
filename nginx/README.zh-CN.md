@@ -6,28 +6,25 @@ OpenCitadel 边缘网关对外暴露 **8088**（HTTP）或 **443**（启用 HTTP
 
 ## 在栈中的位置
 
-```mermaid
-flowchart LR
-  Client["浏览器 / API 客户端"] --> Nginx["opencitadel-nginx :8088"]
-  Nginx -->|" /api/* "| API["opencitadel-api :8000"]
-  Nginx -->|" / "| UI["opencitadel-ui :3000"]
-```
+![nginx gateway](../docs/assets/diagrams/nginx-gateway.png)
 
-| 路径 | 上游 | 说明 |
-|------|------|------|
+| 路径     | 上游                   | 说明                          |
+| -------- | ---------------------- | ----------------------------- |
 | `/api/*` | `opencitadel-api:8000` | SSE 聊天、WebSocket VNC、REST |
-| `/` | `opencitadel-ui:3000` | Next.js App Router |
+| `/`      | `opencitadel-ui:3000`  | Next.js App Router            |
 
 ## 配置文件
 
-| 文件 | 用途 |
-|------|------|
-| [nginx.conf](nginx.conf) | 全局 gzip、`client_max_body_size`、WebSocket 映射 |
-| [templates/default.http.conf.template](templates/default.http.conf.template) | HTTP server 块 |
-| [templates/default.https.conf.template](templates/default.https.conf.template) | HTTPS server 块（TLS 证书） |
-| [generate-config.sh](generate-config.sh) | 从 `.env` 渲染模板（`OPENCITADEL_DOMAIN`、`HTTPS_ENABLED`） |
+| 文件                                                                           | 用途                                                        |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| [nginx.conf](nginx.conf)                                                       | 全局 gzip、`client_max_body_size`、WebSocket 映射           |
+| [templates/default.http.conf.template](templates/default.http.conf.template)   | HTTP server 块                                              |
+| [templates/default.https.conf.template](templates/default.https.conf.template) | HTTPS server 块（TLS 证书）                                 |
+| [generate-config.sh](generate-config.sh)                                       | 从 `.env` 渲染模板（`OPENCITADEL_DOMAIN`、`HTTPS_ENABLED`） |
 
 Compose 将生成后的配置挂载到 `opencitadel-nginx` 服务。详见[生产部署](../docs/operations/deployment.zh-CN.md)与 [HTTPS 配置](../docs/operations/https-domain-setup.zh-CN.md)。
+
+Compose 默认将宿主 `NGINX_PORT=8088` 映射到容器 80，`NGINX_HTTPS_PORT=443` 映射到容器 443。HTTP 模板只监听 80；HTTPS 模板在 80 重定向并在 443 终止 TLS。启动脚本从 `/etc/nginx/templates-src` 渲染到命名卷的 `/etc/nginx/conf.d/default.conf`；域名为空时 HTTP 使用 `_`，HTTPS 则拒绝启动。启用 HTTPS 必须设置 `LETSENCRYPT_DIR` 并提供已有证书。HTTP/HTTPS 均设置 CSP、nosniff 和 Referrer-Policy，仅 HTTPS 设置 HSTS。
 
 ## 上传大小限制
 
@@ -37,8 +34,8 @@ client_max_body_size 100m;
 
 这是所有 POST 请求的**网关上限**。各功能可能有更低限制：
 
-| 功能 | 有效限制 | 执行方 |
-|------|----------|--------------|
+| 功能       | 有效限制   | 执行方                                               |
+| ---------- | ---------- | ---------------------------------------------------- |
 | 知识库文档 | 默认 50 MB | Execution Policy `knowledge_base.document.max_bytes` |
 
 修改上传上限时需同步 nginx 与类型化 Execution Policy。
@@ -47,7 +44,7 @@ client_max_body_size 100m;
 
 `/api/` location 关闭缓冲并设置长超时以支持流式传输：
 
-- `proxy_buffering off`、`X-Accel-Buffering no`、`gzip off`
+- `proxy_buffering off`、向上游传递 `X-Accel-Buffering: no`、`gzip off`
 - `proxy_read_timeout` / `proxy_send_timeout`：86400s
 - 通过 `nginx.conf` 中 `$connection_upgrade` 映射支持 WebSocket 升级
 

@@ -2,6 +2,7 @@ import type { SessionStatus, SSEEventData, SSEEventType } from "@/lib/api/types"
 
 /** 后端返回的原始事件（可能用 event 或 type 表示类型） */
 type RawEvent = {
+  run_id?: string;
   event?: string;
   type?: string;
   data?: unknown;
@@ -14,7 +15,11 @@ type RawEvent = {
  */
 export function normalizeEvent(raw: RawEvent): SSEEventData | null {
   const type = (raw.type ?? raw.event ?? raw.event_type) as SSEEventType | undefined;
-  const data = raw.data ?? raw.payload;
+  const payload = raw.data ?? raw.payload;
+  const data =
+    raw.run_id && payload && typeof payload === "object"
+      ? { ...payload, run_id: raw.run_id }
+      : payload;
   if (!type || data === undefined) return null;
   return { type, data } as SSEEventData;
 }
@@ -32,23 +37,17 @@ export function normalizeEvents(rawList: unknown): SSEEventData[] {
   return out;
 }
 
-const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
-  "waiting",
-  "completed",
-  "cancelled",
-  "failed",
-]);
+const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>(["completed", "cancelled", "failed"]);
 
 function isTerminalSessionStatus(
   status: SessionStatus | undefined,
-): status is "waiting" | "completed" | "cancelled" | "failed" {
+): status is "completed" | "cancelled" | "failed" {
   return status !== undefined && TERMINAL_SESSION_STATUSES.has(status);
 }
 
 export type SessionStatusReductionState = {
   status?: SessionStatus;
-  persistedTerminal?: "waiting" | "completed" | "cancelled" | "failed";
-  lastPersistedSeq?: number;
+  persistedTerminal?: "completed" | "cancelled" | "failed";
 };
 
 export function reduceSessionStatusState(
@@ -71,17 +70,8 @@ export function reduceSessionStatusState(
     if (!incoming) continue;
 
     const persisted = data.persist !== false;
-    const parsedSeq = persisted ? Number(data.event_id) : Number.NaN;
-    const seq = Number.isInteger(parsedSeq) && parsedSeq > 0 ? parsedSeq : undefined;
-    if (
-      seq !== undefined &&
-      state.lastPersistedSeq !== undefined &&
-      seq <= state.lastPersistedSeq
-    ) {
-      continue;
-    }
-    if (seq !== undefined) state.lastPersistedSeq = seq;
-
+    // The event store supplies persisted order. Public IDs are opaque, including
+    // strings that happen to look numeric. A session may contain successive Runs.
     if (incoming === "running") {
       state.status = incoming;
       if (persisted) state.persistedTerminal = undefined;

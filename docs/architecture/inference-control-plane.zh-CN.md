@@ -8,8 +8,8 @@ OpenCitadel 使用一套统一推理控制面承载 Chat、Embedding 与 Rerank�
 - Model 隶属于一个 Endpoint，持有 Provider Model Name、Kind、Settings、Price 与能力声明；
 - Binding 为 `chat`、`embedding` 或 `rerank` 用途选择一个有效 Model。
 
-系统不存在环境变量 Key 回退、隐式默认模型或独立向量 Credential 路径。消费者必须解析用途
-Binding；无法解析时用稳定错误键 Fail Closed。
+系统不存在环境变量 Key 回退、隐式默认模型或独立向量 Credential 路径。消费者解析
+显式选择的已配置 Model 或用途 Binding；无法授权/解析时用稳定错误键 Fail Closed。
 
 ## Scope 与解析
 
@@ -18,13 +18,14 @@ Resource。Workspace Binding 覆盖可见的 Global Binding；删除 Workspace O
 被引用的 Model 与 Endpoint 必须同时在当前 Owner Scope 可见。
 
 解析过程强制校验 Purpose/Kind：`chat` 与 `rerank` 使用 Chat Model；`embedding` 使用平台维度
-固定为 1536 的 Embedding Model。没有显式 Rerank Binding 时，Rerank 可以解析 Chat Binding。
+固定为 1536 的 Embedding Model。Team 用途 Binding 修改需团队 `OWNER` 或 `ADMIN`；
+Global Binding 修改需平台 Admin。没有显式 Rerank Binding 时，Rerank 可以解析 Chat Binding。
 资源缺失、不可访问或 Kind 不匹配时，绝不会回退到无关 Provider。
 
 ## Provider 与 Credential
 
-Provider Registry 是 Provider/Kind 支持矩阵的唯一事实来源，覆盖 OpenAI、Azure OpenAI、
-Ollama、Anthropic 与 Gemini。写入前即验证组合。Ollama 可以不配置 Credential；要求
+Provider Registry 是 Provider/Kind 支持矩阵的唯一事实来源：OpenAI、Azure OpenAI、
+Ollama 支持 Chat 与 Embedding；Anthropic、Gemini 只支持 Chat。写入前即验证组合。Ollama 可以不配置 Credential；要求
 Credential 的 Provider 缺失时 Fail Closed。
 
 Credential 只以版本化 `fernet_v2` 信封存储。API 仅返回 `credential_configured`，不返回
@@ -34,11 +35,13 @@ Ring 支持计划内轮换。
 ## Capability 与消费者
 
 `GET /api/capabilities` 投影当前 Owner Scope 的 Chat、Embedding、Rerank、A2A、Patrol 与
-Patrol Remediation 可用性。UI 与服务端 Admission 使用相同状态：`available`、`degraded`、
+Patrol Remediation、PDF Report 与 Web Search 可用性；Response 另含 Caller/Workspace
+Execution Grant，独立于 Provider Availability。UI 与服务端 Admission 使用相同状态：`available`、`degraded`、
 `not_configured`、`disabled` 或 `denied`，并共享稳定 Reason Key。
 
-Chat 执行、Knowledge/Memory 向量化与 Rerank 均在调用时解析控制面。活动 Execution Policy
-可以分别禁用向量消费者，但已启用的消费者不会读取独立 API Key 或 Base URL。能力缺失时，
+Chat 执行、Knowledge/Memory 向量化与 Rerank 在 OwnerScope 下解析控制面；Admission/
+Configuration Record 固定所选 Identity，供执行证据使用。Vector Enablement 与 Resilience
+采用 Run 冻结的 Execution Policy。Execution Policy 可分别禁用向量消费者，但已启用的消费者不会读取独立 API Key 或 Base URL。能力缺失时，
 UI 引导用户前往 **设置 → 推理**。
 
 ## API 与运维

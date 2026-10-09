@@ -8,7 +8,7 @@ Ops Patrol 通过固定的只读 MCP Collector 检查自托管 Kubernetes 应用
 
 需要准备：
 
-- 正常运行的 API、执行内核、PostgreSQL、Redis 与支持工具调用的模型；
+- 正常运行的 API、执行内核、PostgreSQL 与 Redis；
 - 使用专用只读 ServiceAccount 部署在目标集群的 Ops Collector；
 - 已评审的 Namespace/Workload 白名单与注册探针；
 - 已启用的 Streamable HTTP MCP Server，九个 Tool Policy 均固定为只读；
@@ -23,18 +23,23 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 
 Compose Profile 不会挂载宿主机 kubeconfig。真实 Kubernetes 观察应使用 Helm/Kustomize ServiceAccount。绝不能将 Collector 暴露到公网。
 
+设置至少 32 字符的强 `OPS_COLLECTOR_TOKEN`（Helm 使用 `opsCollector.token`），并配置
+匹配的加密 Integration Header `Authorization: Bearer <token>`。在部署出站策略中允许
+精确内部 Collector Host。HTTP Listener 健康不代表认证访问或 Kubernetes 已就绪。
+正式 Patrol 使用固定 Collector Tool 与服务端断言；只有独立 Agent 工作流才需要模型。
+
 ## 准备 Collector
 
 内置 `kubernetes-baseline-v1` 向导会创建十项已启用检查。验证前必须注册使用以下标识符的外部目标：
 
-| 检查 | 必需注册 ID |
-|------|-------------|
-| PVC 使用率 | `pvc-utilization` Prometheus Query |
-| HTTP 5xx 比例 | `app-5xx-ratio` Prometheus Query |
-| Endpoint 健康 | `primary-endpoint` HTTP Probe |
-| 证书过期 | `primary-tls` Certificate Probe |
-| 备份新鲜度 | `primary-database` Backup Status |
-| 依赖健康 | `primary-dependencies` Dependency Group |
+| 检查          | 必需注册 ID                             |
+| ------------- | --------------------------------------- |
+| PVC 使用率    | `pvc-utilization` Prometheus Query      |
+| HTTP 5xx 比例 | `app-5xx-ratio` Prometheus Query        |
+| Endpoint 健康 | `primary-endpoint` HTTP Probe           |
+| 证书过期      | `primary-tls` Certificate Probe         |
+| 备份新鲜度    | `primary-database` Backup Status        |
+| 依赖健康      | `primary-dependencies` Dependency Group |
 
 四项 Kubernetes 检查使用 Pack Namespace 与 Collector Namespace/Workload 白名单。完整配置示例见 [Collector README](../../ops-collector/README.zh-CN.md#配置参考)。
 
@@ -69,12 +74,12 @@ Collector 本身不会获得任何变更权限。一个范围收窄、独立部�
 
 ## 理解结果
 
-| 状态 | 含义 |
-|------|------|
-| `pass` | 全部已配置服务端断言通过 |
-| `warn` / `fail` | 阈值越界；可能创建或去重 Finding |
-| `error` | Probe、Schema、Capability 或必需证据失败；不能视为健康 |
-| `skipped` | 按 Pack 缺失数据契约显式跳过；不会静默计为通过 |
+| 状态            | 含义                                                   |
+| --------------- | ------------------------------------------------------ |
+| `pass`          | 全部已配置服务端断言通过                               |
+| `warn` / `fail` | 阈值越界；可能创建或去重 Finding                       |
+| `error`         | Probe、Schema、Capability 或必需证据失败；不能视为健康 |
+| `skipped`       | 按 Pack 缺失数据契约显式跳过；不会静默计为通过         |
 
 Pack 详情显示 30 天计划运行成功率、Finding/误报数与复核时间中位数。只有 Operator 打开 Run 并完成 Finding 决策后才计算复核时间。
 

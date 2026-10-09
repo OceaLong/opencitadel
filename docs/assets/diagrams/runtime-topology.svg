@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1020" viewBox="0 0 1440 1020" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">OpenCitadel · Runtime topology</title>
+<desc id="desc">One execution authority; evaluation extends the control plane without adding a Run family. Redis wake-ups are post-commit hints. Lost notifications are recovered by PostgreSQL polling. Activity progress also feeds the observation journal and public feed; it cannot create a Run terminal event.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1020" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">OpenCitadel · Runtime topology</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">One execution authority; evaluation extends the control plane without adding a Run family.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="client" data-target="api" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="api" data-target="inbox" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="inbox" data-target="kernel" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="kernel" data-target="events" d="M 900,500 L 780,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="events" data-target="views" d="M 480,500 L 360,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="api" data-target="views" d="M 630,280 L 630,365 L 210,365 L 210,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="views" data-target="queries" d="M 210,550 L 210,720" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-7" data-edge-id="edge-7" data-graph-role="edge" data-source="events" data-target="public" d="M 630,550 L 630,720" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-8" data-edge-id="edge-8" data-graph-role="edge" data-source="public" data-target="queries" d="M 480,770 L 360,770" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-9" data-edge-id="edge-9" data-graph-role="edge" data-source="kernel" data-target="providers" d="M 1110,550 L 1110,720" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="client" data-node-id="client" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Web / API clients</text>
+<text x="78" y="240" font-size="15" class="secondary">Sessions · Runs · Analysis · Evaluations</text>
+<text x="78" y="262" font-size="14" class="secondary">Typed intent; scope-owned browser state</text>
+</g>
+<g id="api" data-node-id="api" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Stateless API</text>
+<text x="498" y="240" font-size="15" class="secondary">ApiRuntime; authorize each request</text>
+<text x="498" y="262" font-size="14" class="secondary">Commands, scoped queries, public SSE</text>
+</g>
+<g id="inbox" data-node-id="inbox" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="203" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,203 V 216 Q 921,223 931,216 V 203" fill="none" stroke="#16a34a"/>
+<text x="944" y="213" font-size="20" font-weight="600">Command inbox</text>
+<text x="918" y="240" font-size="15" class="secondary">PostgreSQL idempotent accepted intent</text>
+<text x="918" y="262" font-size="14" class="secondary">API, scheduler and evaluation ingress</text>
+</g>
+<g id="views" data-node-id="views" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="81" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 71,473 V 486 Q 81,493 91,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="104" y="483" font-size="20" font-weight="600">Derived read models</text>
+<text x="78" y="510" font-size="15" class="secondary">Formal views + observation journal</text>
+<text x="78" y="532" font-size="14" class="secondary">No workflow or terminal authority</text>
+</g>
+<g id="events" data-node-id="events" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="501" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 491,473 V 486 Q 501,493 511,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="524" y="483" font-size="20" font-weight="600">Execution events</text>
+<text x="498" y="510" font-size="15" class="secondary">PostgreSQL append-only hash chain</text>
+<text x="498" y="532" font-size="14" class="secondary">Only Run lifecycle authority</text>
+</g>
+<g id="kernel" data-node-id="kernel" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Execution kernel</text>
+<text x="918" y="510" font-size="15" class="secondary">KernelRuntime + TaskSupervisor</text>
+<text x="918" y="532" font-size="14" class="secondary">Decisions, Activities, evaluation lanes</text>
+</g>
+<g id="queries" data-node-id="queries" data-graph-role="node" data-bounds="60,720,360,820">
+<rect x="60" y="720" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="753" font-size="20" font-weight="600">API read surfaces</text>
+<text x="78" y="780" font-size="15" class="secondary">Workbench · Analysis · Compare · Export</text>
+<text x="78" y="802" font-size="14" class="secondary">Scoped immutable cuts; reauthorize</text>
+</g>
+<g id="public" data-node-id="public" data-graph-role="node" data-bounds="480,720,780,820">
+<rect x="480" y="720" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="501" cy="743" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 491,743 V 756 Q 501,763 511,756 V 743" fill="none" stroke="#16a34a"/>
+<text x="524" y="753" font-size="20" font-weight="600">Public feed</text>
+<text x="498" y="780" font-size="15" class="secondary">Sanitized formal + progress entries</text>
+<text x="498" y="802" font-size="14" class="secondary">Opaque seq cursor; live and replay</text>
+</g>
+<g id="providers" data-node-id="providers" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">External Activities</text>
+<text x="918" y="780" font-size="15" class="secondary">LLM · sandbox broker · MCP / A2A</text>
+<text x="918" y="802" font-size="14" class="secondary">Storage; read probes; approved writes</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">intent</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">submit</text>
+<text x="1150" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">claim</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">append</text>
+<text x="420" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">project</text>
+<text x="420" y="353" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">query</text>
+<text x="256" y="640" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">read cut</text>
+<text x="670" y="640" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-7">sanitize</text>
+<text x="420" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-8">SSE</text>
+<text x="1155" y="640" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-9">dispatch</text>
+<g data-graph-role="legend">
+<line x1="60" y1="892" x2="96" y2="892" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="897" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="892" x2="536" y2="892" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="897" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="892" x2="976" y2="892" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="897" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="940" font-size="15" class="secondary" data-graph-role="label">Redis wake-ups are post-commit hints. Lost notifications are recovered by PostgreSQL polling.</text>
+<text x="60" y="964" font-size="15" class="secondary" data-graph-role="label">Activity progress also feeds the observation journal and public feed; it cannot create a Run terminal event.</text>
+</svg>

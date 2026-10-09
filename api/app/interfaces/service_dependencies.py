@@ -27,6 +27,9 @@ from app.application.services.auth_service import AuthService
 from app.application.services.capability_service import CapabilityService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.execution_content_service import ExecutionContentService
+from app.application.services.execution_event_service import ExecutionEventService
+from app.application.services.execution_view_service import ExecutionViewService
 from app.application.services.file_service import FileService
 from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
@@ -343,3 +346,103 @@ def get_approval_inbox_service(
     # A stateless read-model wrapper over the shared run projection; cheap to
     # build per request, so it needs no slot in the runtime bundle.
     return ApprovalInboxService(run_projection=runtime.run_projection)
+
+
+def get_execution_content_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ExecutionContentService:
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.execution_content_factory(get_authorization_context())
+
+
+def get_execution_view_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ExecutionViewService:
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.execution_view_factory(get_authorization_context())
+
+
+def get_execution_event_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ExecutionEventService:
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.execution_event_factory(get_authorization_context())
+
+
+def get_dataset_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.dataset_factory(get_authorization_context())
+
+
+def get_suite_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.suite_factory(get_authorization_context())
+
+
+def get_recording_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.recording_factory(get_authorization_context())
+
+
+def get_environment_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.environment_factory(get_authorization_context())
+
+
+def get_batch_service(
+    suites=Depends(get_suite_service), environments=Depends(get_environment_service)
+):
+    from app.application.evaluation.batch_service import BatchService
+    from app.application.evaluation.environment_authority import EnvironmentPreflightAuthority
+    from app.application.evaluation.preflight import PreflightService
+    from app.application.evaluation.recording_authority import RecordingPreflightAuthority
+
+    return BatchService(
+        suites,
+        preflight_factory=lambda principal: PreflightService(
+            suites,
+            principal,
+            recordings=RecordingPreflightAuthority(),
+            environments=EnvironmentPreflightAuthority(
+                environments.registry, ceiling=environments.ceiling
+            ),
+        ),
+    )
+
+
+def get_review_service(suites=Depends(get_suite_service)):
+    from app.application.evaluation.review_service import ReviewService
+
+    return ReviewService(suites)
+
+
+async def get_execution_comparison_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    ctx = get_authorization_context()
+    return await runtime.comparison_factory(ctx.scope, ctx.principal)
+
+
+async def get_execution_analysis_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    ctx = get_authorization_context()
+    return await runtime.analysis_factory(ctx.scope, ctx.principal)
+
+
+def get_analysis_preferences(runtime: ApiRuntime = Depends(require_api_runtime)):
+    return runtime.analysis_preferences_factory()
+
+
+async def get_execution_export_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    ctx = get_authorization_context()
+    return await runtime.export_factory(ctx.scope, ctx.principal)

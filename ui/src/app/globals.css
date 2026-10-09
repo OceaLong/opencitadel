@@ -289,3 +289,18 @@
     }
   }
 }
+
+/* Execution workbench uses the shared theme and keeps the retained chat mounted. */
+.execution-conversation:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: reduce) {
+  .execution-workbench *,
+  .execution-detail-sheet,
+  .execution-title-dialog {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

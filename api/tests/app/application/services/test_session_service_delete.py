@@ -114,5 +114,5 @@ async def test_purge_session_physically_deletes_recycle_bin_row():
     scope = OwnerScope.personal("user-1")
     await service.purge_session("sess-1", scope=scope)
 
-    uow.session.purge.assert_awaited_once_with("sess-1", scope=scope)
+    uow.session.purge.assert_awaited_once_with("sess-1", scope=scope, force=False)
     uow.commit.assert_awaited_once()

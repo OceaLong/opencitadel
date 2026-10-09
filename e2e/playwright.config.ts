@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
-const evidenceDir = process.env.ACCEPTANCE_EVIDENCE_DIR ?? resolve("test-results");
+const evidenceDir =
+  process.env.ACCEPTANCE_EVIDENCE_DIR ?? resolve("test-results");
 
 export default defineConfig({
   testDir: ".",
@@ -13,7 +14,10 @@ export default defineConfig({
   reporter: [
     ["line"],
     ["junit", { outputFile: resolve(evidenceDir, "playwright/junit.xml") }],
-    ["json", { outputFile: resolve(evidenceDir, "playwright/native-results.json") }],
+    [
+      "json",
+      { outputFile: resolve(evidenceDir, "playwright/native-results.json") },
+    ],
     ["./reporters/zero-skip-reporter.ts"],
   ],
   use: {
@@ -44,8 +48,15 @@ export default defineConfig({
     },
     {
       name: "execution",
-      dependencies: ["bootstrap"],
-      testMatch: /execution\.spec\.ts/,
+      dependencies: ["bootstrap", "control-plane", "resources", "patrol-admin"],
+      workers: 1,
+      testMatch: [
+        /execution\.spec\.ts/,
+        /execution-workbench\.spec\.ts/,
+        /evaluations\.spec\.ts/,
+        /execution-analysis\.spec\.ts/,
+        /evaluation-governance\.spec\.ts/,
+      ],
     },
     {
       name: "patrol-admin",

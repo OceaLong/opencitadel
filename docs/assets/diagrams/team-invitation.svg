@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="970" viewBox="0 0 1140 970" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Teams · Invitation and account onboarding</title><desc id="desc">An invitation token selects a team and optional email; account and membership checks remain server-side.</desc>
+<style>text {font-family: Helvetica, Arial, sans-serif;fill:#111827} .secondary {fill:#6b7280}</style>
+<rect width="1140" height="970" fill="#ffffff" data-graph-role="background"/>
+<defs><marker id="blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#2563eb"/></marker><marker id="green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#16a34a"/></marker></defs>
+<text x="50" y="62" font-size="28" font-weight="600" data-graph-role="label">Teams · Invitation and account onboarding</text>
+<text x="50" y="98" font-size="15" class="secondary" data-graph-role="label">An invitation token selects a team and optional email; account and membership checks remain server-side.</text>
+<rect x="50" y="478" width="1040" height="150" rx="8" fill="#f8fafc" stroke="#d1d5db" stroke-dasharray="6 4" data-graph-role="container"/>
+<text x="64" y="500" font-size="14" font-weight="600" data-graph-role="label">New account · email-bound invitation</text>
+<rect x="50" y="618" width="1040" height="220" rx="8" fill="#f8fafc" stroke="#d1d5db" stroke-dasharray="6 4" data-graph-role="container"/>
+<text x="64" y="640" font-size="14" font-weight="600" data-graph-role="label">Existing account · sign in and accept</text>
+<rect id="admin" data-node-id="admin" data-graph-role="node" x="45" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="150" y="170" font-size="17" font-weight="600" text-anchor="middle">Team administrator</text>
+<text x="150" y="192" font-size="12" class="secondary" text-anchor="middle">Owner / admin</text>
+<line x1="150" y1="210" x2="150" y2="820" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="api" data-node-id="api" data-graph-role="node" x="305" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="410" y="170" font-size="17" font-weight="600" text-anchor="middle">Invitation / auth API</text>
+<text x="410" y="192" font-size="12" class="secondary" text-anchor="middle">Server authorization</text>
+<line x1="410" y1="210" x2="410" y2="820" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="invitee" data-node-id="invitee" data-graph-role="node" x="565" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="670" y="170" font-size="17" font-weight="600" text-anchor="middle">Invitee</text>
+<text x="670" y="192" font-size="12" class="secondary" text-anchor="middle">New or existing account</text>
+<line x1="670" y1="210" x2="670" y2="820" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="page" data-node-id="page" data-graph-role="node" x="825" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="930" y="170" font-size="17" font-weight="600" text-anchor="middle">Invitation page</text>
+<text x="930" y="192" font-size="12" class="secondary" text-anchor="middle">/invitations/[token]</text>
+<line x1="930" y1="210" x2="930" y2="820" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="admin" data-target="api" d="M 150,240 L 410,240" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="280.0" y="228" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">Create invitation; optional email</text>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="api" data-target="admin" d="M 410,310 L 150,310" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="280.0" y="298" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">Invitation link and token</text>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="invitee" data-target="page" d="M 670,380 L 930,380" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="800.0" y="368" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">Open invitation link</text>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="page" data-target="api" d="M 930,450 L 410,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="670.0" y="438" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">Inspect invitation</text>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="page" data-target="api" d="M 930,520 L 410,520" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="670.0" y="508" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">Email-bound signup + password + token</text>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="api" data-target="invitee" d="M 410,590 L 670,590" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="540.0" y="578" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">Created account and joined team</text>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="invitee" data-target="page" d="M 670,660 L 930,660" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="800.0" y="648" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">Existing account sign-in return</text>
+<path id="edge-7" data-edge-id="edge-7" data-graph-role="edge" data-source="page" data-target="api" d="M 930,730 L 410,730" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="670.0" y="718" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-7">Accept invitation as signed-in user</text>
+<path id="edge-8" data-edge-id="edge-8" data-graph-role="edge" data-source="api" data-target="invitee" d="M 410,800 L 670,800" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="540.0" y="788" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-8">Validated team membership</text>
+<text x="50" y="875" font-size="14" class="secondary" data-graph-role="label">The signup and existing-account paths are alternatives; new users require the supported email-bound invitation path.</text>
+<text x="50" y="900" font-size="14" class="secondary" data-graph-role="label">Expired, mismatched, revoked or unauthorized invitations are rejected by the server.</text>
+</svg>

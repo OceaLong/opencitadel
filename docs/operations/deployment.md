@@ -4,20 +4,21 @@
 
 OpenCitadel deploys one stateless API and one database-authoritative execution
 kernel. PostgreSQL is required; Redis only lowers wake-up latency. The shipped
-schema is greenfield and has one Alembic revision, so deploy into a new
-database rather than importing an earlier development catalog.
+schema uses one greenfield Alembic lineage from `0001greenfield` through
+`0030evaluation_judge_history`, including incremental execution, analysis, and
+evaluation migrations. Deploy into a fresh database; `app.migrate` upgrades the
+lineage to its current head rather than importing an earlier development catalog.
 
 ## Processes
 
-| Process | Compose service | Database credential |
-| --- | --- | --- |
-| Migration | `opencitadel-migrate` | `POSTGRES_MIGRATION_*` |
-| API | `opencitadel-api` | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
-| Execution kernel | `opencitadel-execution-kernel` | `POSTGRES_KERNEL_*` |
-| UI | `opencitadel-ui` | none |
+| Process          | Compose service                | Database credential                   |
+| ---------------- | ------------------------------ | ------------------------------------- |
+| Migration        | `opencitadel-migrate`          | `POSTGRES_MIGRATION_*`                |
+| API              | `opencitadel-api`              | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
+| Execution kernel | `opencitadel-execution-kernel` | `POSTGRES_KERNEL_*`                   |
+| UI               | `opencitadel-ui`               | none                                  |
 
-The PostgreSQL administrator credential is bootstrap-only. Runtime containers
-must not receive it. The kernel runs command inbox, Run decisions, Activities,
+The PostgreSQL administrator credential is reserved for bootstrap and the optional Helm database backup job. API and kernel runtime containers must not receive it. The kernel runs command inbox, Run decisions, Activities,
 timers, outbox delivery, formal projectors, automation, and maintenance ticks.
 There is no second execution service.
 
@@ -30,7 +31,10 @@ storage, provider, and connection-pool resources are never shared.
 
 ```bash
 cp .env.example .env
-# Replace every required secret and password in .env.
+# Replace every required secret and password; use COOKIE_SECURE=false for local HTTP.
+# Set FRONTEND_BASE_URL=http://localhost:8088 and OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth.
+# Set OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=30 to fit the Compose 45s grace period.
+docker compose build opencitadel-sandbox
 docker compose --profile local up -d --build
 docker compose ps
 ```
@@ -39,7 +43,7 @@ Open `http://localhost:8088`. The `local` profile enables bundled MinIO. Cloud
 deployments can use COS by setting `STORAGE_PROVIDER=cos` and the `COS_*`
 values.
 
-At minimum, set strong distinct values for:
+Configure these deployment settings; passwords and keys need distinct strong values, while IDs, usernames, and timeouts are not secrets:
 
 - `POSTGRES_ADMIN_USER`, `POSTGRES_ADMIN_PASSWORD`,
   `POSTGRES_MIGRATION_USER`, `POSTGRES_MIGRATION_PASSWORD`,
@@ -56,7 +60,7 @@ At minimum, set strong distinct values for:
 production; the API and execution kernel both derive each sandbox's data-plane
 token from it. `JWT_PREVIOUS_SECRETS` (default `{}`) and
 `DATABASE_AUTHORIZATION_SIGNING_SECRET` (default: reuse `SESSION_SECRET`) are
-optional and covered under *Configuration and secrets*. When you run the Ops
+optional and covered under _Configuration and secrets_. When you run the Ops
 Patrol Collector/Actuator, also set strong `OPS_COLLECTOR_TOKEN` and
 `OPS_ACTUATOR_TOKEN` values; each server refuses to start without one.
 
@@ -114,7 +118,7 @@ Compose isolates Docker access in `opencitadel-sandbox-broker`. API and kernel
 receive only its narrow token-authenticated HTTP endpoint, never the Docker
 socket. On native Linux set `DOCKER_SOCK_GID` to the socket group. Kubernetes
 uses a dedicated execution-kernel ServiceAccount and restricted sandbox Pod
-RBAC. Keep the Squid sandbox egress proxy and allowlist enabled. Each sandbox's
+RBAC. Keep the Squid sandbox egress proxy enabled; its static configuration uses private-range/metadata denials and Safe_ports, without a domain allowlist. Each sandbox's
 data-plane token is derived as `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)` on both the
 API and kernel side; the seed never enters the sandbox container, so any replica
 can re-attach and authenticate without shared token state.
@@ -177,7 +181,7 @@ do not bypass it by modifying event rows.
 The chart is under `deploy/helm/opencitadel`.
 
 ```bash
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
   --values values.production.yaml
@@ -185,21 +189,13 @@ helm upgrade --install opencitadel deploy/helm/opencitadel \
 
 Supply all secrets through a secret manager or protected values file. Keep
 `networkPolicy.enabled=true`, separate API/kernel/migration database users,
-and configure `executionKernel.replicas` plus its HPA for Activity volume.
+and configure `executionKernel.replicas` plus its HPA for Activity volume. Set `env.SANDBOX_K8S_NAMESPACE` to the release namespace (`opencitadel` here) to align sandbox RBAC and NetworkPolicy.
 Optional Ops Collector and Actuator workloads must remain network-separated;
 the Actuator is reachable only from API/kernel and still requires a persisted
 approval. Their RBAC is a namespaced `Role`/`RoleBinding` rendered per allowed
 namespace, not a cluster-wide `ClusterRole`.
 
-The chart ships the resilience and observability baseline as templates:
-per-workload `NetworkPolicy` objects (PostgreSQL, Redis, execution kernel, Ops
-Collector/Actuator, egress proxy, sandbox), PodDisruptionBudgets for the API and
-execution kernel, a Squid `egress-proxy` Deployment that confines sandbox
-outbound traffic to an allowlist, a PostgreSQL backup `CronJob`, and a
-`PrometheusRule` with alerts for approval timeouts, audit-chain verification
-failure, outbox lag, sandbox admission rejection, 5xx rate, and rate-limit
-rejections. The reverse proxy also sets HSTS/CSP/nosniff response headers and
-`server_tokens off`.
+These templates have separate deployment switches: NetworkPolicy and egress proxy default on; `pdb.enabled`, `backup.enabled`, `monitoring.serviceMonitor.enabled`, and `monitoring.prometheusRule.enabled` default off. The backup CronJob also requires chart-managed PostgreSQL. Squid uses the static address/port ACLs; `egressProxy.allowedDomains` is not consumed. Alerts require Prometheus Operator CRDs, matching selectors, and actual scrapes; API scraping also needs a strong `secrets.metricsToken`. Compose Nginx templates set CSP/nosniff and HTTPS HSTS. Helm supplies security headers only through optional Ingress annotations for ingress-nginx, subject to controller support.
 
 For chart-managed PostgreSQL, `files/postgres/init-app-role.sh` creates the
 distinct migration, API, and kernel roles before the greenfield migration.
@@ -209,8 +205,8 @@ schema ownership or migration credentials to API or kernel containers.
 
 ## Release artifacts and supply chain
 
-Release tags publish seven images: `api`, `execution-kernel`, `migrate`, `ui`,
-`sandbox`, `ops-collector`, and `ops-actuator`. The
+Release tags publish eight images: `api`, `execution-kernel`, `migrate`,
+`sandbox-broker`, `ui`, `sandbox`, `ops-collector`, and `ops-actuator`. The
 `.github/workflows/security.yml` gate runs Gitleaks, CodeQL, and Trivy. The
 release workflow scans every image before publish and attaches an SBOM plus
 signed provenance. Deploy by immutable digest after verifying provenance,
@@ -220,6 +216,10 @@ The deterministic inference provider under `e2e/fixtures/` is not a release
 artifact. It exists only in the Compose `acceptance` profile and must never be
 added to Helm, Kustomize, quickstart, production settings, or the release image
 matrix.
+
+## Evaluation runtime deployment
+
+The same kernel owns four critical lanes: `evaluation-scheduler`, `evaluation-reconciler`, `evaluation-scoring`, and `evaluation-cleanup`; API work is authorization, validation, and durable admission. An unexpected lane failure withdraws kernel readiness and requests shutdown. Recorded/isolated subjects and Judges use formal Runs, without another execution service. Default deployments enable no controlled physical-environment adapter. The local Docker adapter requires a non-production `ENV`, `EVALUATION_LOCAL_DOCKER_ENABLED=true`, a read-only administrator inventory at `EVALUATION_TEST_INVENTORY_PATH`, and configured physical budget inventory. Acceptance inventory mounts and the broker journal volume belong to its dedicated override, not production. See the [evaluation control plane](../architecture/evaluation-control-plane.md) and [controlled environments](../evaluation-environments.md).
 
 ## Deterministic acceptance gate
 
@@ -247,13 +247,20 @@ the gate fails. Inspect the manifest `failure_reason`, `logs/stack.log`, and
 Playwright traces/screenshots before retrying. Do not replace runner cleanup
 with a broad Docker prune.
 
+The full execution gate also requires `ACCEPTANCE_CAPACITY_REPORT` and `ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` with valid AC21 measured evidence. UI/unit-test success is not capacity acceptance. Full AC21 capacity acceptance remains incomplete; deployment success or other passing cases does not establish an all-green release gate.
+
 ## Release gates
 
 Before rollout, run:
 
+The API command below excludes only the six current-invocation consumers in
+`test_execution_visualization_closed_loop.py`. The acceptance runner executes
+them after validating the native strict report and restoration receipt, retaining
+`strict-pytest.xml` and requiring six passes with zero skips.
+
 ```bash
 cd api
-uv run pytest -q
+uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 uv run lint-imports
 uv run ruff check --select F821 app tests
 
@@ -266,7 +273,7 @@ npm run build
 
 cd ..
 docker compose config
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 ./scripts/run-acceptance-e2e.sh --disposable
 ```
 
@@ -389,4 +396,5 @@ receives HTTP 429; retries of an existing group do not consume another slot.
 
 This change targets a freshly initialized greenfield database. Existing initialized
 databases do not acquire new columns/tables by rerunning an already-applied initial
-migration; do not point a fresh-schema test at production data.
+migration. `app.migrate` applies pending revisions in the current lineage to its
+head; do not point a fresh-schema test at production data.

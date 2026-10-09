@@ -145,6 +145,7 @@ class KnowledgeBaseService:
             },
             idempotency_key=f"resource-build:{build.build_id}",
             command_sink=command_sink,
+            inference_read_context=uow,
         )
 
     async def _freeze_embedding(
@@ -525,6 +526,7 @@ class KnowledgeBaseService:
             )
         evidence_by_chunk = {
             row.chunk.id: KnowledgeCitation(
+                knowledge_base_id=kb_id,
                 version_id=version_id,
                 document_revision_id=row.document_revision_id,
                 doc_id=row.document.id,
@@ -1050,10 +1052,12 @@ class KnowledgeBaseService:
             await uow.commit()
         logger.info("恢复知识库[%s]成功", kb_id)
 
-    async def purge_kb(self, kb_id: str, scope: OwnerScope | None = None) -> None:
+    async def purge_kb(
+        self, kb_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> None:
         """物理清除回收站中的知识库及其级联数据（不可恢复）。"""
         async with self._uow_factory() as uow:
-            purged = await uow.knowledge_base.purge_kb(kb_id, scope=scope)
+            purged = await uow.knowledge_base.purge_kb(kb_id, scope=scope, force=force)
             if not purged:
                 raise NotFoundError(f"回收站中不存在知识库[{kb_id}]")
             await uow.commit()

@@ -14,4 +14,6 @@ Every manifest passes strict server-side schema validation before replay. On fai
 
 Prerequisites: Docker, kind, kubectl, jq, uv, and enough local capacity for the pinned kind node plus fixture images. The script preloads its runtime images, writes the machine-readable score under `tmp/`, and removes the cluster on success or failure unless the explicit keep flag is set.
 
+This lab verifies Collector/Actuator adapters, fixed-fixture judgments, and permission boundaries. Patrol fixture 21 is remediation and uses a different numbering scheme from full-stack AC21 capacity; it does not establish the full product approval chain or capacity acceptance. Full AC21 capacity acceptance remains incomplete. The default runner creates/removes its own cluster; an explicit `PATROL_DEMO_CONTEXT` uses an existing disposable context without deleting that externally created cluster, and requires its fixture images and Python dependencies to be ready.
+
 See [Ops Patrol operations](../../docs/operations/ops-patrol.md#verification) for release-gate expectations.

@@ -15,3 +15,5 @@ CI 还会设置 `PATROL_RUN_REMEDIATION_FIXTURE=true` 执行第 21 个案例：�
 前置工具包括 Docker、kind、kubectl、jq、uv，并需为固定版本 kind Node 与 Fixture 镜像预留足够本地资源。脚本会预载运行镜像，将机器可读评分写入 `tmp/`，并在成功或失败后删除集群；仅显式 Keep Flag 会改变清理行为。
 
 Release 门禁要求见 [Ops Patrol 运维手册](../../docs/operations/ops-patrol.zh-CN.md#验证)。
+
+此实验验证 Collector/Actuator Adapter、固定 Fixture 判定和权限边界；Patrol 第 21 个 Fixture 是修复案例，与全栈 AC21 容量门禁编号不同，不能证明完整产品审批链或容量验收。全 AC21 容量验收目前仍未完成。默认 Runner 创建并清理自己的集群；显式传入 `PATROL_DEMO_CONTEXT` 时使用已存在的一次性 Context，不会删除外部创建的集群，且需自行准备 Fixture 镜像与 Python 依赖。

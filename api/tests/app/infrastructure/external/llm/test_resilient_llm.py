@@ -920,3 +920,34 @@ async def _test_client_for_caches_fallback_clients():
 
 def test_client_for_caches_fallback_clients():
     asyncio.run(_test_client_for_caches_fallback_clients())
+
+
+def test_fixed_candidate_context_precedes_discovery_and_cached_candidates():
+    from app.application.ports.inference_dispatch import candidate_authority_context
+
+    primary, frozen, newly_added = _model("primary"), _model("frozen"), _model("new")
+    service = MagicMock()
+    service.list_resolved_chat_models = AsyncMock(return_value=[primary, newly_added])
+
+    class Authority:
+        async def resolve(self, actual_service, scope, actual_primary, **modes):
+            assert actual_service is service
+            assert actual_primary is primary
+            assert modes == {"require_vision": False, "thinking_enabled": False}
+            return [primary, frozen]
+
+    client = ResilientLLMClient(_FakeLLM(), primary, inference_model_service=service)
+
+    async def run():
+        assert [m.id for m in await client._build_candidate_chain(require_vision=False)] == [
+            "primary",
+            "new",
+        ]
+        with candidate_authority_context(Authority()):
+            assert [m.id for m in await client._build_candidate_chain(require_vision=False)] == [
+                "primary",
+                "frozen",
+            ]
+        assert service.list_resolved_chat_models.await_count == 1
+
+    asyncio.run(run())

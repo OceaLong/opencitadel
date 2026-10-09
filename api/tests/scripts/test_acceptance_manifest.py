@@ -34,6 +34,7 @@ from scripts.acceptance.manifest import (  # noqa: E402
 PRODUCTION_IMAGE_NAMES = (
     "api",
     "execution-kernel",
+    "sandbox-broker",
     "migrate",
     "ui",
     "sandbox",
@@ -302,3 +303,26 @@ def test_write_manifest_atomic_preserves_previous_file_on_serialization_failure(
 
     assert path.read_text(encoding="utf-8") == '{"stable":true}\n'
     assert list(tmp_path.glob(".manifest.json.*.tmp")) == []
+
+
+def test_execution_requires_all_acs_and_retains_original_runs():
+    assert ACCEPTANCE_PROJECT_REQUIREMENTS["execution"] == frozenset(
+        {
+            "RUN-AGENT",
+            "RUN-ASK",
+            "RUN-SSE",
+            "RUN-APPROVE",
+            "RUN-REJECT",
+            "RUN-CANCEL",
+            *(f"AC{index:02d}" for index in range(1, 23)),
+        }
+    )
+
+
+def test_wire_requirement_enum_matches_canonical_manifest():
+    import json
+
+    from scripts.acceptance.manifest import REQUIRED_ACCEPTANCE_IDS
+
+    schema = json.loads((REPOSITORY_ROOT / "contracts/acceptance-evidence.schema.json").read_text())
+    assert set(schema["$defs"]["requirementId"]["enum"]) == REQUIRED_ACCEPTANCE_IDS

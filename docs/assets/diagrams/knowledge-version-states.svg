@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1020" viewBox="0 0 1440 1020" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Knowledge Base · Candidate version outcomes</title>
+<desc id="desc">Version states describe the published product; they do not replace the execution protocol. Ready and degraded publication validates the immutable manifest and advances the active pointer under CAS. Failed or cancelled candidates preserve the active version; retry creates a new candidate from its manifest.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1020" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Knowledge Base · Candidate version outcomes</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Version states describe the published product; they do not replace the execution protocol.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="building" data-target="ready" d="M 360,470 L 630,470 L 630,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="building" data-target="degraded" d="M 360,500 L 900,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="building" data-target="failed" d="M 210,550 L 210,770 L 900,770" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="building" data-node-id="building" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">building</text>
+<text x="78" y="510" font-size="15" class="secondary">Private candidate version</text>
+<text x="78" y="532" font-size="14" class="secondary">Build Run mutates this candidate</text>
+</g>
+<g id="ready" data-node-id="ready" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="203" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,203 V 216 Q 921,223 931,216 V 203" fill="none" stroke="#16a34a"/>
+<text x="944" y="213" font-size="20" font-weight="600">ready</text>
+<text x="918" y="240" font-size="15" class="secondary">Validated mandatory and optional capabilities</text>
+<text x="918" y="262" font-size="14" class="secondary">Publish manifest and active pointer atomically</text>
+</g>
+<g id="degraded" data-node-id="degraded" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,473 V 486 Q 921,493 931,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="944" y="483" font-size="20" font-weight="600">degraded</text>
+<text x="918" y="510" font-size="15" class="secondary">Required keyword / source content available</text>
+<text x="918" y="532" font-size="14" class="secondary">Partial documents or optional capability loss</text>
+</g>
+<g id="failed" data-node-id="failed" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">failed</text>
+<text x="918" y="780" font-size="15" class="secondary">Mandatory build failure or cancellation</text>
+<text x="918" y="802" font-size="14" class="secondary">Candidate stays unpublished</text>
+</g>
+<text x="765" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">complete capabilities</text>
+<text x="630" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">partial / optional loss</text>
+<text x="630" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">mandatory failure</text>
+<g data-graph-role="legend">
+<line x1="60" y1="892" x2="96" y2="892" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="897" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="892" x2="536" y2="892" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="897" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="892" x2="976" y2="892" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="897" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="940" font-size="15" class="secondary" data-graph-role="label">Ready and degraded publication validates the immutable manifest and advances the active pointer under CAS.</text>
+<text x="60" y="964" font-size="15" class="secondary" data-graph-role="label">Failed or cancelled candidates preserve the active version; retry creates a new candidate from its manifest.</text>
+</svg>

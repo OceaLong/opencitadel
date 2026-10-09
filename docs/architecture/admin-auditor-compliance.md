@@ -31,23 +31,31 @@ the audit chain supplies independent action evidence.
 - `GET /api/admin/evidence/sessions`: eligible sessions with event counts.
 - `GET /api/admin/evidence/sessions/{id}/package`: signed, redacted evidence
   archive.
-- `GET /api/admin/audit/verify-chain`: platform or session chain verification.
-- `GET /api/admin/compliance/report`: aggregate compliance report.
+- `GET /api/admin/audit/verify-chain`: platform chain verification.
+- `GET /api/admin/audit/verify-chain/sessions/{session_id}`: session chain verification.
+- `GET /api/admin/compliance/report`: aggregate compliance report with `framework`,
+  `start`, `end`, and `format=json|md|pdf` filters. Unavailable PDF rendering
+  returns HTTP 501 with `apiErrors.compliance.pdfUnavailable`.
 
 Cross-owner session access is resolved server-side under auditor authority;
 ordinary users cannot use these endpoints to enumerate foreign resources.
 
 ## Evidence package
 
-The package is built deterministically without an LLM. It includes a manifest,
+The package is built by server code without an LLM; generation time and ZIP
+metadata mean repeated exports need not have identical bytes. It includes a manifest,
 governance profile in JSON/Markdown, audit material, artifact metadata/content
-when authorized, and a PDF summary when the renderer is available. Every
-free-text field receives key-based redaction and secret-pattern scrubbing.
-Manifest digests and an HMAC signature allow offline integrity checks.
+when authorized, and a PDF summary when the renderer is available. Audit and
+governance export data is redacted; authorized artifact bytes are included as
+content and are not passed through that profile redactor. The manifest includes
+session metadata, chain verification results, and file digests; its HMAC
+signature supports offline integrity checks.
 
 Missing optional PDF support does not change the source evidence; the package
-records the omission. Hash-chain or signature failure is surfaced as an error,
-not replaced with a best-effort success.
+records the omission. A failed chain check is recorded in the profile/manifest
+and the export can still be generated and signed. A valid package signature
+proves the exported bytes have not changed; it does not prove the event or
+audit chain passed verification.
 
 ## UI
 

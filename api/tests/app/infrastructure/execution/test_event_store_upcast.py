@@ -123,3 +123,27 @@ def test_store_without_registries_never_upcasts() -> None:
     (result,) = store._upcast((event,))
 
     assert result is event
+
+
+@pytest.mark.parametrize(
+    "name", ["ActivityCallStarted", "ActivityCompleted", "ActivityFailed", "ActivityOutcomeUnknown"]
+)
+def test_real_run_v1_upcast_preserves_raw_hash_and_unknown_claim(name):
+    from app.domain.execution.run import RunAggregate
+
+    public = {"activity_id": str(UUID(int=2)), "generation": 0}
+    if name in ("ActivityFailed", "ActivityOutcomeUnknown"):
+        public["failure_code"] = "TIMEOUT"
+    internal = {"decision_digest": "sha256:abc"} if name == "ActivityCompleted" else {}
+    event = _event().model_copy(
+        update={"event_type": name, "public_payload": public, "internal_payload": internal}
+    )
+    store = _store(RunAggregate().event_registry)
+    (result,) = store._upcast((event,))
+    assert result.event_schema_version == 2
+    assert result.public_payload["claim_generation"] is None
+    assert result.internal_payload == internal
+    assert result.event_hash == event.event_hash
+    assert result.event_id == event.event_id
+    assert result.prev_hash == event.prev_hash
+    assert store._upcast((result,))[0] is result

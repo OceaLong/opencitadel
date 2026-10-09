@@ -41,10 +41,12 @@ class PostgresEventStore:
         *,
         max_payload_bytes: int = 64 * 1024,
         event_registries: Mapping[str, EventRegistry] | None = None,
+        evidence=None,
     ) -> None:
         if max_payload_bytes <= 0:
             raise ValueError("max_payload_bytes must be positive")
         self._session = session
+        self._evidence = evidence
         self._max_payload_bytes = max_payload_bytes
         # stream_type -> registry. Every read path applies schema upcasting
         # AFTER hash verification (hashes cover the raw stored form), so the
@@ -118,6 +120,9 @@ class PostgresEventStore:
                 .order_by(ExecutionEventORM.stream_version.asc())
             )
         ).all()
+        if self._evidence is not None:
+            self._evidence.retain("event-source", rows)
+            self._evidence.reserve_state(len(rows), bytes_per_item=1024)
         events = tuple(self._to_stored(row) for row in rows)
         try:
             verify_stream(events)

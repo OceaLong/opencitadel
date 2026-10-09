@@ -250,10 +250,11 @@ async def purge_knowledge_base(
     kb_id: str,
     ctx: WorkspaceContextDep,
     _write_guard: NonAuditorWriteGuardDep,
+    force: bool = False,
     service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[dict | None]:
     """彻底清除回收站中的知识库及其级联数据（不可恢复）。"""
-    await service.purge_kb(kb_id, scope=ctx.scope)
+    await service.purge_kb(kb_id, scope=ctx.scope, force=force)
     return Response.success()
 
 

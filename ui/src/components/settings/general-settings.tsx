@@ -93,6 +93,7 @@ export function GeneralSettings() {
           onSubmit={async (newPassword, currentPassword) => {
             await authApi.changePassword(currentPassword, newPassword);
             await refresh();
+            // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Reinitialize the document after changing credentials.
             window.location.href = "/login";
           }}
         />

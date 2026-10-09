@@ -10,6 +10,16 @@ class AuditRepository(ABC):
     @abstractmethod
     async def add(self, log: AuditLog) -> None: ...
 
+    async def add_evaluation(self, log: AuditLog, *, authorization) -> None:
+        """Optional narrow same-transaction dataset audit capability, fail closed."""
+        raise NotImplementedError("evaluation audit appender is not configured")
+
+    async def add_review(self, log: AuditLog, *, authorization) -> None:
+        raise NotImplementedError("review audit appender is not configured")
+
+    async def add_batch(self, log: AuditLog, *, authorization) -> None:
+        raise NotImplementedError("batch audit appender is not configured")
+
     @abstractmethod
     async def list(
         self,

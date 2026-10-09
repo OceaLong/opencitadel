@@ -3,6 +3,8 @@
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api/fetch";
+
 import { mockNextIntl } from "@/test-utils/mocks";
 import { renderComponent } from "@/test-utils/render";
 
@@ -26,6 +28,12 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }));
 vi.mock("@/lib/icons", () => ({ IconLoading: () => <span>loading</span> }));
 
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { id: "u" }, loading: false }),
+}));
+vi.mock("@/providers/client-data-provider", () => ({
+  useClientDataScope: () => ({ scope: { userId: "u", workspaceId: "w" }, scopeRevision: 1 }),
+}));
 import { DocumentPager } from "./document-pager";
 
 const document = {
@@ -161,4 +169,48 @@ describe("DocumentPager", () => {
     expect(container.textContent).not.toContain("old content");
     await unmount();
   });
+});
+
+it("targets a chunk without dropping its identity", async () => {
+  mocks.readDocumentPage.mockResolvedValue({
+    document,
+    document_revision_id: "r1",
+    items: [{ id: "wanted", content: "Exact chunk" }],
+    next_cursor: null,
+  });
+  const { container, unmount } = await renderPager({ chunkId: "wanted", expectedRevisionId: "r1" });
+  expect(container.querySelector('[data-chunk-id="wanted"]')?.getAttribute("aria-current")).toBe(
+    "true",
+  );
+  await unmount();
+});
+it("authority loss during pagination clears already displayed text and cursor", async () => {
+  mocks.readDocumentPage
+    .mockResolvedValueOnce({
+      document,
+      document_revision_id: "r1",
+      items: [{ id: "c", content: "PRIVATE" }],
+      next_cursor: "n",
+    })
+    .mockRejectedValueOnce(new ApiError(403, "denied"));
+  const { container, unmount } = await renderPager();
+  await act(async () => {
+    container.querySelector("button")!.click();
+  });
+  expect(container.textContent).not.toContain("PRIVATE");
+  expect(container.querySelector("button")).toBeNull();
+  await unmount();
+});
+
+it("missing exact chunk is explicit and does not silently show another chunk as its source", async () => {
+  mocks.readDocumentPage.mockResolvedValue({
+    document,
+    document_revision_id: "r1",
+    items: [{ id: "different", content: "Unrelated chunk" }],
+    next_cursor: null,
+  });
+  const { container, unmount } = await renderPager({ chunkId: "gone", expectedRevisionId: "r1" });
+  expect(container.textContent).not.toContain("Unrelated chunk");
+  expect(container.querySelector('[role="status"]')).not.toBeNull();
+  await unmount();
 });

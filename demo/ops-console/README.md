@@ -16,14 +16,14 @@ Form-first internal ticket and settlement console for **OpenCitadel Web Operator
 
 ## Read-only REST API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/tickets` | Ticket list (JSON) |
-| GET | `/api/settlements` | Settlement ledger |
-| GET | `/api/reconciliation/expected` | Expected reconciliation values |
-| GET | `/health` | Health check |
+| Method | Path                           | Description                    |
+| ------ | ------------------------------ | ------------------------------ |
+| GET    | `/api/tickets`                 | Ticket list (JSON)             |
+| GET    | `/api/settlements`             | Settlement ledger              |
+| GET    | `/api/reconciliation/expected` | Expected reconciliation values |
+| GET    | `/health`                      | Health check                   |
 
-All write paths are HTML form POST only — no write REST API. `POST /api/_seed/reset` exists for demo seed reset in development.
+Business writes use authenticated HTML form POSTs. The extra `POST /api/_seed/reset` write endpoint recreates SQLite demo data; it and the JSON read endpoints require no login and have no environment gate. Use this service only for trusted local demos/tests with demo data.
 
 ## Run locally
 
@@ -39,10 +39,12 @@ Open http://localhost:9099
 ## Docker (with OpenCitadel)
 
 ```bash
-docker compose --profile local --profile demo up ops-console
+docker compose --profile local --profile demo up -d --build ops-console
 ```
 
 Service hostname inside Docker network: `ops-console:9099`
+
+Compose joins the application and sandbox networks and publishes host `${OPS_CONSOLE_PORT:-9099}` to container 9099. Sessions live in process memory and require login again after restart. SQLite data lives in the container working directory; the shipped Compose service has no persistent volume.
 
 ## Stable element IDs
 

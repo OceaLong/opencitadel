@@ -7,7 +7,7 @@ Ubuntu 22.04-based isolated environment for code execution, browser automation, 
 ## Tech Stack
 
 - Ubuntu 22.04
-- Python 3.10 + FastAPI (uv for dependency management)
+- Python 3.12 + FastAPI (uv for dependency management)
 - Node.js 24 (LTS)
 - Chromium (browser automation)
 - Xvfb + x11vnc + websockify (virtual display + VNC)
@@ -17,34 +17,36 @@ Ubuntu 22.04-based isolated environment for code execution, browser automation, 
 
 Supervisor manages multiple processes:
 
-| Process | Port | Description |
-|---------|------|-------------|
-| FastAPI | 8080 | REST API (files, Shell execution) |
-| Chrome | 8222 (internal) | Browser instance |
-| socat | 9222 | Chrome DevTools Protocol proxy |
-| Xvfb | — | Virtual display (:1) |
-| x11vnc | 5900 | VNC server |
-| websockify | 5901 | WebSocket VNC proxy |
+| Process    | Port            | Description                       |
+| ---------- | --------------- | --------------------------------- |
+| FastAPI    | 8080            | REST API (files, Shell execution) |
+| Chrome     | 8222 (internal) | Browser instance                  |
+| socat      | 9222            | Chrome DevTools Protocol proxy    |
+| Xvfb       | —               | Virtual display (:1)              |
+| x11vnc     | 5900            | VNC server                        |
+| websockify | 5901            | WebSocket VNC proxy               |
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/file/read-file` | Read file |
-| POST | `/api/file/write-file` | Write file |
-| POST | `/api/file/upload-file` | Upload file |
-| GET | `/api/file/download-file` | Download file |
-| POST | `/api/shell/exec-command` | Execute command |
-| POST | `/api/shell/read-shell-output` | Read Shell output |
-| GET | `/api/supervisor/status` | Process status |
+| Method | Path                           | Description       |
+| ------ | ------------------------------ | ----------------- |
+| POST   | `/api/file/read-file`          | Read file         |
+| POST   | `/api/file/write-file`         | Write file        |
+| POST   | `/api/file/upload-file`        | Upload file       |
+| GET    | `/api/file/download-file`      | Download file     |
+| POST   | `/api/shell/exec-command`      | Execute command   |
+| POST   | `/api/shell/read-shell-output` | Read Shell output |
+| GET    | `/api/supervisor/status`       | Process status    |
+
+Every `/api/*` request requires `Authorization: Bearer <SANDBOX_ACCESS_TOKEN>`; an unconfigured token returns 503 and a wrong/missing header returns 401. API/kernel derive and inject each dynamic sandbox token with `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`; the seed stays outside the sandbox. `/openapi.json` is outside that prefix. CDP/VNC ports do not use this HTTP middleware and must remain behind internal networks and the API proxy.
 
 ### Path containment and sudo escaping
 
 `FileService` normalizes every file/directory path against
 `SANDBOX_ALLOWED_ROOTS = ("/home/ubuntu", "/tmp", "/workspace")`
-(`app/services/file.py:35`). After resolving symlinks and `..` components
+(`app/services/file.py`). After resolving symlinks and `..` components
 with `os.path.realpath`, any path that lands outside those roots is rejected
-with `path outside sandbox allowed roots` (`app/services/file.py:75,99`) —
+with `path outside sandbox allowed roots` (`app/services/file.py`) —
 the same `realpath` + `commonpath` technique the API side uses in
 `source_validator.py`. Sudo-elevated file reads/writes shell out through
 `sudo cat` / `sudo tee`, with both the target path and any temp file passed
@@ -66,7 +68,8 @@ uv sync --frozen
 Inside a container or locally:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+SANDBOX_ACCESS_TOKEN=replace-with-a-strong-local-token \
+  uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 ## Docker Deployment
@@ -81,6 +84,8 @@ docker compose build opencitadel-sandbox
 
 The default production path uses dynamic sandboxes. Deployment Settings choose the Docker or Kubernetes driver, image, network, proxy, and namespace; the active Operations Policy supplies TTL and resource limits for each authenticated create request. Fixed containers are available only through `docker compose --profile fixed-sandbox` or an explicitly deployed external sandbox service.
 
+The image runs as the non-root `ubuntu` user without a sudo grant. The shipped `fixed-sandbox` Compose profile does not inject `SANDBOX_ACCESS_TOKEN`, so `/openapi.json` health can pass while data-plane APIs return 503. An external fixed sandbox needs explicit token injection and matching caller credentials.
+
 ### Timeout Configuration
 
 Sandbox idle destroy timeout (minutes):
@@ -89,7 +94,7 @@ Sandbox idle destroy timeout (minutes):
 SERVER_TIMEOUT_MINUTES=60   # Recommended (pydantic-settings standard)
 ```
 
-The execution kernel injects `SERVER_TIMEOUT_MINUTES` via `SANDBOX_TTL_MINUTES` when creating dynamic sandboxes.
+The kernel injects `SERVER_TIMEOUT_MINUTES` from the active Operations Policy `ttl_minutes`; it is not overridden by a `SANDBOX_TTL_MINUTES` environment variable.
 
 ### Ports
 

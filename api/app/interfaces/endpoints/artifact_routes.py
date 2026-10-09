@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
@@ -17,7 +18,7 @@ from app.interfaces.schemas.artifact import (
     ArtifactResponse,
     ArtifactShareResponse,
 )
-from app.interfaces.service_dependencies import get_artifact_service
+from app.interfaces.service_dependencies import get_artifact_service, get_execution_content_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["交付物"])
@@ -71,26 +72,55 @@ async def get_artifact(
 async def get_artifact_content(
     artifact_id: str,
     version: int | None = Query(None, ge=1),
+    cursor: str | None = None,
+    limit_bytes: int | None = Query(None, ge=4, le=65536),
+    run_id: UUID | None = None,
+    step_id: str | None = None,
+    at: str | None = None,
     ctx: WorkspaceContext = Depends(get_workspace_context),
     service: ArtifactService = Depends(get_artifact_service),
+    content_service=Depends(get_execution_content_service),
 ):
     artifact = await service.get_by_id(artifact_id, scope=ctx.scope)
     if not artifact:
         raise _access_denied()
+    from app.application.ports.execution_view import ViewCursorInvalid, ViewNotFound
+    from app.domain.errors import BadRequestError
+    from app.domain.models.resource_pin import ResourceUnavailable
+
+    if (at is not None or run_id is not None or step_id is not None) and version is None:
+        raise BadRequestError("historical artifact selection requires an explicit version")
+    selected = version if version is not None else len(artifact.version_refs)
     try:
-        content, incomplete = await service.get_content_text(
+        page = await content_service.read_artifact_preview(
+            ctx.scope,
             artifact_id,
-            version_index=version,
-            scope=ctx.scope,
+            selected,
+            cursor=cursor,
+            limit_bytes=limit_bytes if limit_bytes is not None else 65536,
+            complete=limit_bytes is None
+            and cursor is None
+            and run_id is None
+            and step_id is None
+            and at is None,
+            run_id=run_id,
+            step_id=step_id,
+            at=at,
         )
-    except PermissionError as exc:
+    except ViewCursorInvalid as exc:
+        raise BadRequestError(str(exc)) from exc
+    except (PermissionError, ViewNotFound, ResourceUnavailable) as exc:
         raise _access_denied() from exc
-    content_type = "text/markdown" if artifact.kind == "doc" else "text/html"
     return ApiResponse.success(
         ArtifactContentResponse(
-            content=content,
-            content_type=content_type,
-            incomplete=incomplete,
+            content=page.content or "",
+            content_type="text/markdown" if artifact.kind == "doc" else "text/html",
+            artifact_id=artifact_id,
+            version=selected,
+            truncated=page.truncated,
+            incomplete=page.truncated,
+            next_cursor=page.next_cursor,
+            at=page.at,
         )
     )
 

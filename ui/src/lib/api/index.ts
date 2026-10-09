@@ -9,6 +9,7 @@ export { ApiError } from "./fetch";
 export type { Session } from "./types";
 
 // 模块 API
+export { executionViewApi } from "./execution-view";
 export { fileApi } from "./file";
 export type {
   A2AServer,

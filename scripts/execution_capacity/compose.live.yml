@@ -1,0 +1,12 @@
+# Additional explicit live prerequisite overlay; never used for the historical seed.
+# Existing operator-provisioned limits must already satisfy live.validate_topology.
+# Run the complete kernel at its existing per-worker concurrency. Claim batch is
+# capped to that concurrency to avoid un-heartbeated semaphore waiters.
+services:
+  opencitadel-execution-kernel:
+    deploy:
+      replicas: 3
+    environment:
+      EXECUTION_ACTIVITY_BATCH_SIZE: "8"
+    volumes:
+      - ${CAPACITY_LIVE_DIR:?}:/capacity-live:rw

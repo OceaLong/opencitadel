@@ -44,10 +44,16 @@ function makeCallbacks(): VolatileCallbacks {
   };
 }
 
-function Harness({ callbacks }: { callbacks: VolatileCallbacks }) {
+function Harness({
+  callbacks,
+  status = "running",
+}: {
+  callbacks: VolatileCallbacks;
+  status?: "running" | "waiting";
+}) {
   const streams = useSessionStreams({
     sessionId: "session-1",
-    sessionStatus: "running",
+    sessionStatus: status,
     appendEvent: callbacks.appendEvent,
     onSessionMissing: callbacks.onSessionMissing,
     applySessionPatch: callbacks.applySessionPatch,
@@ -118,14 +124,15 @@ describe("useSessionStreams empty stream lifecycle", () => {
     await act(async () => {
       vi.advanceTimersByTime(0);
     });
-    expect(mocks.chat).not.toHaveBeenCalled();
+    expect(mocks.chat).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       currentStreams?.resumeAfterExternalCommand();
     });
 
-    expect(mocks.chat).toHaveBeenCalledTimes(1);
-    expect(mocks.chat.mock.calls[0][1]).toEqual({ event_id: "10" });
+    expect(mocks.chat).toHaveBeenCalledTimes(2);
+    expect(cleanups[0]).toHaveBeenCalledOnce();
+    expect(mocks.chat.mock.calls[1][1]).toEqual({ event_id: "10" });
     await unmount();
   });
 });
@@ -150,3 +157,73 @@ function WaitingHarness({ callbacks }: { callbacks: VolatileCallbacks }) {
   }, [streams]);
   return null;
 }
+
+it("maintains a waiting subscription and accepts external approval resume", async () => {
+  vi.useFakeTimers();
+  const cleanup = vi.fn();
+  mocks.chat.mockReturnValue(cleanup);
+  const patch = vi.fn();
+  const callbacks = { ...makeCallbacks(), applySessionPatch: patch };
+  const { unmount } = await renderComponent(<Harness callbacks={callbacks} status="waiting" />);
+  await act(async () => {
+    vi.advanceTimersByTime(0);
+  });
+  expect(mocks.chat).toHaveBeenCalledTimes(1);
+  const onEvent = mocks.chat.mock.calls[0][2] as (event: SSEEventData) => void;
+  await act(async () => {
+    onEvent({
+      type: "session_status",
+      data: { status: "running", event_id: "opaque-resumed", persist: true },
+    } as SSEEventData);
+  });
+  expect(patch).toHaveBeenLastCalledWith({ status: "running" });
+  expect(currentStreams?.streaming).toBe(true);
+  await unmount();
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
+it("new send invalidates current-run authority until its persisted stream establishes the run", async () => {
+  mocks.chat.mockReturnValue(() => {});
+  const result = await renderComponent(<Harness callbacks={makeCallbacks()} status="waiting" />);
+  await act(async () => currentStreams!.sendMessage("new turn", []));
+  expect(mocks.chat.mock.calls.at(-1)?.[1].request_id).toBeTruthy();
+  expect(currentStreams!.admissionPending).toBe(true);
+  const onEvent = mocks.chat.mock.calls.at(-1)![2];
+  await act(async () =>
+    onEvent({
+      type: "message",
+      data: { role: "user", message: "new turn", run_id: "R2", event_id: "created", persist: true },
+    }),
+  );
+  expect(currentStreams!.admissionPending).toBe(false);
+  await result.unmount();
+});
+
+it("retry resume stops generation only for the accepted current persisted waiting fact", async () => {
+  vi.useFakeTimers();
+  mocks.chat.mockReturnValue(() => {});
+  const accept = vi.fn(() => true);
+  const result = await renderComponent(
+    <Harness callbacks={{ ...makeCallbacks(), appendEvent: accept }} />,
+  );
+  await act(async () => vi.advanceTimersByTime(0));
+  const emit = async (type: string, data: Record<string, unknown>) =>
+    act(async () => mocks.chat.mock.calls.at(-1)![2]({ type, data }));
+  await emit("error", { retryable: true, run_id: "current", persist: true });
+  await emit("session_status", { status: "running", run_id: "current", persist: true });
+  expect(currentStreams!.streaming).toBe(true);
+  await emit("approval", { run_id: "old", persist: true });
+  expect(currentStreams!.streaming).toBe(true);
+  await emit("approval", { run_id: "current", persist: false });
+  expect(currentStreams!.streaming).toBe(true);
+  accept.mockReturnValueOnce(false);
+  await emit("approval", { run_id: "current", persist: true });
+  expect(currentStreams!.streaming).toBe(true);
+  await emit("approval", { run_id: "current", persist: true });
+  expect(currentStreams!.streaming).toBe(false);
+  await emit("session_status", { status: "running", run_id: "current", persist: true });
+  expect(currentStreams!.streaming).toBe(true);
+  await result.unmount();
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});

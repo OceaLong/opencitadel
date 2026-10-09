@@ -53,6 +53,7 @@ class MCPTool(BaseTool):
         if self._initialized:
             return
         filtered = filter_enabled_mcp_runtime(runtime) if runtime else MCPRuntime()
+        self.recording_runtime = filtered
         try:
             self._manager = await self._connection_pool.acquire(filtered, policy=policy)
             self._uses_pool = True
@@ -71,6 +72,13 @@ class MCPTool(BaseTool):
             self._tool_policies = {}
             self._uses_pool = False
         self._initialized = True
+
+    def recording_source(self, name):
+        source = self._manager.get_tool_source(name) if self._manager else None
+        if source is None:
+            return None
+        matches = [s.id for s in self.recording_runtime.servers.values() if s.name == source[0]]
+        return (matches[0], source[1]) if len(matches) == 1 else None
 
     def get_tools(self) -> list[dict[str, Any]]:
         if self._capability_policy is None:

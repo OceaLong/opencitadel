@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, ShieldAlert, X } from "lucide-react";
 import { toast } from "sonner";
@@ -12,13 +12,18 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ApprovalEventData } from "@/lib/api/types";
 
 export type ApprovalActionsBarProps = {
-  approval: ApprovalEventData;
+  approval: Pick<ApprovalEventData, "approval_id" | "payload">;
   onSend: (decision: "approve" | `reject: ${string}`, feedback?: string) => Promise<void> | void;
   disabled?: boolean;
   className?: string;
 };
 
-export function ApprovalActionsBar({
+export function ApprovalActionsBar(props: ApprovalActionsBarProps) {
+  return (
+    <ApprovalActions key={`${props.approval.approval_id}:${Boolean(props.disabled)}`} {...props} />
+  );
+}
+function ApprovalActions({
   approval,
   onSend,
   disabled = false,
@@ -30,27 +35,43 @@ export function ApprovalActionsBar({
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const payload = approval.payload;
+  const mounted = useRef(true),
+    busy = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const send = async (decision: "approve" | `reject: ${string}`, choiceFeedback?: string) => {
+    if (disabled || busy.current || !mounted.current) return;
+    busy.current = true;
     setSubmitting(true);
     try {
       await onSend(decision, choiceFeedback);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("sendFailed"));
+      if (mounted.current) toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {
-      setSubmitting(false);
+      if (mounted.current) {
+        busy.current = false;
+        setSubmitting(false);
+      }
     }
   };
 
   const reject = async () => {
+    if (disabled || busy.current || !mounted.current) return;
     const reason = feedback.trim();
     if (!reason) {
       toast.error(t("rejectReasonRequired"));
       return;
     }
     await send(`reject: ${reason}`);
-    setRejectOpen(false);
-    setFeedback("");
+    if (mounted.current) {
+      setRejectOpen(false);
+      setFeedback("");
+    }
   };
 
   return (
@@ -99,7 +120,7 @@ export function ApprovalActionsBar({
             <Button
               size="sm"
               variant="destructive"
-              disabled={submitting}
+              disabled={disabled || submitting}
               onClick={() => void reject()}
             >
               {t("confirmReject")}

@@ -144,6 +144,7 @@ async def test_retrieval_never_crosses_bound_version_and_cites_manifest_revision
 
     assert [item.content for item in response.items] == ["v1 only"]
     assert response.items[0].citation.model_dump(mode="json") == {
+        "knowledge_base_id": "kb1",
         "version_id": "kbv1",
         "document_revision_id": "revision-v1",
         "doc_id": "doc1",

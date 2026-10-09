@@ -51,7 +51,7 @@ test("health is public and models require the exact bearer token", async () => {
     const payload = await models.json();
     assert.deepEqual(
       payload.data.map((model) => model.id),
-      ["acceptance-chat", "acceptance-embedding-1536", "acceptance-failure"],
+      ["acceptance-chat", "acceptance-embedding-1536", "acceptance-failure", "acceptance-capacity", "acceptance-live"],
     );
     assert.ok(payload.data.every((model) => model.object === "model" && model.owned_by === "opencitadel-acceptance"));
   });
@@ -199,5 +199,18 @@ test("request size and deterministic timeout scenarios are bounded", async () =>
     );
     assert.equal(timeout.status, 504);
     assert.equal((await errorPayload(timeout)).code, "deterministic_timeout");
+  });
+});
+
+test("explicit workbench retry returns one invalid decision then recovers", async () => {
+  await withServer(async (baseUrl) => {
+    const call = async (identity) => {
+      const response = await fetch(`${baseUrl}/v1/chat/completions`, authorized({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "acceptance-chat", messages: [{ role: "user", content: `[acceptance:workbench:retry:${identity}] [acceptance:tool:artifact_write]` }], tools: [{ type: "function", function: { name: "artifact_write", parameters: { type: "object", properties: {} } } }] }) }));
+      assert.equal(response.status, 200);
+      return (await response.json()).choices[0].message.tool_calls[0].function.name;
+    };
+    assert.equal(await call("a"), "acceptance_undeclared_tool");
+    assert.equal(await call("a"), "artifact_write");
+    assert.equal(await call("b"), "acceptance_undeclared_tool");
   });
 });

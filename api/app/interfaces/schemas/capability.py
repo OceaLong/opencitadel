@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.application.services.capability_service import CapabilityStateValue
+from app.application.services.capability_service import CapabilityStateValue, ExecutionGrant
 
 
 class CapabilityStateResponse(BaseModel):
@@ -18,5 +18,6 @@ class CapabilityStateResponse(BaseModel):
 class CapabilityResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    grants: list[ExecutionGrant] = Field(default_factory=list)
     generated_at: datetime
     items: dict[str, CapabilityStateResponse]

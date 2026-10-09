@@ -177,6 +177,8 @@ export type EventVisibility = "user";
 type EventChannel = "ui";
 
 export type EventMeta = {
+  /** Public projection identity supplied by the authenticated transport, never inferred from event IDs. */
+  run_id?: string;
   event_id?: string;
   schema_version: number;
   visibility: EventVisibility;

@@ -16,15 +16,15 @@ Thank you for your interest in contributing!
 
 ```bash
 cd api
-uv sync
-uv run pytest
+uv sync --all-groups
+uv run pytest --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 ```
 
 ### UI
 
 ```bash
 cd ui
-npm install
+npm ci
 npm run test
 npm run build
 ```
@@ -44,6 +44,9 @@ strict i18n, TypeScript, and ESLint.
 The authoritative translation sources are `ui/messages/en.json` and
 `ui/messages/zh.json`; update both directly. There is no catalog generation
 step.
+
+PostgreSQL/Redis integration suites require fresh schema roles and real services; `make test-api-strict` requires those dependencies. Ordinary runs can skip unconfigured integration cases. See [E2E acceptance](../e2e/README.md) for the isolated stack and capacity gate.
+The API job and both Make targets exclude only the six current-invocation consumers in `test_execution_visualization_closed_loop.py`; the acceptance runner executes them with zero skips after validating their native strict report and restoration receipt.
 
 ### Full stack (local)
 

@@ -33,7 +33,10 @@ _AUTH_ERROR_CODES = frozenset(
 class Minio:
     """MinIO 对象存储客户端。"""
 
-    def __init__(self, settings: DeploymentSettings) -> None:
+    def __init__(self, settings: DeploymentSettings, *, real_test_io: bool = False) -> None:
+        if real_test_io and settings.env != "test":
+            raise ValueError("real_test_io requires explicit test environment")
+        self._real_test_io = real_test_io
         self._settings = settings
         self._client: MinioClient | None = None
         self._presign_client: MinioClient | None = None
@@ -43,7 +46,11 @@ class Minio:
             logger.warning("MinIO 对象存储已初始化，无需重复操作")
             return
 
-        if self._settings.env == "test":
+        if (
+            self._settings.env == "test"
+            and not self._real_test_io
+            and not self._settings.evaluation_acceptance_enabled
+        ):
             logger.info("测试环境跳过 MinIO 客户端初始化")
             self._client = object()  # type: ignore[assignment]
             return
@@ -60,21 +67,25 @@ class Minio:
                 bucket = self.bucket
                 exists = await run_in_threadpool(client.bucket_exists, bucket)
                 if not exists:
+                    if self._real_test_io:
+                        raise ValueError("preprovisioned MinIO bucket required")
                     try:
                         await run_in_threadpool(client.make_bucket, bucket)
                     except S3Error as exc:
                         if exc.code not in _BUCKET_EXISTS_CODES:
                             raise
                 self._client = client
-                self._presign_client = self._build_presign_client()
+                self._presign_client = None if self._real_test_io else self._build_presign_client()
                 logger.info("MinIO 对象存储初始化成功")
                 return
             except S3Error as exc:
-                if exc.code in _AUTH_ERROR_CODES:
+                if self._real_test_io or exc.code in _AUTH_ERROR_CODES:
                     logger.error("MinIO 对象存储认证失败: %s", exc)
                     raise
                 last_exc = exc
             except (OSError, RuntimeError, ValueError) as exc:
+                if self._real_test_io:
+                    raise
                 last_exc = exc
 
             if attempt < _INIT_MAX_ATTEMPTS:
@@ -151,7 +162,11 @@ class Minio:
         )
 
     async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> str | None:
-        if self._settings.env == "test":
+        if (
+            self._settings.env == "test"
+            and not self._real_test_io
+            and not self._settings.evaluation_acceptance_enabled
+        ):
             return f"https://example.com/{key}"
         if self._presign_client is None:
             return None

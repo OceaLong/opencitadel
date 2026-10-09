@@ -81,7 +81,10 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
+                  onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- This backend OAuth redirect requires document navigation, not the Next router.
+                    window.location.href = "/api/auth/oauth/google/login";
+                  }}
                 >
                   <span translate="no">Google</span>
                 </Button>
@@ -90,7 +93,10 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
+                  onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- This backend OAuth redirect requires document navigation, not the Next router.
+                    window.location.href = "/api/auth/oauth/github/login";
+                  }}
                 >
                   <span translate="no">GitHub</span>
                 </Button>

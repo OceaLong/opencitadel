@@ -19,6 +19,12 @@ class FileRepository(Protocol):
         """根据传递的文件id列表批量获取文件信息"""
         ...
 
+    async def prepare_delete(
+        self, file_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> File | None:
+        """Lock, authorize pins and persist a tombstone before external deletion."""
+        ...
+
     async def delete(self, file_id: str, scope: OwnerScope | None = None) -> bool:
         """根据传递的文件id删除文件记录，返回是否删除成功"""
         ...

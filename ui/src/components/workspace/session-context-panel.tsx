@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { KnowledgeContextPanel } from "@/components/workspace/knowledge-context-panel";
+import { parseKbDocHref } from "@/components/knowledge/knowledge-utils";
+import {
+  KnowledgeContextPanel,
+  type SelectedSource,
+} from "@/components/workspace/knowledge-context-panel";
 import { SessionResourceVersion } from "@/components/workspace/session-resource-version";
 
 import type { SessionResourceBinding } from "@/lib/api/types";
@@ -17,6 +21,7 @@ type SessionContextPanelProps = {
   resourceBindings?: SessionResourceBinding[];
   kbSourceRef?: React.MutableRefObject<((value: string) => void) | null>;
   className?: string;
+  fixedSource?: SelectedSource | null;
 };
 
 export function SessionContextPanel({
@@ -25,6 +30,7 @@ export function SessionContextPanel({
   resourceBindings,
   kbSourceRef,
   className,
+  fixedSource,
 }: SessionContextPanelProps) {
   const t = useTranslations("workspaceContext");
   const suppliedBindings = resourceBindings ?? EMPTY_RESOURCE_BINDINGS;
@@ -32,6 +38,27 @@ export function SessionContextPanel({
   useEffect(() => {
     setCurrentBindings(suppliedBindings);
   }, [suppliedBindings]);
+  const [localSource, setLocalSource] = useState<SelectedSource | null>(null);
+  const source = fixedSource ?? localSource;
+  useEffect(() => {
+    if (!kbSourceRef) return;
+    const open = (value: string) => {
+      const ref = parseKbDocHref(value);
+      if (ref?.versionId && ref.revisionId)
+        setLocalSource({
+          versionId: ref.versionId,
+          revisionId: ref.revisionId,
+          documentId: ref.docId,
+          chunkId: ref.chunkId,
+          page: ref.page,
+        });
+      else setLocalSource(null);
+    };
+    kbSourceRef.current = open;
+    return () => {
+      if (kbSourceRef.current === open) kbSourceRef.current = null;
+    };
+  }, [kbSourceRef]);
   const hasKb = Boolean(knowledgeBaseId);
   const boundKnowledgeVersionId = currentBindings.find(
     (binding) =>
@@ -41,11 +68,12 @@ export function SessionContextPanel({
   )?.version_id;
   if (!hasKb) return null;
 
-  const knowledgePanel = boundKnowledgeVersionId ? (
+  const selectedVersionId = source?.versionId ?? boundKnowledgeVersionId;
+  const knowledgePanel = selectedVersionId ? (
     <KnowledgeContextPanel
       knowledgeBaseId={knowledgeBaseId!}
-      versionId={boundKnowledgeVersionId}
-      onSourceClickRef={kbSourceRef}
+      versionId={selectedVersionId}
+      fixedSource={source}
     />
   ) : (
     <p role="alert" className="text-muted-foreground p-4 text-sm">

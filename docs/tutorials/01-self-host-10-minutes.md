@@ -20,7 +20,10 @@ cd opencitadel
 make quickstart
 ```
 
-The script copies `.env.example` → `.env`, generates secrets, and prompts you to set `BOOTSTRAP_ADMIN_PASSWORD`.
+On first run, the script copies `.env.example` → `.env`, generates secrets when
+`openssl` is available, and prompts you to set `BOOTSTRAP_ADMIN_PASSWORD`. An
+existing `.env` is preserved; check its secrets, profiles, and storage settings
+before rerunning. Non-interactive runs must supply the password in advance.
 
 > **Local evaluation only:** quickstart deliberately sets
 > `ENV=development`, `COOKIE_SECURE=false`, bundled MinIO, and localhost URLs.
@@ -66,9 +69,9 @@ From the home page, try:
 
 Watch the Agent plan, use tools in the sandbox, and stream results in real time.
 
-## Fully offline (optional)
+## Local inference (optional)
 
-For air-gapped or local-only deployments, set in `.env`:
+For local inference, set in `.env`:
 
 ```bash
 COMPOSE_PROFILES=local
@@ -83,15 +86,18 @@ Install [Ollama](https://ollama.com), pull a model, then add an **endpoint**
 **binding** in Settings → Inference. Keep the allowlist exact—no wildcard.
 Full local-mode reference: [deployment guide — local mode](../operations/deployment.md#local-mode).
 
-**Note:** Smaller local models may struggle with multi-step Agent tasks. BYO cloud API keys give the best first-run experience.
+For an air-gapped installation, prepare all container images, model weights and
+dependencies before disconnecting, and use tasks that do not require remote
+sources. Local inference alone does not make browsing or integrations offline.
+The selected model must support tool calls for Agent workflows.
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| 502 on login | Wait for `opencitadel-migrate` to finish; check `docker compose logs opencitadel-migrate` |
+| Issue              | Fix                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| 502 on login       | Wait for `opencitadel-migrate` to finish; check `docker compose logs opencitadel-migrate`    |
 | Agent does nothing | Confirm the effective `chat` binding resolves to an accessible model and endpoint credential |
-| OOM / slow | See [deployment guide](../operations/deployment.md) memory tuning; enable swap on small VMs |
+| OOM / slow         | See [deployment guide](../operations/deployment.md) memory tuning; enable swap on small VMs  |
 
 ## Next
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ACCEPTANCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ACCEPTANCE_ROOT"
+export PYTHONPATH="$ACCEPTANCE_ROOT/api:$ACCEPTANCE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 if [[ -x "$ACCEPTANCE_ROOT/api/.venv/bin/python" ]]; then
   exec "$ACCEPTANCE_ROOT/api/.venv/bin/python" -m scripts.acceptance.runner "$@"

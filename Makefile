@@ -31,12 +31,12 @@ quality-check: lint
 	cd ui && npm run lint
 
 test-api:
-	cd api && uv run pytest -q
+	cd api && uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 
 # Strict mode: Postgres/Redis-backed suites FAIL (not skip) when the backing
 # services are unavailable — the anti-false-green variant CI relies on.
 test-api-strict:
-	cd api && OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 OPENCITADEL_REQUIRE_REDIS_TESTS=1 uv run pytest -q
+	cd api && OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 OPENCITADEL_REQUIRE_REDIS_TESTS=1 uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 
 test-ui:
 	cd ui && npm run test

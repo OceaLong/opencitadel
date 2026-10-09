@@ -84,7 +84,12 @@ function ApprovalInboxRow({
     item.source_entity_type === "session" ? `/sessions/${item.source_entity_id}` : null;
 
   return (
-    <div className="grid gap-3 rounded-lg border p-4">
+    <div
+      className="grid gap-3 rounded-lg border p-4"
+      data-approval-id={item.approval_id}
+      data-run-id={item.run_id}
+      data-subject-activity-id={item.subject_activity_id}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

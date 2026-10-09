@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from redis.asyncio import Redis
 
+from app.application.evaluation.runtime import EvaluationRuntime
 from app.application.ports.coordination import RedisConnectivity
 from app.runtime_role import ProcessRole
 from core.config import DeploymentSettings
@@ -17,6 +19,9 @@ if TYPE_CHECKING:
     # would hand every one of them an indirect infrastructure dependency (the
     # import-linter contracts analyze runtime imports only —
     # exclude_type_checking_imports).
+    from app.application.evaluation.dataset_service import DatasetService
+    from app.application.evaluation.scheduler import Scheduler
+    from app.application.evaluation.suite_service import SuiteService
     from app.application.execution.admission import RunAdmissionService
     from app.application.execution.command_ingress import CommandIngress
     from app.application.execution.run_control import RunControlService
@@ -45,6 +50,9 @@ if TYPE_CHECKING:
     from app.application.services.capability_service import CapabilityService
     from app.application.services.compliance_service import ComplianceService
     from app.application.services.evidence_service import EvidenceService
+    from app.application.services.execution_content_service import ExecutionContentService
+    from app.application.services.execution_event_service import ExecutionEventService
+    from app.application.services.execution_view_service import ExecutionViewService
     from app.application.services.file_service import FileService
     from app.application.services.governance_overview_service import GovernanceOverviewService
     from app.application.services.governance_profile_service import GovernanceProfileService
@@ -81,6 +89,7 @@ if TYPE_CHECKING:
     from app.domain.external.file_storage import FileStorage
     from app.domain.external.object_storage import ObjectStoragePort
     from app.domain.external.sandbox import SandboxFactoryPort
+    from app.domain.models.authorization import AuthorizationContext
     from app.domain.repositories.runtime_policy_repository import RuntimePolicyRepository
     from app.domain.repositories.uow import UnitOfWorkFactory
     from app.execution_kernel import ExecutionKernelRuntime
@@ -187,6 +196,17 @@ class ApiRuntime:
     governance_profile_service: GovernanceProfileService
     governance_overview_service: GovernanceOverviewService
     execution_projection_status: ExecutionProjectionStatusPort
+    dataset_factory: Callable[[AuthorizationContext], DatasetService]
+    suite_factory: Callable[[AuthorizationContext], SuiteService]
+    recording_factory: Callable
+    environment_factory: Callable
+    comparison_factory: Callable
+    export_factory: Callable
+    analysis_factory: Callable
+    analysis_preferences_factory: Callable
+    execution_content_factory: Callable[[AuthorizationContext], ExecutionContentService]
+    execution_view_factory: Callable[[AuthorizationContext], ExecutionViewService]
+    execution_event_factory: Callable[[AuthorizationContext], ExecutionEventService]
 
 
 @dataclass(frozen=True)
@@ -207,3 +227,5 @@ class KernelRuntime:
     patrol_retention: PatrolRetentionService
     sandbox_factory: SandboxFactoryPort
     sandbox_maintenance: SandboxMaintenance
+    evaluation_scheduler: Scheduler | None = None
+    evaluation_runtime: EvaluationRuntime | None = None

@@ -15,19 +15,23 @@ MCP servers are first-class, owner-scoped Integration resources. Create and mana
 
 ## Example: add a remote MCP server
 
-Open **Settings → Integrations → Add server** and submit:
+Replace the example URL with your reviewed server endpoint. Open
+**Settings → Integrations → Add server** and submit:
 
 ```json
 {
-  "name": "jina-mcp-server",
+  "name": "docs-reader",
   "transport": "streamable_http",
-  "url": "https://mcp.jina.ai/sse",
+  "url": "https://mcp.example.com/mcp",
   "enabled": true,
   "visibility": "private"
 }
 ```
 
-No service restart is required. The Integration list projects connection state and discovered tools; Agent tools use the `mcp_` prefix.
+No service restart is required. The Integration list shows persisted configuration.
+The execution kernel connects and discovers tools when building the authorized
+Agent catalog; Agent tools use the `mcp_` prefix. Registration is not a successful
+connection probe.
 
 ## Example: internal HTTP MCP gateway
 
@@ -37,12 +41,17 @@ For internal systems, run an MCP gateway inside your VPC:
 {
   "name": "internal-crm",
   "transport": "streamable_http",
-  "url": "http://mcp-gateway.internal:8080/sse",
+  "url": "http://mcp-gateway.internal:8080/mcp",
   "enabled": true,
   "visibility": "private",
-  "headers": {"Authorization": "Bearer <token>"}
+  "headers": { "Authorization": "Bearer <token>" }
 }
 ```
+
+The deployment must explicitly allow the internal host through
+`OUTBOUND_PRIVATE_HOST_ALLOWLIST`; registration still applies outbound URL
+validation. Match transport to the server protocol: a `/sse` endpoint may require
+`sse`, while this example assumes `streamable_http`.
 
 Credentials are encrypted at rest with the active API encryption key and masked on reads. Do not place Integration credentials in deployment variables or Runtime Policy.
 
@@ -64,8 +73,12 @@ Only administrators may create stdio or global resources. Mount the script into 
 ## Verify tools
 
 1. Start a session
-2. Ask: *What MCP tools do you have available?*
-3. Invoke a tool: *Use the Jina reader to summarize https://example.com/docs*
+2. Ask: _What MCP tools do you have available?_
+3. Invoke one of the discovered tools against an approved source.
+4. Review any persisted approval card. Tools without an administrator-declared
+   policy use the conservative interactive/always-approve policy; resource
+   registration alone does not grant read-only execution. Only administrators
+   may declare `tool_policies` through the management API.
 
 ## Security checklist
 
@@ -76,7 +89,9 @@ Only administrators may create stdio or global resources. Mount the script into 
 
 ## Manage via UI
 
-Open **Settings → Integrations** to manage MCP and A2A resources. Mutations persist immediately in PostgreSQL; connection health and discovered capabilities are read-side projections.
+Open **Settings → Integrations** to manage MCP and A2A resources. Mutations persist immediately in PostgreSQL. Connection errors and discovered
+tools come from the runtime catalog; verify them through an actual authorized
+Agent task.
 
 ## Next
 

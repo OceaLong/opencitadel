@@ -8,12 +8,15 @@ import logging
 import httpx
 
 from app.application.ports.crypto import OutboundNetworkPolicy
+from app.application.ports.inference_dispatch import physical_request_context
+from app.application.security.authorization_context import get_authorization_context
 from app.domain.external.file_storage import FileStorage
 from app.domain.models.inference import (
     InferenceProvider,
     ResolvedInferenceModel,
 )
 from app.domain.services.vision_service import upload_image_bytes_to_storage
+from app.infrastructure.external.llm.dispatch import physical_send
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
     create_ssrf_safe_async_client,
@@ -28,8 +31,10 @@ class ProviderImageGenerator:
         self,
         *,
         outbound_policy: OutboundNetworkPolicy = DEFAULT_OUTBOUND_NETWORK_POLICY,
+        physical_dispatch=None,
     ) -> None:
         self._outbound_policy = outbound_policy
+        self._physical_dispatch = physical_dispatch
 
     async def generate(
         self,
@@ -42,16 +47,19 @@ class ProviderImageGenerator:
         owner_user_id: str | None = None,
         team_id: str | None = None,
     ) -> str | None:
-        return await generate_image(
-            prompt,
-            model,
-            file_storage,
-            size=size,
-            quality=quality,
-            owner_user_id=owner_user_id,
-            team_id=team_id,
-            outbound_policy=self._outbound_policy,
-        )
+        with physical_request_context(
+            self._physical_dispatch, get_authorization_context().scope, "image.generate", model
+        ):
+            return await generate_image(
+                prompt,
+                model,
+                file_storage,
+                size=size,
+                quality=quality,
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                outbound_policy=self._outbound_policy,
+            )
 
 
 def _ensure_bounded_provider_response(response: httpx.Response) -> None:
@@ -137,7 +145,11 @@ async def _generate_openai_image(
             follow_redirects=False,
             outbound_policy=outbound_policy,
         ) as client:
-            response = await client.post(url, json=payload, headers=headers)
+            response = await physical_send(
+                lambda: client.post(url, json=payload, headers=headers),
+                payload,
+                provider="openai",
+            )
             response.raise_for_status()
             _ensure_bounded_provider_response(response)
             encoded = response.json()["data"][0].get("b64_json", "")
@@ -185,7 +197,11 @@ async def _generate_gemini_image(
             follow_redirects=False,
             outbound_policy=outbound_policy,
         ) as client:
-            response = await client.post(url, json=payload, headers=headers)
+            response = await physical_send(
+                lambda: client.post(url, json=payload, headers=headers),
+                {**payload, "model": model_name},
+                provider="gemini",
+            )
             response.raise_for_status()
             _ensure_bounded_provider_response(response)
             predictions = response.json().get("predictions") or []

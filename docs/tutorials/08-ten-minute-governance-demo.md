@@ -11,7 +11,10 @@ chain verification, and signed evidence.
 ./scripts/quickstart.sh --demo
 ```
 
-The demo profile starts Ops Collector and OpsConsole, registers
+During first-run configuration, set `BOOTSTRAP_ADMIN_PASSWORD` and a strong
+`OPS_COLLECTOR_TOKEN` (at least 32 characters). Quickstart builds the dynamic
+Sandbox image before starting the stack. The demo profile starts Ops Collector
+and OpsConsole, registers
 read-only Collector policies, and creates **Demo Governance Patrol**. Configure
 a tool-capable chat binding in Settings → Inference if the optional
 `DEMO_INFERENCE_*` seed values were not supplied.
@@ -33,7 +36,7 @@ LLM, determines the failed check.
 ## 3. Approve one browser action
 
 1. Select **Web Operator** on the home page.
-2. Ask it to open `http://localhost:9099` and sign in.
+2. Ask it to open `http://ops-console:9099` and sign in.
 3. Keep exact allowed hosts `ops-console, localhost` and declare the target
    enterprise-owned.
 4. When an interactive browser Activity requests approval, inspect its frozen

@@ -6,6 +6,7 @@ from starlette.exceptions import HTTPException
 
 from app.application.request_context import get_request_id
 from app.domain.errors import AppException
+from app.domain.models.resource_pin import ResourcePinned
 from app.interfaces.observability.security_metrics import record_login_failure
 from app.interfaces.schemas import Response
 
@@ -76,5 +77,24 @@ def register_exception_handlers(app: FastAPI) -> None:
                 msg="服务器出现异常请稍后重试",
                 data={},
                 error_key="errors.serverError",
+            ).model_dump(exclude_none=True),
+        )
+
+    @app.exception_handler(ResourcePinned)
+    async def resource_pinned_handler(req: Request, error: ResourcePinned) -> JSONResponse:
+        # Deletion has already checked resource authority. Pin owners may have
+        # stricter authority: never expose them from this generic exception.
+        data = (
+            {"resource_kind": error.resource_kind, "resource_id": error.resource_id}
+            if error.resource_kind and error.resource_id
+            else {}
+        )
+        return JSONResponse(
+            status_code=409,
+            content=Response(
+                code=409,
+                msg="Resource is retained by published references",
+                data=data,
+                error_key="resource_pinned",
             ).model_dump(exclude_none=True),
         )

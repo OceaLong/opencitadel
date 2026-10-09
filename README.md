@@ -20,12 +20,12 @@ OpenCitadel is a **governed, self-hosted AI agent platform**. Keep data, model c
 
 Most agent-governance offerings are point solutions; OpenCitadel is an integrated platform:
 
-| Capability | MCP gateways | Agent firewalls / guardrails | Read-only diagnostics (k8sgpt, etc.) | OpenCitadel |
-|-----------|--------------|------------------------------|--------------------------------------|-------------|
-| Coverage | MCP traffic only | Single policy-interception point | Read-only, no execution | Browser / shell / file / MCP / A2A — the full tool chain |
-| Human-in-the-loop | — | Approval point | — | Persisted per-invocation approval + VNC takeover |
-| Evidence | Access logs | Logs | — | API-layer hash-chained audit + verifiable evidence packages |
-| Deployment | Gateway | Sidecar/SDK | CLI | Full self-hosted platform (Compose / Helm) |
+| Capability        | MCP gateways     | Agent firewalls / guardrails     | Read-only diagnostics (k8sgpt, etc.) | OpenCitadel                                                 |
+| ----------------- | ---------------- | -------------------------------- | ------------------------------------ | ----------------------------------------------------------- |
+| Coverage          | MCP traffic only | Single policy-interception point | Read-only, no execution              | Browser / shell / file / MCP / A2A — the full tool chain    |
+| Human-in-the-loop | —                | Approval point                   | —                                    | Persisted per-invocation approval + VNC takeover            |
+| Evidence          | Access logs      | Logs                             | —                                    | API-layer hash-chained audit + verifiable evidence packages |
+| Deployment        | Gateway          | Sidecar/SDK                      | CLI                                  | Full self-hosted platform (Compose / Helm)                  |
 
 > Web Operator targets **enterprise-owned/self-hosted systems**; third-party SaaS requires an ownership declaration and audit trail—not a waiver of legal risk.
 
@@ -39,14 +39,17 @@ Due to the large size of the video file, please click on the image or link below
 
 ## Core modules
 
-| Module | Route | Description |
-|--------|-------|-------------|
-| **Agent chat** | `/`, `/sessions/[id]` | Event-sourced Agent/Ask Runs, per-invocation approval, VNC takeover, durable replay |
-| **Ops Patrol** | `/patrols` | Read-only infrastructure checks with approval-gated remediation: closed-world collector, server-side assertion engine, signed evidence packages |
-| **Automation** | `/automation` | Scheduled jobs, webhooks, notifications |
-| **Governed context sources** | `/knowledge` | Document knowledge bases: versioning, atomic publish, session version binding, retrieval Q&A |
-| **Integrations** | Settings modal → Integrations | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
-| **Admin** | `/admin/*` | Users, quotas, audit, usage, compliance evidence |
+| Module                       | Route                         | Description                                                                                                                                     |
+| ---------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Agent chat**               | `/`, `/sessions/[id]`         | Event-sourced Agent/Ask Runs, per-invocation approval, VNC takeover, durable replay                                                             |
+| **Ops Patrol**               | `/patrols`                    | Read-only infrastructure checks with approval-gated remediation: closed-world collector, server-side assertion engine, signed evidence packages |
+| **Execution workbench**      | `/runs`, `/runs/[id]`         | Scoped Run projections, pinned playback, detail bodies, approval decisions and exports                                                          |
+| **Analysis**                 | `/analysis`                   | Captured evidence sources, comparisons and artifact diffs                                                                                       |
+| **Evaluations**              | `/evaluations`                | Cases, Subject/Judge batches, scoring and environment lifecycle                                                                                 |
+| **Automation**               | `/automation`                 | Scheduled jobs, webhooks, notifications                                                                                                         |
+| **Governed context sources** | `/knowledge`                  | Document knowledge bases: versioning, atomic publish, session version binding, retrieval Q&A                                                    |
+| **Integrations**             | Settings modal → Integrations | MCP (stdio / SSE / streamable HTTP) and A2A remote agents                                                                                       |
+| **Admin**                    | `/admin/*`                    | Users, quotas, audit, usage, compliance evidence                                                                                                |
 
 ## Quick start
 
@@ -70,21 +73,7 @@ agent task.
 
 ## Architecture at a glance
 
-```mermaid
-flowchart LR
-  UI["Next.js UI"] -->|"HTTP / SSE"| API["FastAPI API"]
-  API --> Inbox["PostgreSQL Command Inbox"]
-  Inbox --> Kernel["Execution Kernel"]
-  Kernel --> Events["Append-only Execution Events"]
-  Events --> API
-  Events -.->|"disposable wake-up"| Redis["Redis"]
-  API --> Storage["MinIO / COS Storage"]
-  Kernel --> Sandbox["Sandbox Runtime"]
-  Kernel --> LLM["LLM Providers"]
-  Kernel --> MCP["MCP / A2A"]
-  Kernel -->|"read-only probes"| Collector["ops-collector :8090"]
-  Kernel -->|"approval-gated writes"| Actuator["ops-actuator :8091"]
-```
+![Runtime architecture](docs/assets/diagrams/runtime-topology.png)
 
 - **Single execution authority**: PostgreSQL events drive every Run; Redis is only a recoverable wake-up hint
 - **Explicit composition**: independent typed `ApiRuntime` / `KernelRuntime` graphs own resources, supervised tasks, and bounded shutdown
@@ -95,15 +84,17 @@ flowchart LR
 
 Full design: [Architecture overview](docs/architecture/overview.md).
 
+The execution workbench, analysis, comparisons, and exports read pinned evidence cuts. Evaluation Subject/Judge Runs reuse the same kernel. See [Execution analysis](docs/architecture/execution-analysis.md) and [Evaluation control plane](docs/architecture/evaluation-control-plane.md).
+
 ## Documentation map
 
-| Audience | Start here |
-|----------|------------|
-| First run | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) · [10-minute governance demo loop](docs/tutorials/08-ten-minute-governance-demo.md) |
-| Ops / DevOps | [Deployment](docs/operations/deployment.md) · [Ops Patrol](docs/tutorials/06-ops-patrol.md) · [Approved remediation](docs/tutorials/07-approved-remediation.md) · [Patrol operations](docs/operations/ops-patrol.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
-| Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) · [Governed Web Operator](docs/tutorials/04-governed-web-operator.md) · [Refund reconciliation & compliance](docs/tutorials/05-refund-reconciliation-compliance.md) |
-| Platform engineers | [Docs index](docs/README.md) · [Execution kernel](docs/architecture/execution-kernel.md) · [Security model](docs/architecture/security-model.md) · [Ops Patrol architecture](docs/architecture/ops-patrol.md) |
-| Contributors | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) |
+| Audience             | Start here                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First run            | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) · [10-minute governance demo loop](docs/tutorials/08-ten-minute-governance-demo.md)                                                                                                                                                          |
+| Ops / DevOps         | [Deployment](docs/operations/deployment.md) · [Ops Patrol](docs/tutorials/06-ops-patrol.md) · [Approved remediation](docs/tutorials/07-approved-remediation.md) · [Patrol operations](docs/operations/ops-patrol.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
+| Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) · [Governed Web Operator](docs/tutorials/04-governed-web-operator.md) · [Refund reconciliation & compliance](docs/tutorials/05-refund-reconciliation-compliance.md)           |
+| Platform engineers   | [Docs index](docs/README.md) · [Execution kernel](docs/architecture/execution-kernel.md) · [Security model](docs/architecture/security-model.md) · [Ops Patrol architecture](docs/architecture/ops-patrol.md)                                                                                                     |
+| Contributors         | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md)                                                                                                                                                                                                                                         |
 
 ## Local development
 
@@ -114,9 +105,12 @@ cp .env.example .env
 docker compose --profile local up --build
 
 # Or run API / UI tests separately
-cd api && uv sync && uv run pytest
-cd ui && npm install && npm run test
+cd api && uv sync --all-groups && uv run pytest --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
+cd ui && npm ci && npm run test
 ```
+
+API integration tests require the configured PostgreSQL database; strict mode also requires its supporting services. See the module guide for Docker setup.
+The excluded six current-invocation consumers run in the [acceptance runner](e2e/README.md), after their native evidence is produced and validated; all six must pass without skips.
 
 Module guides: [api/README.md](api/README.md) · [ui/README.md](ui/README.md) · [sandbox/README.md](sandbox/README.md)
 

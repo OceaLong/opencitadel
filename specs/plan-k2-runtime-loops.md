@@ -1,3 +1,5 @@
+> **历史归档 / Historical archive**：本文件记录 2026-09-03/04 的设计、计划或当时审计结果，不是当前实现、部署操作或验收状态。原文的待实现项、版本数量、命令与暂存要求仅属于历史上下文，不适用于当前工作。当前架构以[架构总览](../docs/architecture/overview.zh-CN.md)、[执行内核](../docs/architecture/execution-kernel.zh-CN.md)、[评测控制面](../docs/architecture/evaluation-control-plane.zh-CN.md)及[容量协议](../scripts/execution_capacity/REFERENCE.md)为准。AC21 完整容量验收仍未完成；不从历史“全绿”结论推导当前状态。
+
 # Plan K2 · 运行时循环改造
 
 遵守总体 spec 决策 D4/D5/D6/D7。范围：`api/app/application/execution/`（workers/admission/run_control）、`api/app/infrastructure/execution/`（inbox/outbox/timer/activity/decision source）、`api/app/execution_kernel_main.py`、`api/app/composition/tasks.py`、`kernel.py`。依赖 K1 完成。

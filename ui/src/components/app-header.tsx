@@ -16,6 +16,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 import { useCapabilities } from "@/hooks/use-capabilities";
@@ -85,7 +92,27 @@ export function AppHeader() {
                 return (
                   <Fragment key={`${crumb.label}-${index}`}>
                     <BreadcrumbItem className="min-w-0">
-                      {isLast || !crumb.href ? (
+                      {isLast && pageTitle ? (
+                        <span aria-current="page" className="min-w-0">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button
+                                type="button"
+                                className="focus-visible:outline-ring max-w-full truncate rounded-sm text-left text-sm font-medium underline decoration-dotted underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+                                aria-label={`${t("showFullTitle")}: ${crumb.label}`}
+                              >
+                                {crumb.label}
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className="execution-title-dialog max-h-[80dvh] overflow-y-auto">
+                              <DialogTitle>{t("fullTitle")}</DialogTitle>
+                              <DialogDescription className="text-foreground min-w-0 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+                                {crumb.label}
+                              </DialogDescription>
+                            </DialogContent>
+                          </Dialog>
+                        </span>
+                      ) : isLast || !crumb.href ? (
                         <BreadcrumbPage className="truncate text-sm font-medium">
                           {crumb.label}
                         </BreadcrumbPage>

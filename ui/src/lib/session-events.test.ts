@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EventMeta, SSEEventData } from "@/lib/api/types";
 
-import { eventsToTimeline, reduceSessionStatusEvents } from "./session-events";
+import { eventsToTimeline, normalizeEvents, reduceSessionStatusEvents } from "./session-events";
 
 function meta(eventId: string, createdAt = 1): EventMeta {
   return {
@@ -105,4 +105,14 @@ describe("formal session status reduction", () => {
       ]),
     ).toBe("completed");
   });
+});
+it("preserves authoritative HTTP Run identity when normalizing public event envelopes", () => {
+  const result = normalizeEvents([
+    {
+      run_id: "real-run",
+      event_type: "message",
+      payload: { event_id: "opaque", role: "user", message: "hello", persist: true },
+    },
+  ]);
+  expect(result[0].data).toMatchObject({ run_id: "real-run", event_id: "opaque" });
 });

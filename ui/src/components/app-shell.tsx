@@ -8,14 +8,15 @@ import type { ReactNode } from "react";
 
 import { AdminContextPanel } from "@/components/admin/admin-context-panel";
 import { AppHeader } from "@/components/app-header";
+import { WorkbenchSidebar } from "@/components/execution/workbench-sidebar";
 import { IconRail } from "@/components/icon-rail";
 import { LeftPanel } from "@/components/left-panel";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PatrolContextPanel } from "@/components/patrol/patrol-context-panel";
-import { SidebarProvider } from "@/components/ui/sidebar";
 
 import { matchModule, type NavModule } from "@/lib/nav-modules";
 import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
 import { LoginPromptProvider } from "@/providers/login-prompt-provider";
 import { PageTitleProvider } from "@/providers/page-title-provider";
 import { PatrolPacksProvider } from "@/providers/patrol-packs-provider";
@@ -51,6 +52,7 @@ function ContextPanel({ module }: { module: NavModule | undefined }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { scope } = useClientDataScope();
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -92,7 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="bg-background min-h-screen">{children}</div>
   ) : (
     <PageTitleProvider>
-      <SidebarProvider className="[--sidebar-width:18rem] md:[--sidebar-left-offset:3.5rem] md:[--sidebar-width:280px]">
+      <WorkbenchSidebar scope={scope}>
         <IconRail />
         {/*
           两个数据 Provider 无条件挂载在稳定位置（父类型不随 activeModule 变化），
@@ -104,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {shellBody}
           </PatrolPacksProvider>
         </SessionsProvider>
-      </SidebarProvider>
+      </WorkbenchSidebar>
     </PageTitleProvider>
   );
 

@@ -10,6 +10,7 @@ from app.infrastructure.adapters.object_storage import (
     MinioObjectStorageAdapter,
     create_object_storage_adapter,
 )
+from tests.app.artifact_test_support import UnitOfWorkUploadIntents
 
 
 def _artifact_uow(artifact: Artifact | None = None):
@@ -72,7 +73,9 @@ def test_artifact_write_and_read_via_storage_adapter(adapter_cls, client_kwarg):
 
     adapter = adapter_cls(**{client_kwarg: client})
     uow = _artifact_uow_with_saved_lookup()
-    service = ArtifactService(lambda: uow, object_storage=adapter)
+    service = ArtifactService(
+        lambda: uow, object_storage=adapter, upload_intents=UnitOfWorkUploadIntents(lambda: uow)
+    )
 
     async def _run():
         artifact = await service.write_content(

@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.domain.execution.activity import ActivityRequest
 from app.domain.execution.aggregate import Decision
@@ -88,6 +88,7 @@ class RunState(BaseModel):
     status: RunStatus = RunStatus.NEW
     active_activity_ids: tuple[UUID, ...] = ()
     started_activity_ids: tuple[UUID, ...] = ()
+    started_activity_claims: tuple[tuple[UUID, int, int | None], ...] = ()
     activity_generations: tuple[tuple[UUID, int], ...] = ()
     settled_activities: tuple[tuple[UUID, str, int], ...] = ()
     activity_failure_codes: tuple[tuple[UUID, int, str], ...] = ()
@@ -126,6 +127,40 @@ class RunState(BaseModel):
 
 class _Payload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class ModelUsagePayload(_Payload):
+    call_identity: UUID
+    phase: Literal["dispatch", "settlement"]
+
+
+class ArtifactProductionPayload(_Payload):
+    operation_id: UUID
+    artifact_id: UUID
+    version: int = Field(ge=1)
+    activity_id: UUID
+    generation: int = Field(ge=0)
+    claim_generation: int = Field(ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _experimental_v1_null(cls, value):
+        # F05 preapproval tests briefly persisted an extra null field in v1.
+        # Preserve the original six-field baseline and never infer authority
+        # from that experimental shape. Other events and non-null v1 reject.
+        if (
+            "invocation_id" not in cls.model_fields
+            and isinstance(value, dict)
+            and "invocation_id" in value
+        ):
+            if value["invocation_id"] is not None:
+                raise ValueError("v1 cannot establish invocation authority")
+            return {key: item for key, item in value.items() if key != "invocation_id"}
+        return value
+
+
+class ArtifactProductionPayloadV2(ArtifactProductionPayload):
+    invocation_id: UUID | None = None
 
 
 class EmptyPayload(_Payload):
@@ -186,6 +221,15 @@ class RequestActivityPayload(_Payload):
     public_data: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class RequestActivityPayloadV2(RequestActivityPayload):
+    parent_activity_id: UUID | None = None
+    invocation_id: UUID | None = None
+
+
+class ActivityRequestedPayloadV2(RequestActivityPayloadV2):
+    generation: int | None = Field(default=None, ge=0)
+
+
 class ActivityRequestedInternalPayload(_Payload):
     input_payload: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -207,6 +251,22 @@ class ActivityFailurePayload(_Payload):
     activity_id: UUID
     generation: int = Field(ge=0)
     failure_code: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class ActivityResultPayloadV2(ActivityResultPayload):
+    claim_generation: int | None = Field(default=None, ge=1)
+
+
+class ActivityFailurePayloadV2(ActivityFailurePayload):
+    claim_generation: int | None = Field(default=None, ge=1)
+
+
+def _unknown_claim(payload):
+    return {**payload, "claim_generation": None}
+
+
+def _unknown_event_claim(payloads):
+    return EventPayloads(public=_unknown_claim(payloads.public), internal=payloads.internal)
 
 
 class RequestApprovalPayload(_Payload):
@@ -237,6 +297,8 @@ class ExpireApprovalPayload(_Payload):
 
 
 _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
+    "RecordModelUsage": ModelUsagePayload,
+    "RecordArtifactVersionProduced": ArtifactProductionPayload,
     "CreateRun": CreateRunPayload,
     "StartRun": EmptyPayload,
     "WaitRun": WaitRunPayload,
@@ -259,6 +321,8 @@ _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
 # mandatory: events with no internal data declare EmptyPayload, so accidental
 # internal leakage fails at emit time instead of surfacing on a later replay.
 _EVENT_SPECS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+    "ModelUsageRecorded": (EmptyPayload, ModelUsagePayload),
+    "ArtifactVersionProduced": (EmptyPayload, ArtifactProductionPayload),
     "RunCreated": (RunCreatedPayload, RunCreatedInternalPayload),
     "RunStarted": (EmptyPayload, EmptyPayload),
     "RunWaiting": (WaitRunPayload, EmptyPayload),
@@ -285,6 +349,8 @@ _EVENT_SPECS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
 # vice versa) fails at aggregate construction instead of on a later replay.
 _EVOLVED_EVENT_TYPES = frozenset(
     {
+        "ModelUsageRecorded",
+        "ArtifactVersionProduced",
         "RunCreated",
         "RunStarted",
         "RunWaiting",
@@ -311,7 +377,7 @@ class RunAggregate:
     """One deterministic state machine for all execution lifecycles."""
 
     state_type = RunState
-    snapshot_serializer_version = 5
+    snapshot_serializer_version = 6
 
     def __init__(self) -> None:
         self.command_registry = CommandRegistry()
@@ -325,6 +391,72 @@ class RunAggregate:
                 public_model,
                 internal_model=internal_model,
             )
+        for name in (
+            "MarkActivityCallStarted",
+            "CompleteActivity",
+            "FailActivity",
+            "MarkActivityOutcomeUnknown",
+        ):
+            model = (
+                ActivityResultPayloadV2
+                if name in ("MarkActivityCallStarted", "CompleteActivity")
+                else ActivityFailurePayloadV2
+            )
+            self.command_registry.register(name, 2, model, upcast_from_previous=_unknown_claim)
+        for name in (
+            "ActivityCallStarted",
+            "ActivityCompleted",
+            "ActivityFailed",
+            "ActivityOutcomeUnknown",
+        ):
+            model = (
+                ActivityResultPayloadV2
+                if name in ("ActivityCallStarted", "ActivityCompleted")
+                else ActivityFailurePayloadV2
+            )
+            self.event_registry.register(
+                name,
+                2,
+                model,
+                internal_model=_EVENT_SPECS[name][1],
+                upcast_from_previous=_unknown_event_claim,
+            )
+        self.command_registry.register(
+            "RequestActivity",
+            2,
+            RequestActivityPayloadV2,
+            upcast_from_previous=lambda p: {**p, "parent_activity_id": None, "invocation_id": None},
+        )
+        self.event_registry.register(
+            "ActivityRequested",
+            2,
+            ActivityRequestedPayloadV2,
+            internal_model=ActivityRequestedInternalPayload,
+            upcast_from_previous=lambda p: EventPayloads(
+                public={
+                    **p.public,
+                    "parent_activity_id": None,
+                    "invocation_id": None,
+                    "generation": None,
+                },
+                internal=p.internal,
+            ),
+        )
+        self.command_registry.register(
+            "RecordArtifactVersionProduced",
+            2,
+            ArtifactProductionPayloadV2,
+            upcast_from_previous=lambda p: {**p, "invocation_id": None},
+        )
+        self.event_registry.register(
+            "ArtifactVersionProduced",
+            2,
+            EmptyPayload,
+            internal_model=ArtifactProductionPayloadV2,
+            upcast_from_previous=lambda p: EventPayloads(
+                public=p.public, internal={**p.internal, "invocation_id": None}
+            ),
+        )
         self._assert_registry_coverage()
 
     def _assert_registry_coverage(self) -> None:
@@ -347,6 +479,8 @@ class RunAggregate:
         payload = event.public_payload
         common = {"stream_version": event.stream_version}
 
+        if event.event_type in {"ArtifactVersionProduced", "ModelUsageRecorded"}:
+            return state.model_copy(update=common)
         if event.event_type == "RunCreated":
             raw_snapshot = event.internal_payload.get("policy_snapshot")
             try:
@@ -481,6 +615,7 @@ class RunAggregate:
                     "status": status,
                     "active_activity_ids": (),
                     "started_activity_ids": (),
+                    "started_activity_claims": (),
                     "terminal_event_id": event.event_id,
                     "result_ref": payload.get("result_ref"),
                     "failure_code": payload.get("failure_code"),
@@ -523,7 +658,20 @@ class RunAggregate:
                 update={
                     **common,
                     "started_activity_ids": tuple(
-                        sorted((*state.started_activity_ids, activity_id), key=str)
+                        sorted({*state.started_activity_ids, activity_id}, key=str)
+                    ),
+                    "started_activity_claims": tuple(
+                        sorted(
+                            {
+                                *state.started_activity_claims,
+                                (
+                                    activity_id,
+                                    int(payload["generation"]),
+                                    payload.get("claim_generation"),
+                                ),
+                            },
+                            key=lambda item: (str(item[0]), item[1], item[2] or 0),
+                        )
                     ),
                 }
             )
@@ -587,6 +735,9 @@ class RunAggregate:
                     "started_activity_ids": tuple(
                         item for item in state.started_activity_ids if item != activity_id
                     ),
+                    "started_activity_claims": tuple(
+                        item for item in state.started_activity_claims if item[0] != activity_id
+                    ),
                     "settled_activities": tuple(
                         sorted(
                             (
@@ -606,12 +757,9 @@ class RunAggregate:
         self._validate_target(state, command)
         if command.command_type not in _COMMAND_PAYLOADS:
             raise UnknownRunCommandError(command.command_type)
-        expected_schema_version = self.command_registry.latest_version(command.command_type)
-        if command.command_schema_version != expected_schema_version:
-            raise ValueError(
-                f"unsupported {command.command_type} schema version: "
-                f"{command.command_schema_version}"
-            )
+        _, normalized_payload = self.command_registry.upcast(
+            command.command_type, command.command_schema_version, command.payload
+        )
         if (
             command.expected_stream_version is not None
             and command.expected_stream_version != state.stream_version
@@ -621,7 +769,19 @@ class RunAggregate:
                 f"{command.expected_stream_version}, current {state.stream_version}"
             )
 
-        payload = _COMMAND_PAYLOADS[command.command_type].model_validate(command.payload)
+        payload = self.command_registry.latest(command.command_type).model.model_validate(
+            normalized_payload
+        )
+        # Only receipt-verified metadata can be appended after termination.
+        # The transactional adapter verifies the durable receipt before decide.
+        if command.command_type == "RecordModelUsage":
+            if state.status == RunStatus.NEW:
+                raise InvalidRunTransitionError("usage requires an admitted Run")
+            return self._decide_RecordModelUsage(state, payload)
+        if command.command_type == "RecordArtifactVersionProduced":
+            if state.status == RunStatus.NEW:
+                raise InvalidRunTransitionError("production requires an admitted Run")
+            return self._decide_RecordArtifactVersionProduced(state, payload)
         if state.status in TERMINAL_STATUSES:
             matching = {
                 RunStatus.COMPLETED: "CompleteRun",
@@ -652,6 +812,24 @@ class RunAggregate:
         if handler is None:
             raise UnknownRunCommandError(command.command_type)
         return handler(state, payload)
+
+    def _decide_RecordModelUsage(self, state, payload):
+        return Decision(
+            events=(
+                self._new_event(
+                    "ModelUsageRecorded", {}, internal_payload=payload.model_dump(mode="json")
+                ),
+            )
+        )
+
+    def _decide_RecordArtifactVersionProduced(self, state, payload):
+        return Decision(
+            events=(
+                self._new_event(
+                    "ArtifactVersionProduced", {}, internal_payload=payload.model_dump(mode="json")
+                ),
+            )
+        )
 
     def _decide_CreateRun(self, state: RunState, payload: CreateRunPayload) -> Decision:
         if state.status != RunStatus.NEW:
@@ -969,10 +1147,13 @@ class RunAggregate:
             events=(
                 self._new_event(
                     "ActivityRequested",
-                    payload.model_dump(
-                        mode="json",
-                        exclude={"input_payload"},
-                    ),
+                    {
+                        **payload.model_dump(
+                            mode="json",
+                            exclude={"input_payload"},
+                        ),
+                        "generation": state.retry_generation,
+                    },
                     internal_payload={"input_payload": payload.input_payload},
                 ),
             ),
@@ -986,7 +1167,10 @@ class RunAggregate:
         payload: ActivityResultPayload,
     ) -> Decision:
         RunAggregate._validate_active_generation(state, payload)
-        if payload.activity_id in state.started_activity_ids:
+        claim = payload.claim_generation
+        if claim is None and payload.activity_id in state.started_activity_ids:
+            return Decision(events=())
+        if (payload.activity_id, payload.generation, claim) in state.started_activity_claims:
             return Decision(events=())
         return self._event("ActivityCallStarted", payload.model_dump(mode="json"))
 
@@ -1112,7 +1296,10 @@ class RunAggregate:
             )
         if event.event_type != "RunCreated" and state.status == RunStatus.NEW:
             raise InvalidRunTransitionError("RunCreated must be the first event")
-        if state.status in TERMINAL_STATUSES:
+        if state.status in TERMINAL_STATUSES and event.event_type not in {
+            "ArtifactVersionProduced",
+            "ModelUsageRecorded",
+        }:
             raise InvalidRunTransitionError("terminal Run cannot evolve")
 
     @staticmethod

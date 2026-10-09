@@ -1,0 +1,60 @@
+[
+  {
+    "case_key": "rule-pass",
+    "input": "[acceptance:evaluation:rule-pass]",
+    "reference_answer": "Acceptance response: [acceptance:evaluation:rule-pass]",
+    "rules": [
+      {
+        "id": "exact",
+        "kind": "text_exact",
+        "expected": "Acceptance response: [acceptance:evaluation:rule-pass]",
+        "required": true
+      }
+    ]
+  },
+  {
+    "case_key": "citation",
+    "input": "[acceptance:evaluation:citation]",
+    "rules": [
+      {
+        "id": "citation",
+        "kind": "citations",
+        "sources": [],
+        "required": true
+      }
+    ]
+  },
+  {
+    "case_key": "invalid-json",
+    "input": "[acceptance:evaluation:invalid-json]",
+    "reference_answer": "Acceptance response: [acceptance:evaluation:invalid-json]",
+    "rules": [
+      {
+        "id": "exact",
+        "kind": "text_exact",
+        "expected": "Acceptance response: [acceptance:evaluation:invalid-json]",
+        "required": true
+      }
+    ]
+  },
+  {
+    "case_key": "replay-mismatch",
+    "input": "[acceptance:evaluation:isolated-write] [acceptance:tool:shell_execute]",
+    "expected_execution": "mismatch"
+  },
+  {
+    "case_key": "isolated-write",
+    "input": "[acceptance:evaluation:isolated-write] [acceptance:tool:shell_execute]",
+    "expected_cleanup": "clean"
+  },
+  {
+    "case_key": "unrecorded-branch",
+    "input": "[acceptance:evaluation:isolated-write] [acceptance:tool:shell_execute]",
+    "expected_execution": "mismatch"
+  },
+  {
+    "case_key": "missing-recorded-object",
+    "input": "[acceptance:evaluation:isolated-write] [acceptance:tool:shell_execute]",
+    "expected_execution": "mismatch"
+  }
+]

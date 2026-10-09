@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -7,9 +8,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+from app.application.ports.artifact_upload_intents import ArtifactUploadIntentWriter
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.models.artifact import Artifact, ArtifactKind, ArtifactStatus
+from app.domain.models.artifact_provenance import ArtifactProducer, ArtifactVersionProvenance
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
@@ -99,7 +102,10 @@ class ArtifactService:
         object_storage: ObjectStoragePort,
         file_storage: FileStorage | None = None,
         sandbox_file_reader: SandboxFileReader | None = None,
+        *,
+        upload_intents: ArtifactUploadIntentWriter | None = None,
     ) -> None:
+        self._upload_intents = upload_intents
         self._uow_factory = uow_factory
         self._object_storage = object_storage
         self._file_storage = file_storage
@@ -118,17 +124,53 @@ class ArtifactService:
         content: str,
         *,
         verify_upload: bool = True,
+        producer: ArtifactProducer | None = None,
     ) -> Artifact:
+        if self._upload_intents is None:
+            raise RuntimeError("durable artifact upload intent writer is not configured")
         data = _encode_utf8_content(content)
+        requested_id = artifact_id
+        artifact_id = artifact_id or str(
+            uuid.uuid5(uuid.NAMESPACE_URL, "artifact:" + str(producer.operation_id))
+            if producer
+            else uuid.uuid4()
+        )
         async with self._uow_factory() as uow:
-            if artifact_id:
+            repository = uow.artifact_provenance
+            await repository.lock_artifact(artifact_id)
+            scope = await repository.session_scope(session_id)
+            if producer is not None:
+                if (scope.team_id, None if scope.team_id else scope.user_id) != (
+                    producer.scope.team_id,
+                    None if producer.scope.team_id else producer.scope.user_id,
+                ):
+                    raise PermissionError("producer scope mismatch")
+                prior = await repository.get_operation(scope, producer.operation_id)
+                if prior is not None:
+                    if (
+                        prior.artifact_id != artifact_id
+                        or prior.content_digest != "sha256:" + hashlib.sha256(data).hexdigest()
+                    ):
+                        raise ValueError(
+                            "artifact operation reused with different content or target"
+                        )
+                    saved = await uow.artifact.get_by_id(prior.artifact_id)
+                    if saved is None:
+                        raise ValueError("artifact operation target unavailable")
+                    return saved.model_copy(
+                        update={
+                            "version_refs": saved.version_refs[: prior.version],
+                            "storage_ref": saved.version_refs[prior.version - 1],
+                            "title": title or saved.title,
+                        }
+                    )
+            if requested_id:
                 artifact = await uow.artifact.get_by_id(artifact_id)
                 if not artifact or artifact.session_id != session_id:
                     raise ValueError(_artifact_not_found_message(artifact_id))
                 version = len(artifact.version_refs) + 1
                 status: ArtifactStatus = "updated"
             else:
-                artifact_id = str(uuid.uuid4())
                 artifact = Artifact(
                     id=artifact_id,
                     session_id=session_id,
@@ -138,7 +180,18 @@ class ArtifactService:
                 version = 1
                 status = "draft"
 
-            key = self._storage_key(session_id, artifact_id, version, kind)
+            upload_id = uuid.uuid4()
+            key = f"artifacts/{session_id}/{artifact_id}/uploads/{upload_id}"
+            # Hold the matching lock before publishing the cleanup intent. A
+            # crashed writer releases it; cleanup cannot race a live upload.
+            await repository.lock_upload(upload_id)
+            await self._upload_intents.register(
+                scope,
+                upload_id=upload_id,
+                session_id=session_id,
+                artifact_id=artifact_id,
+                storage_key=key,
+            )
             logger.info(
                 "写入交付物 session=%s artifact=%s version=%s byte_size=%d",
                 session_id,
@@ -176,12 +229,32 @@ class ArtifactService:
             artifact.status = status
             artifact.updated_at = datetime.now(UTC)
             await uow.artifact.save(artifact)
+            operation_id = producer.operation_id if producer else uuid.uuid4()
+            await repository.record_version(
+                scope,
+                ArtifactVersionProvenance(
+                    id=uuid.uuid4(),
+                    artifact_id=artifact_id,
+                    version=version,
+                    producer_identity=str(operation_id),
+                    evidence_kind="direct" if producer else "unknown",
+                    binding_status="pending" if producer else "unavailable",
+                    content_digest="sha256:" + hashlib.sha256(data).hexdigest(),
+                    content_ref={"artifact_id": artifact_id, "version": version},
+                    evidence={
+                        "basis": "committed_version_receipt" if producer else "unknown_producer"
+                    },
+                ),
+                producer=producer,
+                storage_key=key,
+            )
             await uow.commit()
 
         return artifact
 
     async def finalize(self, session_id: str, artifact_id: str) -> Artifact:
         async with self._uow_factory() as uow:
+            await uow.artifact_provenance.lock_artifact(artifact_id)
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact or artifact.session_id != session_id:
                 raise ValueError(_artifact_not_found_message(artifact_id))
@@ -349,6 +422,7 @@ class ArtifactService:
         token = secrets.token_urlsafe(24)
         expires = datetime.now(UTC) + timedelta(hours=ttl_hours)
         async with self._uow_factory() as uow:
+            await uow.artifact_provenance.lock_artifact(artifact_id)
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
                 raise ValueError(_artifact_not_found_message(artifact_id))
@@ -381,6 +455,7 @@ class ArtifactService:
     ) -> None:
         """清除交付物的分享令牌，使已发出的分享链接立即失效。"""
         async with self._uow_factory() as uow:
+            await uow.artifact_provenance.lock_artifact(artifact_id)
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
                 raise ValueError(_artifact_not_found_message(artifact_id))

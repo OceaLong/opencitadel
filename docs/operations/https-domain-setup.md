@@ -34,7 +34,7 @@ NGINX_PORT=8088
 Restart Nginx:
 
 ```bash
-docker compose up -d opencitadel-nginx
+docker compose up -d --force-recreate opencitadel-nginx
 ```
 
 Visit: `http://your-domain.com:8088`
@@ -64,6 +64,8 @@ sudo certbot certonly --standalone \
 
 Certificate renewal is your responsibility; after renewal run `docker compose restart opencitadel-nginx`.
 
+Standalone HTTP-01 validation requires public access to host `80/tcp` with no other listener; exposing only `8088/tcp` does not satisfy Certbot validation. Compose otherwise mounts the empty repository directory `nginx/letsencrypt`; set `LETSENCRYPT_DIR` below to mount host certificates. Rendering configuration does not obtain certificates.
+
 ### 2. Update .env
 
 ```ini
@@ -71,6 +73,7 @@ OPENCITADEL_DOMAIN=your-domain.com
 HTTPS_ENABLED=true
 NGINX_PORT=8088
 NGINX_HTTPS_PORT=443
+LETSENCRYPT_DIR=/etc/letsencrypt
 
 # Required when ENV=production (API startup validation)
 ENV=production
@@ -84,7 +87,13 @@ For **local HTTP quickstart** only (`make quickstart`), use `ENV=development` wi
 ### 3. Restart Nginx
 
 ```bash
-docker compose up -d opencitadel-nginx
+docker compose up -d --force-recreate opencitadel-nginx
+```
+
+If you changed `ENV`, cookie settings, or frontend/OAuth URLs, recreate API and kernel containers to reload their `env_file`:
+
+```bash
+docker compose up -d --force-recreate opencitadel-api opencitadel-execution-kernel
 ```
 
 With HTTPS enabled:
@@ -110,6 +119,8 @@ docker compose exec opencitadel-nginx nginx -t
 
 ---
 
+The HTTPS template redirects HTTP to standard port 443. A nonstandard host `NGINX_HTTPS_PORT` needs a matching public entrypoint/template.
+
 ## 4. Rollback
 
 Return to HTTP-only access:
@@ -117,8 +128,9 @@ Return to HTTP-only access:
 ```bash
 # In .env
 HTTPS_ENABLED=false
+# For local HTTP development, also set ENV=development, COOKIE_SECURE=false, and frontend/OAuth URLs.
 
-docker compose up -d opencitadel-nginx
+docker compose up -d --force-recreate opencitadel-nginx
 ```
 
 ---
@@ -143,5 +155,5 @@ Templates include `Upgrade` / `Connection` headers and long timeouts; extra Ngin
 
 ---
 
-**Last updated**: 2026-06-15  
+**Last updated**: 2026-10-08
 **Applies to**: OpenCitadel v1.0

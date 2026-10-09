@@ -7,40 +7,35 @@ OpenCitadel 将知识库视为一个稳定的逻辑资源，其可读内容则�
 
 ## 标识与存储模型
 
-| 概念 | 标识与职责 |
-| --- | --- |
-| 知识库 | 稳定、受所有权范围保护的资源，并指向当前已发布版本 |
-| 知识库版本 | 不可变候选或已发布快照；记录父版本、构建、能力、降级原因、指标和发布时间 |
-| 逻辑文档 | 知识库内稳定的文档元数据 |
-| 文档修订 | 对应一次确定源内容摘要及处理状态的不可变对象 |
-| 版本清单 | 从版本到精确 `(document_id, document_revision_id)` 的有序映射 |
-| 分块和图数据 | 同时携带 `kb_id` 与 `version_id` 的派生数据，不能跨版本推断复用 |
-| 源 Run | 候选版本生命周期和进度的唯一权威，通过正式资源构建投影查询 |
-| 会话绑定 | 将 Ask 或 Agent 会话固定到某个明确已发布版本的不可变记录 |
+| 概念         | 标识与职责                                                                         |
+| ------------ | ---------------------------------------------------------------------------------- |
+| 知识库       | 稳定、受所有权范围保护的资源，并指向当前已发布版本                                 |
+| 知识库版本   | 不可变候选或已发布快照；记录父版本、构建、能力、降级原因、指标和发布时间           |
+| 逻辑文档     | 知识库内稳定的文档元数据                                                           |
+| 文档修订     | 对应一次确定源内容摘要及处理状态的不可变对象                                       |
+| 版本清单     | 从版本到精确 `(document_id, document_revision_id)` 的有序映射                      |
+| 分块和图数据 | 同时携带 `kb_id` 与 `version_id` 的派生数据，不能跨版本推断复用                    |
+| 源 Run       | 执行生命周期的唯一权威；正式资源构建状态可附带 Fenced Off-stream Activity Progress |
+| 会话绑定     | 将 Ask 或 Agent 会话固定到某个明确已发布版本的不可变记录                           |
 
-只有当清单中的每一项都能解析到精确修订，且强制派生数据完整时，版本才构成可读闭包。父子分块、关键词、向量、实体、关系和证据引用都必须按绑定版本过滤。
+清单中的每一项都必须解析到精确修订。Indexed 修订需完整强制派生数据；部分发布闭包
+可保留解析失败修订作为显式 Failed Entry，并记录 `DOCUMENT_PARTIAL`。父子分块、关键词、向量、实体、关系和证据引用都必须按绑定版本过滤。
 
 ## 状态机
 
 文档修订状态：
 
-```text
-uploaded -> parsing -> parsed -> indexing -> indexed
-                    \              \-> failed
-                     \-> failed
-```
+![knowledge document states](../assets/diagrams/knowledge-document-states.png)
 
 `parsed` 仅表示源内容提取成功，不表示可被检索，也不允许据此创建会话。生产问答只能读取已发布闭包中的 `indexed` 修订。
 
 知识库版本状态：
 
-```text
-building -> ready
-         -> degraded
-         -> failed
-```
+![knowledge version states](../assets/diagrams/knowledge-version-states.png)
 
-`ready` 和 `degraded` 是可发布终态。`degraded` 必须如实表达：强制的关键词检索与来源阅读仍可用，但一个或多个可选能力被禁用，并由版本与正式 Run 状态面展示具体原因。
+`ready` 和 `degraded` 是可发布终态。`degraded` 如实表达 Indexed Document 的强制
+关键词检索与来源阅读可用；部分文档可能失败（`DOCUMENT_PARTIAL`），可选能力也可能
+禁用，由版本与正式 Run 状态面展示原因。
 
 源 Run 使用 `new`、`queued`、`running`、`waiting`、`completed`、`failed`、`cancelled`。候选版本的 `ready`/`degraded` 是产品能力状态，不是第二套执行生命周期。取消命令由内核持久化，Activity 在 fencing 边界停止，未发布候选标记为 `failed`，Run 标记为 `cancelled`。
 
@@ -61,17 +56,20 @@ building -> ready
 
 ## 失败语义
 
-| 失败位置 | 候选 / Run 结果 | 当前版本 |
-| --- | --- | --- |
-| 解析 | failed | 不变且持续可读 |
-| 分块 | failed | 不变且持续可读 |
-| 关键词索引 | failed | 不变且持续可读 |
-| 闭包验证 | failed | 不变且持续可读 |
-| 发布 CAS 或事务提交 | failed | 不变且持续可读 |
-| 向量索引 | 以 `degraded` 发布，`vector_search=false` | 原子前移 |
-| 图抽取、预算或截止时间 | 以 `degraded` 发布，`graph_search=false` | 原子前移 |
+| 失败位置                       | 候选 / Run 结果                           | 当前版本       |
+| ------------------------------ | ----------------------------------------- | -------------- |
+| 所有候选文档解析失败           | failed                                    | 不变且持续可读 |
+| 部分解析失败，其余文档索引成功 | 以 `degraded` 发布，`DOCUMENT_PARTIAL`    | 原子前移       |
+| 分块                           | failed                                    | 不变且持续可读 |
+| 关键词索引                     | failed                                    | 不变且持续可读 |
+| 闭包验证                       | failed                                    | 不变且持续可读 |
+| 发布 CAS 或事务提交            | failed                                    | 不变且持续可读 |
+| 向量索引                       | 以 `degraded` 发布，`vector_search=false` | 原子前移       |
+| 图抽取、预算或截止时间         | 以 `degraded` 发布，`graph_search=false`  | 原子前移       |
 
-强制阶段失败绝不清空 active 分块，也不会造成检索黑屏。可选阶段失败不能伪装能力可用；未完成图数据不会作为“半张图”暴露。
+整次构建的强制阶段失败绝不清空 Active 分块，也不会造成检索黑屏。单个文档解析失败
+时，只要至少一个文档及其关键词分块成功索引，就可发布 Degraded Closure；Failed
+Revision Entry 不会成为可检索文档。可选阶段失败不能伪装能力可用；未完成图数据不会作为“半张图”暴露。
 
 当前降级原因包括 `DOCUMENT_PARTIAL`、`EMBEDDING_UNAVAILABLE` 以及 GraphRAG
 失败/预算原因。应从版本或正式 Run 状态读取。图接口在图能力不可用时只返回
@@ -126,26 +124,29 @@ GET  /knowledge-bases/{kb_id}/versions/{version_id}
 POST /knowledge-bases/{kb_id}/builds
 POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
 POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
-POST /knowledge-bases/{kb_id}/reindex
 ```
 
 同一知识库同时只能有一个 active 候选。完全相同的命令具备幂等性。重试会基于失败候选的不可变清单创建新候选，而不是复活或覆盖旧版本。重建从 active 清单创建候选，绝不调用原地
-`clear_index_data`。
+`clear_index_data`；当前 Reindex API 为
+`POST /api/knowledge-bases/{kb_id}/builds`。
 
 移除文档只修改下一个候选清单，不会同步物理删除逻辑文档、修订、分块、图证据或旧版本。只有移除候选发布后 active 才会切换。
 
-执行内核从 PostgreSQL 回收过期 Activity claim 和待处理命令。知识图预算/cursor 指标属于候选进度标记，Run 进度只在正式投影中。恢复会安全继续同一 invocation，或在不改变 active 版本的前提下收敛候选。
+执行内核从 PostgreSQL 回收过期 Activity claim 和待处理命令。知识图预算/cursor 指标属于候选进度标记，Run Lifecycle 以正式投影为准。Live Activity Progress 是带 Fencing 的 Off-stream
+Observation，由 Status/Read Model 展示；其 Counter 或 SSE Cursor 不成为执行历史或回放顺序。恢复会安全继续同一 invocation，或在不改变 active 版本的前提下收敛候选。
 
 ## 保留与垃圾回收
 
-版本 GC 默认关闭：
+版本 GC 通过 Operations Policy 控制，默认关闭（下方是 Policy Payload，并非运行时 YAML
+配置文件）：
 
 ```yaml
-knowledge_base:
-  version_gc_enabled: false
-  version_retention_count: 10
-  version_retention_min_days: 30
-  version_gc_batch_size: 50
+resource_gc:
+  knowledge_base:
+    enabled: false
+    retention_count: 10
+    retention_min_days: 30
+    batch_size: 50
 ```
 
 scheduler 在 leader lease 下执行有界 GC。当前 active、被非终态 Run 引用的候选，以及被任意会话绑定引用的版本（**包括 `is_current=false` 的历史绑定**）都是本次回收的永久根。父版本指针对 GC 安全，删除顺序维护图数据、分块、清单、修订和逻辑文档的外键。只有没有任何保留版本引用时，共享修订/文档才可回收。GC 会报告保护数量以及回收行数/字节。

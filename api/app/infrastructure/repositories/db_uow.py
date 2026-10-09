@@ -4,11 +4,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Self
 
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.crypto import VersionedSecretCipher
 from app.application.security.authorization_context import get_authorization_context
-from app.domain.models.authorization import AuthorizationContext
+from app.domain.evaluation.errors import DatasetUnavailable
+from app.domain.models.authorization import AuthorizationContext, AuthorizationMode
 from app.domain.repositories.session_resource_binding_repository import (
     SessionResourceBindingRepository,
 )
@@ -21,8 +23,30 @@ from app.domain.repositories.uow import (
 from app.infrastructure.execution.postgres_inbox import PostgresInbox
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
+from .db_artifact_provenance_repository import DBArtifactProvenanceRepository
 from .db_artifact_repository import DBArtifactRepository
 from .db_audit_repository import DBAuditRepository
+from .db_evaluation_batch_repository import DBEvaluationBatchRepository
+from .db_evaluation_budget_control_repository import DBEvaluationBudgetControlRepository
+from .db_evaluation_budget_policy_repository import DBEvaluationBudgetPolicyRepository
+from .db_evaluation_budget_repository import DBEvaluationBudgetRepository
+from .db_evaluation_configuration_repository import (
+    DBEvaluationConfigurationRepository,
+    config_version_owner,
+)
+from .db_evaluation_dataset_repository import DBEvaluationDatasetRepository, dataset_version_owner
+from .db_evaluation_environment_repository import DBEvaluationEnvironmentRepository
+from .db_evaluation_execution_repository import DBEvaluationExecutionRepository
+from .db_evaluation_judge_repository import DBEvaluationJudgeRepository
+from .db_evaluation_lineage_repository import DBEvaluationLineageRepository
+from .db_evaluation_recording_repository import (
+    DBEvaluationRecordingRepository,
+    recording_version_owner,
+)
+from .db_evaluation_score_repository import DBEvaluationScoreRepository
+from .db_execution_comparison_repository import comparison_owner_validator
+from .db_execution_content_repository import DBExecutionContentRepository
+from .db_execution_usage_repository import DBExecutionUsageRepository
 from .db_file_repository import DBFileRepository
 from .db_inference_binding_repository import DBInferenceBindingRepository
 from .db_inference_endpoint_repository import DBInferenceEndpointRepository
@@ -41,6 +65,7 @@ from .db_oauth_identity_repository import DBOAuthIdentityRepository
 from .db_patrol_repository import DBPatrolRepository
 from .db_quota_repository import DBQuotaRepository
 from .db_refresh_token_repository import DBRefreshTokenRepository
+from .db_resource_pin_repository import DBResourcePinRepository
 from .db_scheduled_job_repository import DBScheduledJobRepository
 from .db_service_api_key_repository import DBServiceApiKeyRepository
 from .db_session_repository import DBSessionRepository
@@ -170,7 +195,56 @@ class DBUnitOfWork(IUnitOfWork):
         self.team = DBTeamRepository(db_session=self.db_session)
         self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
         self.user = DBUserRepository(db_session=self.db_session)
+        self.execution_content = DBExecutionContentRepository(self.db_session)
+        self.evaluation_batch = DBEvaluationBatchRepository(
+            self.db_session, signing_secret=self._database_authorization_signing_secret
+        )
+        self.evaluation_dataset = DBEvaluationDatasetRepository(self.db_session)
+        from .db_evaluation_archive_repository import DBEvaluationArchiveRepository
+
+        self.evaluation_archive = DBEvaluationArchiveRepository(
+            self, signing_secret=self._database_authorization_signing_secret
+        )
+        self.evaluation_score = DBEvaluationScoreRepository(self)
+        from .db_evaluation_summary_repository import DBEvaluationSummaryRepository
+
+        self.evaluation_summary = DBEvaluationSummaryRepository(
+            self, signing_secret=self._database_authorization_signing_secret
+        )
+
+        from .db_evaluation_review_repository import DBEvaluationReviewRepository
+
+        self.evaluation_review = DBEvaluationReviewRepository(
+            self, signing_secret=self._database_authorization_signing_secret
+        )
+        self.evaluation_judge = DBEvaluationJudgeRepository(self)
+        self.evaluation_configuration = DBEvaluationConfigurationRepository(self.db_session)
+        self.evaluation_recording = DBEvaluationRecordingRepository(self.db_session)
+        self.evaluation_lineage = DBEvaluationLineageRepository(self.db_session)
+        self.evaluation_physical_policy = DBEvaluationBudgetPolicyRepository(self.db_session)
+        self.execution_usage = DBExecutionUsageRepository(
+            self.db_session, signing_secret=self._database_authorization_signing_secret
+        )
+        self.evaluation_budget = DBEvaluationBudgetRepository(
+            self.db_session, signing_secret=self._database_authorization_signing_secret
+        )
+        self.evaluation_budget_control = DBEvaluationBudgetControlRepository(self.db_session)
+        self.evaluation_execution = DBEvaluationExecutionRepository(self.db_session)
+        self.evaluation_environment = DBEvaluationEnvironmentRepository(self.db_session)
+        self.resource_pins = DBResourcePinRepository(
+            self.db_session,
+            owner_validators={
+                "dataset_version": dataset_version_owner,
+                "recording_version": recording_version_owner,
+                "config_version": config_version_owner,
+                "comparison_revision": comparison_owner_validator(
+                    self._active_authorization_context.principal,
+                    signing_secret=self._database_authorization_signing_secret,
+                ),
+            },
+        )
         self.artifact = DBArtifactRepository(db_session=self.db_session)
+        self.artifact_provenance = DBArtifactProvenanceRepository(self.db_session)
         self.mcp_server = DBMCPServerRepository(
             db_session=self.db_session,
             cipher=self._secret_cipher,
@@ -233,6 +307,13 @@ class DBUnitOfWork(IUnitOfWork):
                 type(exc_val).__name__,
                 cleanup_error,
             )
+        if (
+            self._active_authorization_context is not None
+            and self._active_authorization_context.mode is AuthorizationMode.USER
+            and isinstance(exc_val, DBAPIError)
+            and "evaluation_resource_archived" in str(exc_val.orig)
+        ):
+            raise DatasetUnavailable("evaluation_resource_archived") from exc_val
 
     def _enter_nesting_guard(self) -> None:
         if self._read_only:

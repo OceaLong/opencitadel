@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1020" viewBox="0 0 1440 1020" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Ops Actuator · Validation, deduplication and patch</title>
+<desc id="desc">Current-marker duplicate detection precedes writes; it does not promise global exactly-once execution. get_capabilities is a separate read-only tool exposing tool/schema hashes, not a remediation mutation. A later key replaces the annotation. Old-key replay or concurrent callers cannot rely on a history ledger.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1020" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Ops Actuator · Validation, deduplication and patch</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Current-marker duplicate detection precedes writes; it does not promise global exactly-once execution.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="caller" data-target="validate" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="validate" data-target="dedup" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="dedup" data-target="patch" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="patch" data-target="applied" d="M 900,500 L 780,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="applied" data-target="result" d="M 480,500 L 360,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="dedup" data-target="skip" d="M 1320,230 L 1348,230 L 1348,770 L 1320,770" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="caller" data-node-id="caller" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Approved caller</text>
+<text x="78" y="240" font-size="15" class="secondary">Bearer token + idempotency_key</text>
+<text x="78" y="262" font-size="14" class="secondary">Kernel-owned remediation Activity</text>
+</g>
+<g id="validate" data-node-id="validate" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Request validation</text>
+<text x="498" y="240" font-size="15" class="secondary">Action / namespace / workload / replicas</text>
+<text x="498" y="262" font-size="14" class="secondary">Registered narrow patch contracts</text>
+</g>
+<g id="dedup" data-node-id="dedup" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Read current marker</text>
+<text x="918" y="240" font-size="15" class="secondary">Get workload before any patch</text>
+<text x="918" y="262" font-size="14" class="secondary">Compare remediation-key annotation</text>
+</g>
+<g id="patch" data-node-id="patch" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Apply selected patch</text>
+<text x="918" y="510" font-size="15" class="secondary">Restart annotation / replicas / rollback</text>
+<text x="918" y="532" font-size="14" class="secondary">Write current remediation-key marker</text>
+</g>
+<g id="applied" data-node-id="applied" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Applied receipt</text>
+<text x="498" y="510" font-size="15" class="secondary">Actual patch response</text>
+<text x="498" y="532" font-size="14" class="secondary">No read/patch CAS transaction</text>
+</g>
+<g id="result" data-node-id="result" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Return narrow result</text>
+<text x="78" y="510" font-size="15" class="secondary">Formal Activity receives outcome</text>
+<text x="78" y="532" font-size="14" class="secondary">Transport cannot decide Run success</text>
+</g>
+<g id="skip" data-node-id="skip" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">Skipped duplicate</text>
+<text x="918" y="780" font-size="15" class="secondary">Matching current annotation</text>
+<text x="918" y="802" font-size="14" class="secondary">skipped_idempotent; no patch</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">authorize</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">read target</text>
+<text x="1154" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">new key</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">patch result</text>
+<text x="420" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">receipt</text>
+<text x="1390" y="510" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">same key</text>
+<g data-graph-role="legend">
+<line x1="60" y1="892" x2="96" y2="892" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="897" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="892" x2="536" y2="892" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="897" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="892" x2="976" y2="892" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="897" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="940" font-size="15" class="secondary" data-graph-role="label">get_capabilities is a separate read-only tool exposing tool/schema hashes, not a remediation mutation.</text>
+<text x="60" y="964" font-size="15" class="secondary" data-graph-role="label">A later key replaces the annotation. Old-key replay or concurrent callers cannot rely on a history ledger.</text>
+</svg>

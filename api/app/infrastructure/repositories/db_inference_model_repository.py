@@ -47,7 +47,7 @@ class DBInferenceModelRepository(InferenceModelRepository):
 
     async def get_all(self, scope: OwnerScope | None = None) -> list[InferenceModel]:
         result = await self.db_session.execute(
-            self._model_stmt(scope).order_by(InferenceModelORM.created_at)
+            self._model_stmt(scope).order_by(InferenceModelORM.created_at, InferenceModelORM.id)
         )
         return [record.to_domain() for record in result.scalars().all()]
 

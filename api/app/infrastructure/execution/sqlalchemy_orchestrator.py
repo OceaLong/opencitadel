@@ -8,10 +8,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.ports.execution import CommandResult
+from app.domain.evaluation.execution_slots import ExecutionCapacityUnavailable
 from app.domain.execution.aggregate import (
     Aggregate,
     Decision,
@@ -67,9 +68,12 @@ class SqlAlchemyExecutionOrchestrator:
         inbox_factory: InboxFactory = PostgresInbox,
         snapshot_store_factory: SnapshotStoreFactory = PostgresSnapshotStore,
         now: Callable[[], datetime] | None = None,
+        formal_now: Callable[[], datetime] | None = None,
         claim_ttl: timedelta = timedelta(seconds=30),
         max_conflict_retries: int = 3,
         snapshot_interval: int = 50,
+        evaluation_execution=None,
+        activity_timeout=None,
     ) -> None:
         if claim_ttl <= timedelta(0):
             raise ValueError("claim_ttl must be positive")
@@ -77,6 +81,7 @@ class SqlAlchemyExecutionOrchestrator:
             raise ValueError("max_conflict_retries must be positive")
         if snapshot_interval <= 0:
             raise ValueError("snapshot_interval must be positive")
+        self._activity_timeout = activity_timeout
         self._session_factory = session_factory
         self._aggregates = dict(aggregates)
         self._authorization = authorization
@@ -95,14 +100,23 @@ class SqlAlchemyExecutionOrchestrator:
         self._inbox_factory = inbox_factory
         self._snapshot_store_factory = snapshot_store_factory
         self._now = now or (lambda: datetime.now(UTC))
+        # Controlled historical construction may date formal facts separately
+        # from operational inbox leases. Ordinary callers retain one clock.
+        self._formal_now = formal_now or self._now
         self._claim_ttl = claim_ttl
         self._max_conflict_retries = max_conflict_retries
         self._snapshot_interval = snapshot_interval
+        self._evaluation_execution = evaluation_execution
 
     async def handle(self, command: CommandEnvelope) -> CommandResult:
         async with self._session_factory() as session:
             try:
                 await configure_session_authorization(session, self._authorization)
+                execution_lock = (
+                    await self._evaluation_execution.lock_command(session, command)
+                    if self._evaluation_execution is not None
+                    else None
+                )
                 inbox = self._inbox_factory(session)
                 claim = await inbox.claim(
                     command,
@@ -123,10 +137,13 @@ class SqlAlchemyExecutionOrchestrator:
                     await session.commit()
                     return result
 
-                result = await self._process(session, command)
+                result = await self._process(session, command, execution_lock=execution_lock)
                 await inbox.complete(result, now=self._now())
                 await session.commit()
                 return result
+            except ExecutionCapacityUnavailable:
+                await session.rollback()
+                return self._deferred(command)
             except CommandInProgressError:
                 # Another worker holds an active claim. This is a benign
                 # concurrency signal, not a fatal error: roll back without
@@ -143,6 +160,8 @@ class SqlAlchemyExecutionOrchestrator:
         self,
         session: AsyncSession,
         command: CommandEnvelope,
+        *,
+        execution_lock=None,
     ) -> CommandResult:
         aggregate = self._aggregates.get(command.stream_type)
         if aggregate is None:
@@ -167,6 +186,51 @@ class SqlAlchemyExecutionOrchestrator:
             }
         )
 
+        usage_receipt = None
+        if command.command_type == "RecordModelUsage":
+            from app.infrastructure.execution.postgres_execution_usage import authorize_usage
+
+            usage_receipt = await authorize_usage(session, normalized_command)
+            if usage_receipt is None:
+                return self._rejected(command, RejectionCode.INVALID_TRANSITION)
+            if usage_receipt.get("event_position") is not None:
+                return CommandResult(
+                    command_id=command.command_id,
+                    status="accepted",
+                    first_event_position=usage_receipt["event_position"],
+                    last_event_position=usage_receipt["event_position"],
+                    rejection_code=None,
+                )
+        production_receipt = None
+        if command.command_type == "RecordArtifactVersionProduced":
+            from app.infrastructure.execution.postgres_artifact_provenance import (
+                authorize_production,
+            )
+
+            production_receipt = await authorize_production(session, normalized_command)
+            if production_receipt is None:
+                return self._rejected(command, RejectionCode.INVALID_TRANSITION)
+            if production_receipt["event_id"] is not None:
+                return CommandResult(
+                    command_id=command.command_id,
+                    status="accepted",
+                    first_event_position=production_receipt["event_position"],
+                    last_event_position=production_receipt["event_position"],
+                    rejection_code=None,
+                )
+        if self._activity_timeout is not None and self._activity_timeout.applies(
+            normalized_command
+        ):
+            # Match append ordering after C2/inbox locks; call-start cannot race
+            # the accepted-state safety decision and enqueue in this transaction.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {
+                    "key": PostgresEventStore._scope_advisory_lock_key(
+                        command.owner_user_id, command.team_id
+                    )
+                },
+            )
         store = self._event_store_factory(session)
         snapshot_store = self._snapshot_store_factory(session)
         stream = StreamRef(
@@ -227,6 +291,10 @@ class SqlAlchemyExecutionOrchestrator:
                         snapshot=snapshot,
                         stream_id=stream.stream_id,
                     )
+            if self._activity_timeout is not None and await self._activity_timeout.redirect(
+                session, normalized_command, replayed.state
+            ):
+                return self._rejected(command, RejectionCode.INVALID_TRANSITION)
             try:
                 decision = aggregate.decide(replayed.state, normalized_command)
             except UnknownRunCommandError:
@@ -249,7 +317,7 @@ class SqlAlchemyExecutionOrchestrator:
                         team_id=command.team_id,
                         correlation_id=command.correlation_id,
                         causation_id=command.command_id,
-                        occurred_at=self._now(),
+                        occurred_at=self._formal_now(),
                     ),
                 )
             except OptimisticConcurrencyError:
@@ -258,6 +326,45 @@ class SqlAlchemyExecutionOrchestrator:
             except PayloadTooLargeError:
                 return self._rejected(command, RejectionCode.PAYLOAD_TOO_LARGE)
 
+            from app.infrastructure.execution.postgres_execution_content import (
+                bind_new_content_events,
+            )
+
+            await bind_new_content_events(session, appended.events)
+            if usage_receipt is not None:
+                from app.infrastructure.execution.postgres_execution_usage import (
+                    mark_usage_publication,
+                )
+
+                await mark_usage_publication(session, appended.events[0])
+            if production_receipt is not None:
+                produced = appended.events[0]
+                await session.execute(
+                    text(
+                        "UPDATE artifact_production_receipts SET event_id=:event,event_position=:position,reconciliation_status='published',updated_at=CURRENT_TIMESTAMP WHERE operation_id=:operation AND event_id IS NULL"
+                    ),
+                    {
+                        "event": produced.event_id,
+                        "position": produced.position,
+                        "operation": production_receipt["operation_id"],
+                    },
+                )
+            if self._evaluation_execution is not None and execution_lock is not None:
+                accepted_state = replay(
+                    aggregate,
+                    appended.events,
+                    snapshot=ReplaySnapshot(
+                        stream_id=command.stream_id,
+                        stream_version=replayed.stream_version,
+                        state=replayed.state,
+                        state_hash=replayed.state_hash,
+                        last_event_hash=replayed.last_event_hash,
+                    ),
+                    stream_id=command.stream_id,
+                ).state
+                await self._evaluation_execution.accepted(
+                    session, normalized_command, accepted_state, execution_lock
+                )
             await self._write_critical_records(
                 session,
                 command=command,

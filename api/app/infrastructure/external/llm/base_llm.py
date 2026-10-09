@@ -199,53 +199,122 @@ def openai_content_to_gemini_parts(content: Any) -> list[dict[str, Any]]:
     return parts or [{"text": ""}]
 
 
-def _int_from_path(raw: dict[str, Any], *path: str) -> int:
-    value: Any = raw
-    for key in path:
-        if not isinstance(value, dict):
-            return 0
-        value = value.get(key)
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
+def normalize_usage(raw: dict[str, Any] | None, *, provider: str | None = None) -> dict[str, Any]:
+    """Inclusive canonical totals plus nullable native categories (never add twice)."""
+    raw = raw if isinstance(raw, dict) else {}
 
+    def count(*path):
+        value = raw
+        for key in path:
+            if not isinstance(value, dict):
+                return None
+            value = value.get(key)
+        return value if type(value) is int and value >= 0 else None
 
-def normalize_usage(raw: dict[str, Any] | None) -> dict[str, int]:
-    """统一 usage 字段为 prompt/completion/total/cache tokens。"""
-    if not raw:
-        return {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "cached_tokens": 0,
-            "cache_write_tokens": 0,
+    def add(*values):
+        return None if any(v is None for v in values) else sum(values)
+
+    provider = provider or (
+        "gemini"
+        if any(k.endswith("TokenCount") for k in raw)
+        else "anthropic"
+        if "input_tokens" in raw
+        else "openai"
+    )
+    if provider == "anthropic":
+        uncached = count("input_tokens")
+        cached, written = count("cache_read_input_tokens"), count("cache_creation_input_tokens")
+        # Optional omitted cache fields are known inapplicable to non-cache calls;
+        # retain their absent native coverage separately.
+        prompt = add(
+            uncached,
+            cached if "cache_read_input_tokens" in raw else 0,
+            written if "cache_creation_input_tokens" in raw else 0,
+        )
+        completion = count("output_tokens")
+        reasoning = None
+        visible = None
+        native_total = count("total_tokens")
+    elif provider == "gemini":
+        prompt, cached = count("promptTokenCount"), count("cachedContentTokenCount")
+        written = None
+        visible = (
+            count("candidatesTokenCount")
+            if "candidatesTokenCount" in raw
+            else count("completionTokenCount")
+        )
+        reasoning = count("thoughtsTokenCount")
+        completion = add(visible, reasoning if "thoughtsTokenCount" in raw else 0)
+        native_total = count("totalTokenCount")
+        uncached = (
+            prompt - (cached or 0)
+            if prompt is not None and (cached is None or cached <= prompt)
+            else None
+        )
+    else:
+        prompt, completion = count("prompt_tokens"), count("completion_tokens")
+        cached = count("prompt_tokens_details", "cached_tokens")
+        if cached is None and "prompt_cache_hit_tokens" in raw:
+            cached = count("prompt_cache_hit_tokens")
+        written = count("prompt_cache_miss_tokens")
+        reasoning = count("completion_tokens_details", "reasoning_tokens")
+        visible = (
+            completion - reasoning
+            if completion is not None and reasoning is not None and reasoning <= completion
+            else None
+        )
+        uncached = (
+            prompt - (cached or 0) - (written or 0)
+            if prompt is not None and (cached or 0) + (written or 0) <= prompt
+            else None
+        )
+        native_total = count("total_tokens")
+
+    def category_state(*path):
+        value = raw
+        for key in path:
+            if not isinstance(value, dict) or key not in value or value[key] is None:
+                return "absent"
+            value = value[key]
+        return "reported" if type(value) is int and value >= 0 else "malformed"
+
+    if provider == "anthropic":
+        states = {
+            "cached_tokens": category_state("cache_read_input_tokens"),
+            "cache_write_tokens": category_state("cache_creation_input_tokens"),
+            "reasoning_tokens": "inapplicable",
         }
-    prompt = int(
-        raw.get("prompt_tokens") or raw.get("input_tokens") or raw.get("promptTokenCount") or 0
-    )
-    completion = int(
-        raw.get("completion_tokens")
-        or raw.get("output_tokens")
-        or raw.get("completionTokenCount")
-        or raw.get("candidatesTokenCount")
-        or 0
-    )
-    total = int(raw.get("total_tokens") or raw.get("totalTokenCount") or (prompt + completion))
-    cached = int(
-        _int_from_path(raw, "prompt_tokens_details", "cached_tokens")
-        or raw.get("prompt_cache_hit_tokens")
-        or raw.get("cache_read_input_tokens")
-        or raw.get("cachedContentTokenCount")
-        or 0
-    )
-    cache_write = int(
-        raw.get("prompt_cache_miss_tokens") or raw.get("cache_creation_input_tokens") or 0
-    )
+    elif provider == "gemini":
+        states = {
+            "cached_tokens": category_state("cachedContentTokenCount"),
+            "cache_write_tokens": "inapplicable",
+            "reasoning_tokens": category_state("thoughtsTokenCount"),
+        }
+    else:
+        states = {
+            "cached_tokens": category_state("prompt_cache_hit_tokens")
+            if "prompt_cache_hit_tokens" in raw
+            else category_state("prompt_tokens_details", "cached_tokens"),
+            "cache_write_tokens": category_state("prompt_cache_miss_tokens")
+            if "prompt_cache_miss_tokens" in raw or "prompt_cache_hit_tokens" in raw
+            else "inapplicable",
+            "reasoning_tokens": category_state("completion_tokens_details", "reasoning_tokens"),
+        }
+    total = add(prompt, completion)
     return {
+        "category_states": states,
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": total,
         "cached_tokens": cached,
-        "cache_write_tokens": cache_write,
+        "cache_write_tokens": written,
+        "reasoning_tokens": reasoning,
+        "uncached_tokens": uncached,
+        "visible_output_tokens": visible,
+        "native_total_tokens": native_total,
+        "provider": provider,
+        "cache_metric_source": "provider",
+        "total_consistent": None
+        if native_total is None or total is None
+        else native_total == total,
     }

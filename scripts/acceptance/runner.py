@@ -16,14 +16,17 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
 from typing import Protocol, TextIO
 from urllib.parse import urlparse
+from uuid import uuid4
 
+from scripts.acceptance.capacity import prepare_capacity_evidence
 from scripts.acceptance.manifest import (
     PLAYWRIGHT_PROJECT_NAMES,
     PRODUCTION_IMAGE_NAMES,
@@ -50,6 +53,7 @@ _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9-]{2,47}$")
 _BEARER = re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+")
 _PRODUCTION_IMAGES = {
     "api": "opencitadel-api",
+    "sandbox-broker": "opencitadel-sandbox-broker",
     "execution-kernel": "opencitadel-execution-kernel",
     "migrate": "opencitadel-migrate",
     "ui": "opencitadel-ui",
@@ -61,6 +65,7 @@ _BUILD_SERVICES = (
     "opencitadel-sandbox",
     "opencitadel-migrate",
     "opencitadel-api",
+    "opencitadel-sandbox-broker",
     "opencitadel-execution-kernel",
     "opencitadel-ui",
     "opencitadel-ops-collector",
@@ -238,6 +243,8 @@ class OwnedResources:
     networks: tuple[str, ...] = ()
     volumes: tuple[str, ...] = ()
     dynamic_sandboxes: tuple[str, ...] = ()
+    evaluation_containers: tuple[str, ...] = ()
+    evaluation_networks: tuple[str, ...] = ()
 
     @property
     def empty(self) -> bool:
@@ -419,6 +426,38 @@ def _dynamic_sandbox_identity(
         )
 
 
+def _evaluation_identity(commands, config, repository_root, kind, identity):
+    lines = _docker_query(
+        commands,
+        repository_root,
+        ["docker", kind, "inspect", "--format", "{{json .}}", identity],
+        "inspect evaluation ownership",
+    )
+    try:
+        if len(lines) != 1:
+            raise ValueError("one exact record required")
+        document = json.loads(lines[0])
+        labels = document["Config"]["Labels"] if kind == "container" else document["Labels"]
+        expected = {
+            "opencitadel.e04.acceptance.project": config.project_name,
+            "opencitadel.e04.acceptance.run": config.run_id,
+        }
+        if (
+            document["Id"] != identity
+            or any(labels.get(key) != value for key, value in expected.items())
+            or not re.fullmatch(r"e04-[a-f0-9]{40}", labels.get("opencitadel.e04.namespace", ""))
+            or not re.fullmatch(r"[0-9a-f-]{36}", labels.get("opencitadel.e04.lease", ""))
+            or not re.fullmatch(r"[1-9][0-9]*", labels.get("opencitadel.e04.generation", ""))
+            or not labels.get("opencitadel.e04.role")
+        ):
+            raise ValueError("incomplete ownership")
+        return labels
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OwnershipError(
+            f"evaluation {kind} {identity} does not match exact acceptance ownership"
+        ) from exc
+
+
 def owned_resources(
     commands: CommandRunner,
     config: AcceptanceConfig,
@@ -466,11 +505,44 @@ def owned_resources(
     for container_id in dynamic:
         _dynamic_sandbox_identity(commands, config, repository_root, container_id)
     dynamic_ids = frozenset(dynamic)
+    evaluation = {}
+    for kind in ("container", "network"):
+        filters = [
+            "--filter",
+            f"label=opencitadel.e04.acceptance.project={config.project_name}",
+            "--filter",
+            f"label=opencitadel.e04.acceptance.run={config.run_id}",
+            "--filter",
+            "label=opencitadel.e04.namespace",
+        ]
+        args = [
+            "docker",
+            kind,
+            "ls",
+            "-q",
+            "--no-trunc",
+            *(["-a"] if kind == "container" else []),
+            *filters,
+        ]
+        evaluation[kind] = _docker_query(
+            commands, repository_root, args, "query evaluation ownership"
+        )
+        for identity in evaluation[kind]:
+            _evaluation_identity(commands, config, repository_root, kind, identity)
     return OwnedResources(
-        containers=tuple(item for item in containers if item not in dynamic_ids),
-        networks=networks,
+        containers=tuple(
+            dict.fromkeys(
+                [
+                    *(item for item in containers if item not in dynamic_ids),
+                    *evaluation["container"],
+                ]
+            )
+        ),
+        networks=tuple(dict.fromkeys([*networks, *evaluation["network"]])),
         volumes=volumes,
         dynamic_sandboxes=dynamic,
+        evaluation_containers=evaluation["container"],
+        evaluation_networks=evaluation["network"],
     )
 
 
@@ -508,6 +580,7 @@ class AcceptanceRunner:
         readiness_timeout_seconds: int = 300,
         shutdown_timeout_seconds: int = 45,
         fault: str = "none",
+        capacity_proof_context=None,
         sandbox_event_recorder_factory: (
             Callable[[AcceptanceConfig, Path], SandboxEventRecorder] | None
         ) = None,
@@ -527,6 +600,7 @@ class AcceptanceRunner:
         self.readiness_timeout_seconds = readiness_timeout_seconds
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.fault = fault
+        self.capacity_proof_context = capacity_proof_context
         self._sandbox_event_recorder_factory = sandbox_event_recorder_factory
         self._cancel_requested = False
         self._started = False
@@ -553,6 +627,7 @@ class AcceptanceRunner:
             {
                 "COMPOSE_PROJECT_NAME": self.config.project_name,
                 "ACCEPTANCE_PROJECT_ID": self.config.project_name,
+                "ACCEPTANCE_HOST_PYTHON": sys.executable,
                 "ACCEPTANCE_RUN_ID": self.config.run_id,
                 "SANDBOX_NAME_PREFIX": f"{self.config.project_name}-sandbox",
                 "SANDBOX_NETWORK": compose_network_name(
@@ -567,6 +642,7 @@ class AcceptanceRunner:
                 "OAUTH_REDIRECT_BASE": f"{self.config.base_url}/api/auth/oauth",
                 "PLAYWRIGHT_BASE_URL": self.config.base_url,
                 "ACCEPTANCE_EVIDENCE_DIR": str(self.config.evidence_dir),
+                "EVALUATION_ACCEPTANCE_OWNER": self.config.project_name,
                 "ACCEPTANCE_PLAYWRIGHT_PROJECTS": ",".join(
                     self.playwright_projects or sorted(PLAYWRIGHT_PROJECT_NAMES)
                 ),
@@ -579,6 +655,10 @@ class AcceptanceRunner:
         return [
             "docker",
             "compose",
+            "-f",
+            "docker-compose.yml",
+            "-f",
+            "scripts/acceptance/compose.loopback.yml",
             "--project-name",
             self.config.project_name,
             "--env-file",
@@ -714,6 +794,31 @@ class AcceptanceRunner:
             acceptance_provider=_lines(provider_result, "inspect acceptance provider")[0],
         )
 
+    def _write_evaluation_inventory(self, images: ImageEvidence) -> None:
+        # Trusted local fixture images are explicit deployment prerequisites.
+        # Never pull or accept an HTTP-supplied capability/image identity.
+        body = json.loads(
+            (self.repository_root / "deploy/evaluation/local-fixture.example.json").read_text()
+        )
+        body["images"] = [images.production["sandbox"]]
+        # Pin the fixed Python fixture to the locally built sandbox content ID.
+        body["fixture_image"] = images.production["sandbox"]
+        for key in ("fixture_image", "bootstrap_image"):
+            actual = _docker_query(
+                self.commands,
+                self.repository_root,
+                ["docker", "image", "inspect", body[key], "--format", "{{.Id}}"],
+                "verify pinned evaluation helper image",
+            )
+            if actual != (body[key],):
+                raise RunnerFailure("evaluation inventory", f"pinned {key} unavailable")
+        (self.config.evidence_dir / "evaluation-environment.json").write_text(
+            json.dumps(body, indent=2) + "\n"
+        )
+        (self.config.evidence_dir / "evaluation-budget.json").write_text(
+            json.dumps({"revision": "acceptance-fixture-v1", "acceptance_fixture": True}) + "\n"
+        )
+
     def _capture_services(self, ready_at: str) -> tuple[ServiceEvidence, ...]:
         result = self.commands.run(
             [*self._compose, "ps", "--all", "--format", "json"],
@@ -770,6 +875,88 @@ class AcceptanceRunner:
             result.stdout.strip().split(maxsplit=1)[0] if result.returncode == 0 else "unavailable"
         )
         return MigrationEvidence(alembic_head=head or "unavailable")
+
+    def _capture_capacity_migration(self) -> str:
+        result = self._run(
+            [*self._compose, "exec", "-T", "opencitadel-api", "python", "-m", "alembic", "current"],
+            "read current capacity database migration",
+        )
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if len(lines) != 1 or not re.fullmatch(r"[a-zA-Z0-9_]+(?: \(head\))?", lines[0]):
+            raise RuntimeError("capacity requires exactly one actual database migration head")
+        return lines[0].split()[0]
+
+    def _prepare_strict_binding(self, git_evidence, images):
+        from scripts.acceptance.strict_bridge import assert_kernel_identity, atomic_json, digest
+
+        ids = _lines(
+            self._run(
+                [*self._compose, "ps", "-q", "opencitadel-execution-kernel"],
+                "strict kernel identity",
+            ),
+            "strict kernel identity",
+        )
+        if len(ids) != 1:
+            raise RuntimeError("strict bridge requires exactly one owned kernel")
+        document = json.loads(
+            self._run(
+                ["docker", "inspect", "--format", "{{json .}}", ids[0]], "strict kernel inspection"
+            ).stdout
+        )
+        binding = {
+            "schema_version": 1,
+            "invocation_id": str(uuid4()),
+            "run_id": self.config.run_id,
+            "project": self.config.project_name,
+            **asdict(git_evidence),
+            "kernel_image": images.production["execution-kernel"],
+            "kernel_container": document["Id"],
+            "migration": self._capture_capacity_migration(),
+            "inventory_sha256": digest(self.config.evidence_dir / "evaluation-environment.json"),
+            "budget_inventory_sha256": digest(self.config.evidence_dir / "evaluation-budget.json"),
+        }
+        assert_kernel_identity(document, binding, running=True)
+        atomic_json(self.config.evidence_dir / "strict-binding.json", binding)
+        self._environment["ACCEPTANCE_STRICT_INVOCATION_ID"] = binding["invocation_id"]
+
+    def _validate_strict_receipt(self):
+        from scripts.acceptance.strict_bridge import read_json, validate_evidence
+
+        root = self.config.evidence_dir
+        binding = read_json(root / "strict-binding.json")
+        bootstrap = read_json(root / "strict-bootstrap.json")
+        report = read_json(root / "strict-report.json")
+        receipt = read_json(root / "strict-consumer.json")
+        expected = validate_evidence(report, binding, bootstrap, root)
+        if receipt != {**expected, "kernel_restored": True}:
+            raise RuntimeError("strict consumer receipt changed or restoration unproved")
+
+    def _run_strict_consumers(self) -> None:
+        """Consume this invocation only after its native producer and receipt complete."""
+        stage = "strict execution consumers"
+        junit = self.config.evidence_dir / "strict-pytest.xml"
+        if junit.exists():
+            raise RunnerFailure(stage, "current invocation pytest evidence already exists")
+        self._run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/app/integration/test_execution_visualization_closed_loop.py",
+                f"--junitxml={junit}",
+            ],
+            stage,
+            cwd=self.repository_root / "api",
+        )
+        try:
+            document = ET.parse(junit).getroot()
+        except (OSError, ET.ParseError) as error:
+            raise RunnerFailure(stage, "missing or invalid current pytest evidence") from error
+        if len(list(document.iter("testcase"))) != 6 or any(
+            list(document.iter(tag)) for tag in ("skipped", "failure", "error")
+        ):
+            raise RunnerFailure(stage, "all six current invocation consumers must pass; no skips")
 
     def _capture_sandbox_lifecycle(
         self,
@@ -849,6 +1036,34 @@ class AcceptanceRunner:
                 return None
 
         def remove_dynamic(resources: OwnedResources) -> None:
+            if self.config.disposable:
+                # Producers have stopped. Reinspect exact ownership before every
+                # destructive operation; container removal precedes network removal.
+                for kind, identities in (
+                    ("container", resources.evaluation_containers),
+                    ("network", resources.evaluation_networks),
+                ):
+                    for identity in identities:
+                        try:
+                            _evaluation_identity(
+                                self.commands, self.config, self.repository_root, kind, identity
+                            )
+                            result = self.commands.run(
+                                [
+                                    "docker",
+                                    kind,
+                                    "rm",
+                                    *(["-f"] if kind == "container" else []),
+                                    identity,
+                                ],
+                                cwd=self.repository_root,
+                            )
+                            if result.returncode:
+                                errors.append(
+                                    f"remove evaluation {kind} {identity}: {result.stderr.strip()}"
+                                )
+                        except (OwnershipError, RunnerFailure) as exc:
+                            errors.append(str(exc))
             for container_id in resources.dynamic_sandboxes:
                 result = self.commands.run(
                     ["docker", "rm", "-f", container_id], cwd=self.repository_root
@@ -861,6 +1076,7 @@ class AcceptanceRunner:
         # then visible here and cannot be replaced by a new one.
         before = inspect_owned()
         if before is not None:
+            self._write_cleanup_inventory("before", before)
             remove_dynamic(before)
 
         down_args = [*self._compose, "down", "--remove-orphans"]
@@ -893,7 +1109,24 @@ class AcceptanceRunner:
             errors.append("owned runtime residue remains after cleanup")
         if self.config.disposable and residue.volumes:
             errors.append("owned volume residue remains after disposable cleanup")
+        self._write_cleanup_inventory("after", residue, errors=errors)
         return residue, errors
+
+    def _write_cleanup_inventory(self, phase, resources, *, errors=()):
+        destination = self.config.evidence_dir / f"evaluation-teardown-{phase}.json"
+        destination.write_text(
+            json.dumps(
+                {
+                    "disposable": self.config.disposable,
+                    "containers": resources.evaluation_containers,
+                    "networks": resources.evaluation_networks,
+                    "errors": list(errors),
+                    "authoritative_lease_state_changed": False,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
     def _write_manifest(
         self,
@@ -916,6 +1149,27 @@ class AcceptanceRunner:
                 ("playwright-json", self.config.evidence_dir / "playwright/results.json"),
                 ("logs", self.config.evidence_dir / "logs/stack.log"),
             )
+            if path.is_file()
+        )
+        # Retain the capacity contract and every copied raw artifact, plus the
+        # exact product-retention outcomes. These are not physical-deletion proof.
+        supplemental = [
+            self.config.evidence_dir / "capacity-validation.json",
+            self.config.evidence_dir / "evaluation-lifecycle.json",
+        ]
+        supplemental.extend(self.config.evidence_dir.glob("strict-*.json"))
+        supplemental.extend(self.config.evidence_dir.glob("strict-*.xml"))
+        supplemental.extend(self.config.evidence_dir.glob("evaluation-lifecycle-accounting-*.json"))
+        supplemental.extend(self.config.evidence_dir.glob("protected-retention-*.json"))
+        supplemental.extend(self.config.evidence_dir.glob("dispatch-*.json"))
+        supplemental.extend(self.config.evidence_dir.glob("dispatch-*.ndjson"))
+        for directory in ("capacity", "retained-resources"):
+            root = self.config.evidence_dir / directory
+            if root.is_dir():
+                supplemental.extend(path for path in root.rglob("*") if path.is_file())
+        artifacts += tuple(
+            ArtifactInput(kind="supplemental-evidence", path=path)
+            for path in supplemental
             if path.is_file()
         )
         status = "failed" if failure_reason else "passed"
@@ -980,6 +1234,7 @@ class AcceptanceRunner:
         git_evidence = GitEvidence(revision="0" * 40, dirty_tree_digest="0" * 64)
         sandbox_event_recorder: SandboxEventRecorder | None = None
         evidence_created = False
+        capacity_errors: list[str] = []
         try:
             self._preflight()
             git_evidence = self._capture_git()
@@ -997,6 +1252,7 @@ class AcceptanceRunner:
             )
             self._write_lifecycle("images_built")
             images = self._capture_images()
+            self._write_evaluation_inventory(images)
             # Compose may create containers, networks, and volumes before
             # `up --wait` reports an unhealthy service. Cleanup ownership
             # therefore begins with the attempt, not with a successful return.
@@ -1007,7 +1263,30 @@ class AcceptanceRunner:
             self._wait_ready()
             self._write_lifecycle("stack_ready")
             self._raise_if_cancelled()
+            if not self.playwright_projects or "execution" in self.playwright_projects:
+                self._prepare_strict_binding(git_evidence, images)
+                report = self._environment.get("ACCEPTANCE_CAPACITY_REPORT")
+                fixture = self._environment.get("ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST")
+                capacity_receipt = prepare_capacity_evidence(
+                    report_path=Path(report) if report else None,
+                    fixture_path=Path(fixture) if fixture else None,
+                    evidence_root=self.config.evidence_dir,
+                    build={
+                        **asdict(git_evidence),
+                        "images": asdict(images),
+                        "migration": self._capture_capacity_migration(),
+                    },
+                    run_id=self.config.run_id,
+                    project=self.config.project_name,
+                    proof_context=self.capacity_proof_context,
+                )
+                capacity_errors = capacity_receipt["errors"]
             self._run_playwright()
+            if not self.playwright_projects or "execution" in self.playwright_projects:
+                self._validate_strict_receipt()
+                self._run_strict_consumers()
+            if capacity_errors:
+                raise RuntimeError("AC21 capacity: " + "; ".join(capacity_errors))
         except (OSError, RuntimeError, ValueError) as exc:
             failure_reason = str(exc)
         finally:

@@ -12,6 +12,7 @@ from app.domain.models.inference import (
     InferenceModelKind,
     ResolvedInferenceModel,
 )
+from app.infrastructure.external.llm.dispatch import physical_send
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
     create_ssrf_safe_async_client,
@@ -52,10 +53,11 @@ class OpenAICompatibleEmbedding:
 
     async def embed_batch(self, contents: Sequence[str]) -> list[list[float]]:
         try:
-            response = await self._client.embeddings.create(
-                model=self._model_name,
-                input=list(contents),
-                timeout=self._timeout,
+            payload = {"model": self._model_name, "input": list(contents)}
+            response = await physical_send(
+                lambda: self._client.embeddings.create(**payload, timeout=self._timeout),
+                payload,
+                provider="openai",
             )
         except (OpenAIError, OSError, TimeoutError) as exc:
             raise ServerRequestsError(
@@ -64,3 +66,6 @@ class OpenAICompatibleEmbedding:
             ) from exc
         ordered = sorted(response.data, key=lambda item: item.index)
         return [[float(value) for value in item.embedding] for item in ordered]
+
+    async def aclose(self):
+        await self._client.close()

@@ -1,4 +1,4 @@
-import { del, get, post } from "./fetch";
+import { del, get, post, type RequestOptions } from "./fetch";
 import type {
   DeliveryArtifact,
   DeliveryArtifactContent,
@@ -7,27 +7,32 @@ import type {
 } from "./types";
 
 export const artifactsApi = {
-  listBySession: (sessionId: string): Promise<DeliveryArtifactsData> => {
-    return get<DeliveryArtifactsData>(`/sessions/${sessionId}/artifacts`);
+  listBySession: (sessionId: string, options?: RequestOptions): Promise<DeliveryArtifactsData> => {
+    return get<DeliveryArtifactsData>(`/sessions/${sessionId}/artifacts`, undefined, options);
   },
 
-  get: (artifactId: string): Promise<DeliveryArtifact> => {
-    return get<DeliveryArtifact>(`/artifacts/${artifactId}`);
+  get: (artifactId: string, options?: RequestOptions): Promise<DeliveryArtifact> => {
+    return get<DeliveryArtifact>(`/artifacts/${artifactId}`, undefined, options);
   },
 
-  getContent: (artifactId: string, version?: number): Promise<DeliveryArtifactContent> => {
+  getContent: (
+    artifactId: string,
+    version?: number,
+    options?: RequestOptions,
+  ): Promise<DeliveryArtifactContent> => {
     return get<DeliveryArtifactContent>(
       `/artifacts/${artifactId}/content`,
       version != null ? { version } : undefined,
+      options,
     );
   },
 
-  share: (artifactId: string): Promise<DeliveryArtifactShare> => {
-    return post<DeliveryArtifactShare>(`/artifacts/${artifactId}/share`, {});
+  share: (artifactId: string, options?: RequestOptions): Promise<DeliveryArtifactShare> => {
+    return post<DeliveryArtifactShare>(`/artifacts/${artifactId}/share`, {}, options);
   },
 
-  revokeShare: (artifactId: string): Promise<{ revoked: boolean }> => {
-    return del<{ revoked: boolean }>(`/artifacts/${artifactId}/share`);
+  revokeShare: (artifactId: string, options?: RequestOptions): Promise<{ revoked: boolean }> => {
+    return del<{ revoked: boolean }>(`/artifacts/${artifactId}/share`, options);
   },
 
   getPublicContent: (token: string): Promise<DeliveryArtifactContent> => {

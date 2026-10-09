@@ -264,6 +264,7 @@ class HybridRetriever:
                     parent=None,
                     score=fused + record.score * 0.001,
                     citation=KnowledgeCitation(
+                        knowledge_base_id=kb_id,
                         version_id=version_id,
                         document_revision_id=record.document_revision_id,
                         doc_id=record.document.id,
@@ -315,6 +316,7 @@ class HybridRetriever:
                     parent=None,
                     score=0.0,
                     citation=KnowledgeCitation(
+                        knowledge_base_id=kb_id,
                         version_id=version_id,
                         document_revision_id=record.document_revision_id,
                         doc_id=record.document.id,
@@ -353,6 +355,7 @@ class HybridRetriever:
             citation = item.citation
             if parent is not None:
                 citation = KnowledgeCitation(
+                    knowledge_base_id=kb_id,
                     version_id=citation.version_id,
                     document_revision_id=citation.document_revision_id,
                     doc_id=citation.doc_id,

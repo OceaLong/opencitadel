@@ -14,10 +14,10 @@ Multi-user collaboration via team workspaces. Resources (sessions, knowledge bas
 
 OpenCitadel has two invitation types:
 
-| Type | Issuer | Link | Purpose |
-|------|--------|------|---------|
+| Type            | Issuer                              | Link                         | Purpose              |
+| --------------- | ----------------------------------- | ---------------------------- | -------------------- |
 | Platform invite | Platform admin `/admin/invitations` | `/register?invite_token=...` | Platform access only |
-| Team invite | Team owner/admin `/teams/[id]` | `/invitations/{token}` | Join a team |
+| Team invite     | Team owner/admin `/teams/[id]`      | `/invitations/{token}`       | Join a team          |
 
 Team invites accept an optional **invitee email** (hybrid security model):
 
@@ -26,21 +26,7 @@ Team invites accept an optional **invitee email** (hybrid security model):
 
 The login page supports safe `?redirect=` return paths; OAuth login also carries `redirect` and `team_invite_token`.
 
-```mermaid
-sequenceDiagram
-  participant Admin as Team admin
-  participant User as Invitee
-  participant Page as /invitations/token
-
-  Admin->>Page: Generate invite (optional email)
-  alt New user with email-bound invite
-    User->>Page: Register and set password
-    Page->>User: Create account and join team
-  else Existing user
-    User->>Page: Sign in (with redirect)
-    Page->>User: Accept invite and join team
-  end
-```
+![team invitation](../assets/diagrams/team-invitation.png)
 
 ## Workspace scoping
 
@@ -52,65 +38,47 @@ X-Workspace-Id: <team_id>
 
 If the header is omitted, the server uses **personal scope** (`OwnerScope.personal(user_id)`).
 
-| Scope | Header | Resource ownership |
-|-------|--------|-------------------|
-| Personal | (none) | `owner_user_id = current user` |
-| Team | `X-Workspace-Id` | `team_id = workspace` |
+| Scope    | Header           | Resource ownership             |
+| -------- | ---------------- | ------------------------------ |
+| Personal | (none)           | `owner_user_id = current user` |
+| Team     | `X-Workspace-Id` | `team_id = workspace`          |
 
 The server validates `principal.team_roles` before accepting a team workspace.
 
-```mermaid
-sequenceDiagram
-  participant User
-  participant Switcher as WorkspaceSwitcher
-  participant LS as localStorage
-  participant API as fetch.ts
+![workspace switch](../assets/diagrams/workspace-switch.png)
 
-  User->>Switcher: select team workspace
-  Switcher->>LS: write ACTIVE_WORKSPACE_KEY
-  Switcher->>User: window.location.reload()
-  User->>API: subsequent requests
-  API->>API: attach X-Workspace-Id header
-```
+`WorkspaceSwitcher` (`ui/src/components/workspace-switcher.tsx`) calls the client data provider, which stores the team id in a per-user localStorage key and mirrors `ACTIVE_WORKSPACE_KEY` for API headers, publishes the new data scope, and performs a **full page reload**. Scoped caches and in-flight reads use the authenticated user/workspace identity; the switcher clears a selection when that user no longer belongs to the team.
 
-`WorkspaceSwitcher` (`ui/src/components/workspace-switcher.tsx`) persists the active team id in localStorage and performs a **full page reload** so all providers and cached lists re-fetch under the new scope.
-
-```mermaid
-flowchart LR
-  User["Authenticated user"] --> UI["UI workspace switch"]
-  UI -->|"X-Workspace-Id: team_id"| API["FastAPI"]
-  UI -->|"no header"| Personal["Personal scope"]
-  API --> Validate["Validate team_roles"]
-  Validate --> Query["Filter resources by owner_user_id or team_id"]
-```
+![team owner scope](../assets/diagrams/team-owner-scope.png)
 
 ## Team roles
 
-| Role | Capabilities |
-|------|--------------|
-| `OWNER` | Full team admin; create invitations; change member roles; cannot leave if sole owner |
-| `ADMIN` | Create invitations; manage members (via `TeamService._require_team_admin`) |
-| `MEMBER` | Access team-scoped resources; no member management |
+| Role     | Capabilities                                                                             |
+| -------- | ---------------------------------------------------------------------------------------- |
+| `OWNER`  | Full team admin; create invitations; change member roles; cannot leave if sole owner     |
+| `ADMIN`  | Create invitations and remove members; role changes and team dissolution require `OWNER` |
+| `MEMBER` | Access team-scoped resources; no member management                                       |
 
 Team creators default to `OWNER`. Platform admins can manage teams from `/admin/teams`.
 
 ## API routes
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/teams` | Create team |
-| GET | `/api/teams` | List my teams |
-| GET | `/api/teams/{id}` | Team detail |
-| GET | `/api/teams/{id}/members` | List members |
-| POST | `/api/teams/{id}/invitations` | Create invitation link (optional `email`) |
-| POST | `/api/teams/{id}/leave` | Leave team |
-| PATCH | `/api/teams/{id}/members/{user_id}` | Update member role (OWNER) |
-| DELETE | `/api/teams/{id}/members/{user_id}` | Remove member |
-| GET | `/api/invitations/{token}` | Preview invitation (public) |
-| POST | `/api/invitations/{token}/register` | Register and join (public; email-bound invites only) |
-| POST | `/api/invitations/{token}/accept` | Accept invitation (authenticated) |
+| Method | Path                                | Description                                                         |
+| ------ | ----------------------------------- | ------------------------------------------------------------------- |
+| POST   | `/api/teams`                        | Create team                                                         |
+| GET    | `/api/teams`                        | List my teams                                                       |
+| GET    | `/api/teams/{id}`                   | Team detail                                                         |
+| GET    | `/api/teams/{id}/members`           | List members                                                        |
+| POST   | `/api/teams/{id}/invitations`       | Create invitation link (optional `email`)                           |
+| POST   | `/api/teams/{id}/leave`             | Leave team                                                          |
+| DELETE | `/api/teams/{id}`                   | Dissolve team (OWNER); `transfer_to_owner` by default, or `cascade` |
+| PATCH  | `/api/teams/{id}/members/{user_id}` | Update member role (OWNER)                                          |
+| DELETE | `/api/teams/{id}/members/{user_id}` | Remove member                                                       |
+| GET    | `/api/invitations/{token}`          | Preview invitation (public)                                         |
+| POST   | `/api/invitations/{token}/register` | Register and join (public; email-bound invites only)                |
+| POST   | `/api/invitations/{token}/accept`   | Accept invitation (authenticated)                                   |
 
-Write routes on sessions, knowledge bases, files, scheduling, and memories require `require_non_auditor` and respect `WorkspaceContext`.
+Authenticated business routes inherit `enforce_auditor_read_only`: auditors may use GET/HEAD/OPTIONS but cannot submit mutations. Selected write routes also use `require_non_auditor`; owner-scoped resources use `WorkspaceContext`. Team deletion disposes or transfers its resources and records the chosen strategy in audit history.
 
 ## Related documentation
 

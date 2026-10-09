@@ -1,5 +1,6 @@
 """The project starts from one complete schema, without upgrade bridges."""
 
+from itertools import pairwise
 from pathlib import Path
 
 from alembic.config import Config
@@ -15,16 +16,52 @@ from app.infrastructure.security.tenant_rls import (
 )
 
 
-def test_greenfield_schema_is_the_single_root_and_head() -> None:
+def test_greenfield_schema_is_the_single_root() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     revision = script.get_revision("0001greenfield")
 
     assert revision is not None
     assert revision.down_revision is None
     assert script.get_bases() == ["0001greenfield"]
-    assert script.get_heads() == ["0001greenfield"]
+    assert script.get_heads() == ["0030evaluation_judge_history"]
+    chain = list(script.walk_revisions())
+    assert chain[-1].revision == "0001greenfield"
+    assert all(newer.down_revision == older.revision for newer, older in pairwise(chain))
     versions = sorted(path.name for path in Path("alembic/versions").glob("*.py"))
-    assert versions == ["0001greenfield_initial.py"]
+    assert versions == [
+        "0001greenfield_initial.py",
+        "0002artifact_provenance.py",
+        "0002execution_view.py",
+        "0002view_queries.py",
+        "0003resource_pins.py",
+        "0004execution_configuration.py",
+        "0005evaluation_datasets.py",
+        "0006evaluation_configuration.py",
+        "0007evaluation_recordings.py",
+        "0008evaluation_environments.py",
+        "0009evaluation_budget.py",
+        "0010evaluation_batches.py",
+        "0011evaluation_scores.py",
+        "0012evaluation_judges.py",
+        "0013evaluation_reviews.py",
+        "0014evaluation_summary.py",
+        "0015evaluation_archives.py",
+        "0016execution_analysis.py",
+        "0017execution_comparisons.py",
+        "0018analysis_preferences.py",
+        "0019analysis_chart_facts.py",
+        "0020execution_exports.py",
+        "0021analysis_native_reads.py",
+        "0022analysis_point_facts.py",
+        "0023analysis_runtime_repairs.py",
+        "0024analysis_sealed_cache.py",
+        "0025analysis_point_redaction.py",
+        "0026analysis_redacted_inputs.py",
+        "0027analysis_point_redaction.py",
+        "0028analysis_scoped_jit.py",
+        "0029analysis_team_sessions.py",
+        "0030evaluation_judge_history.py",
+    ]
 
 
 def test_registry_explicitly_loads_execution_kernel_models() -> None:
@@ -76,6 +113,7 @@ def test_current_metadata_contains_only_current_execution_authorities() -> None:
 def test_rls_catalog_references_only_current_metadata() -> None:
     catalog = (
         set(PRIVATE_ROOT_TABLES)
+        | set(tenant_rls.EXECUTION_VIEW_TABLES)
         | set(VISIBILITY_ROOT_TABLES)
         | set(tenant_rls.POLICY_ROOT_TABLES)
         | set(EXECUTION_ROOT_TABLES)
@@ -154,3 +192,20 @@ def test_new_credentials_have_only_current_storage_markers() -> None:
     assert str(endpoints.c.credential_encryption.server_default.arg) == "'fernet_v2'"
     for column in ("url_encryption", "headers_encryption", "env_encryption"):
         assert str(mcp_servers.c[column].server_default.arg) == "'plaintext'"
+
+
+def test_export_forward_tables_are_not_pulled_into_initial_create_all():
+    assert not (
+        {
+            "execution_exports",
+            "export_staging",
+            "export_quota_serializers",
+            "export_resources",
+            "export_rows",
+            "export_receipts",
+            "export_source_facts",
+            "export_object_intents",
+            "export_download_uses",
+        }
+        & set(model_metadata.tables)
+    )

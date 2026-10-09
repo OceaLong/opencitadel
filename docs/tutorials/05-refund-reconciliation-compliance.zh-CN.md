@@ -5,8 +5,11 @@
 运行 OpsConsole Demo，在正式 Web Operator Approval/Evidence 协议下对账退款工单。
 
 ```bash
-docker compose --profile local --profile demo up -d --build
+./scripts/quickstart.sh --demo
 ```
+
+在设置 → 推理中配置支持工具调用的 `chat` Binding。宿主浏览器使用
+`http://localhost:9099`，Agent 沙箱使用 `http://ops-console:9099`。
 
 1. 选择 Skill `refund-reconciliation`。
 2. 声明企业自有 Host `ops-console, localhost`。

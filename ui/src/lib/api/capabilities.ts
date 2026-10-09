@@ -1,4 +1,4 @@
-import { get } from "./fetch";
+import { get, type RequestOptions } from "./fetch";
 import type { components } from "./generated/schema";
 
 export type CapabilitySnapshot = components["schemas"]["CapabilityResponse"];
@@ -35,5 +35,15 @@ export function needsInferenceConfiguration(state: CapabilityState | undefined):
 }
 
 export const capabilitiesApi = {
-  get: (): Promise<CapabilitySnapshot> => get("/capabilities"),
+  get: (options?: RequestOptions): Promise<CapabilitySnapshot> =>
+    get("/capabilities", undefined, options),
 };
+
+// These grants are authorization, independently of runtime capability state.
+export type ExecutionGrant = NonNullable<CapabilitySnapshot["grants"]>[number];
+export function hasExecutionGrant(
+  snapshot: CapabilitySnapshot | undefined,
+  grant: ExecutionGrant,
+): boolean {
+  return snapshot?.grants?.includes(grant) ?? false;
+}

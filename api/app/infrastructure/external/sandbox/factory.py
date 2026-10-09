@@ -57,6 +57,28 @@ class SandboxFactory:
         self._quota = SandboxQuota(deployment=deployment, store=quota_store)
         self._clock = clock
 
+    async def attach_environment(self, *, adapter, lease, access_token):
+        """Lease-only attachment; no session lookup, warm pool or normal sandbox create."""
+        import httpx
+
+        from app.infrastructure.adapters.evaluation_sandbox import LeaseControlTransport
+        from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+
+        settings = await self.current_settings(require_fresh=True)
+        sandbox = DockerSandbox(
+            settings=settings,
+            host=self._host,
+            quota=self._quota,
+            ip="127.0.0.1",
+            container_name=await adapter.case(lease),
+            access_token=access_token,
+        )
+        await sandbox.client.aclose()
+        sandbox.client = httpx.AsyncClient(
+            transport=LeaseControlTransport(adapter, lease, access_token), timeout=130
+        )
+        return sandbox
+
     @classmethod
     def from_settings(
         cls,

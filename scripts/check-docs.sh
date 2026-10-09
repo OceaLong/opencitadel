@@ -117,7 +117,7 @@ for f in docs/DOCUMENTATION_INVENTORY.md docs/DOCUMENTATION_INVENTORY.zh-CN.md; 
 done
 
 echo "==> Checking new architecture docs in indexes ..."
-for topic in inference-control-plane frontend-ui execution-kernel technical-decisions knowledge-base-ingestion; do
+for topic in inference-control-plane frontend-ui execution-kernel technical-decisions knowledge-base-ingestion execution-analysis evaluation-control-plane; do
   for f in docs/README.md docs/README.zh-CN.md; do
     if ! grep -q "$topic" "$f"; then
       fail "architecture doc $topic not listed in $f"
@@ -131,10 +131,35 @@ check_pair docs/architecture/knowledge-base-ingestion.md
 echo "==> Checking nginx README bilingual pair ..."
 check_pair nginx/README.md
 
-echo "==> Checking inventory technical-decisions diagram field ..."
-if rg -n 'technical-decisions\.md.*\| none \|' docs/DOCUMENTATION_INVENTORY.md \
-  docs/DOCUMENTATION_INVENTORY.zh-CN.md 2>/dev/null; then
-  fail "technical-decisions should be marked mermaid in DOCUMENTATION_INVENTORY"
+echo "==> Checking inventory diagram fields against document contents ..."
+if ! python3 - <<'PY_CHECK'
+from pathlib import Path
+import re
+
+errors = []
+for inventory in (Path("docs/DOCUMENTATION_INVENTORY.md"), Path("docs/DOCUMENTATION_INVENTORY.zh-CN.md")):
+    for row in inventory.read_text().splitlines():
+        if not row.startswith("| ["):
+            continue
+        target = re.search(r"\]\(([^)]+)\)", row)
+        if not target:
+            continue
+        document = inventory.parent / target[1]
+        if not document.is_file():
+            errors.append(f"{inventory}: missing document {target[1]}")
+            continue
+        body = document.read_text()
+        has_asset = "assets/diagrams/" in body and re.search(r"!\[[^\]]*\]\([^)]*\.(?:svg|png)\)", body)
+        actual = "svg/png" if has_asset else "mermaid" if "```mermaid" in body else "none"
+        declared = row.split("|")[5].strip()
+        if declared != actual:
+            errors.append(f"{inventory}: {target[1]} declares {declared}; actual {actual}")
+for error in errors:
+    print(error)
+raise SystemExit(bool(errors))
+PY_CHECK
+then
+  fail "documentation inventory diagram fields are out of sync"
 fi
 
 echo "==> Checking stale single 200MB upload claim for KB ..."

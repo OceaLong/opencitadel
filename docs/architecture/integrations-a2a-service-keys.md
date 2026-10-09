@@ -10,7 +10,7 @@ under the Run's frozen OwnerScope and selected Skill references.
 MCP records define transport, endpoint/command, headers/env, enabled state,
 tool policies, visibility, and owner/team. A2A records define endpoint,
 enabled state, tool policies, visibility, and owner/team. HTTP destinations
-pass outbound SSRF validation. Stdio MCP is administrator-only because it
+pass outbound SSRF validation. Configuring stdio MCP (including updates) is administrator-only because it
 starts a local process in the execution-kernel trust boundary.
 
 The Agent tool catalog resolves only enabled, accessible records. A Skill with
@@ -19,13 +19,17 @@ policy before the model sees them, then resolved and checked again before
 invocation. Missing or ambiguous tool names fail closed.
 
 Secret values in MCP URLs, headers, and environment dictionaries use versioned
-encrypted envelopes. Responses mask them. Masked/blank update fields retain
+encrypted envelopes. Dictionary updates replace the supplied dictionary; keys
+omitted from it are removed, while supplied masked/blank values retain the
+corresponding existing value. Responses mask them. Masked/blank update fields retain
 the current value; a real new value is encrypted with the active key.
 
 ## Inbound A2A
 
 Inbound `/api/a2a` uses a service API key and submits normal Agent execution
-under the key owner's authority. Service keys are shown once, stored as hashes,
+under the key owner's personal authority. The request authenticates with
+`X-Api-Key`; the JSON-RPC methods are `message/send`, `message/stream`,
+`tasks/get`, and `tasks/cancel`. `/.well-known/agent-card.json` is public. Service keys are shown once, stored as hashes,
 revocable, and audited. An auditor-owned key cannot invoke A2A. Service keys do
 not implicitly select a team; team-scoped interactive APIs use session auth and
 `X-Workspace-Id`.

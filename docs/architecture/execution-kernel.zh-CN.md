@@ -3,26 +3,15 @@
 [English](execution-kernel.md)
 
 OpenCitadel 使用一套执行运行时承载 Agent、Ask、知识库摄取、自动化、
-Patrol 与 Remediation。PostgreSQL 执行事件是唯一生命周期事实来源；产品表只保存
+Patrol、Remediation 以及评测 Subject/Judge Run。PostgreSQL 执行事件是唯一生命周期事实来源；产品表只保存
 内容与查询投影，Redis 只承担可丢失的唤醒通知。
 
 ## 运行拓扑
 
-```mermaid
-flowchart LR
-  Client[API / 调度器] --> Inbox[(Command Inbox)]
-  Inbox --> Decision[确定性决策]
-  Decision --> Events[(execution_events)]
-  Events --> Activity[(Activity Tasks)]
-  Events --> Timer[(Scheduled Commands)]
-  Events --> Outbox[(Wake-up Outbox)]
-  Activity --> Worker[Execution Kernel]
-  Worker --> Providers[LLM / Sandbox / MCP / A2A / Storage]
-  Worker --> Inbox
-  Events --> Projection[正式 Projector]
-  Projection --> Query[Run / 审批 / 资源视图]
-  Projection --> SSE[公开 SSE Replay]
-```
+![执行内核与有界读模型](../assets/diagrams/execution-read-model.png)
+
+图中区分生命周期事实、流外进度与查询视图。评测编排器通过同一 Admission 边界提交
+Command，不引入第二套执行引擎。
 
 API 只校验身份与 OwnerScope、持久化 Command、返回或流式读取投影，不直接执行工作流。
 Execution Kernel 进程认领数据库工作，调用注册的 Activity Handler，再通过新 Command
@@ -52,16 +41,21 @@ Execution Kernel 进程认领数据库工作，调用注册的 Activity Handler�
 - **产品状态单一写者。** 产品表上的执行权威列（Session/Patrol 状态、
   `active_execution_run_id` 等）只由投影器写入，应用服务读投影。每个此类投影行带
   `last_event_position` 列，投影器的 `UPDATE` 由 `WHERE last_event_position IS NULL OR <
-  :position` 守卫，慢或重复的投影绝不会覆盖更新的状态。
+:position` 守卫，慢或重复的投影绝不会覆盖更新的状态。
 - **毒行隔离。** 无法处理的 Decision 行按 `run_id` 隔离到 `execution_poisoned_runs` 并计数
-  （`execution_poisoned_runs_total`），而不作废整批；每个控制面 Lane 也隔离自身失败，一个
-  Lane 不会拖垮其他 Lane。
+  （`execution_poisoned_runs_total`），而不作废整批；OwnerScope 授权撤销在对应 Scope
+  内处理。关键运行任务的非预期失败仍会撤销就绪状态并请求关闭进程；毒行隔离不会吞掉
+  持久化存储或控制面的故障。
 
 ## Run 与 Activity 协议
 
 所有生产行为都属于六类 Run：`agent`、`ask`、`kb_ingest`、
 `automation`、`patrol`、`remediation`。Run 通过纯 Decision Handler 接受类型化 Command、
 产生类型化 Event，并且只能接受一个终态事件。
+
+评测 Subject 复用配置指定的 `agent` 或 `ask` Family；受限 Judge 是 Source Type 为
+`evaluation_judge` 的 `ask` 子 Run。Batch、评分与人工复核状态属于
+[评测控制面](evaluation-control-plane.zh-CN.md)，不增加 Run Family。
 
 所有非确定性工作都建模为 Activity。外部调用前先提交请求与 Invocation 身份；同一
 Invocation 的重复投递复用持久化结果，新 Invocation 即使参数相同也必须重新执行。
@@ -82,8 +76,28 @@ Claim generation 隔离过期 Worker。超时、重试、审批、取消和未�
 
 ## 公开事件与恢复
 
-SSE 实时流和 replay 读取同一份脱敏公开事件投影，cursor 即正式事件 position；重连不会
-改变工作流状态。Activity 私有输入和 Provider 原始载荷不得进入公开投影。
+实时流与 Replay 读取脱敏数据库投影。正式事件保留其原始 Event Position。
+Activity Progress 是流外遥测，不是生命周期事实，不能完成、失败或取消 Run。
+Activity 私有输入和 Provider 原始载荷不得进入公开投影。
+
+## 执行可视化读模型
+
+Formal Projector 与 `PostgresActivityProgressSink` 共同写入按 Run 组织的
+`execution_view_observations` Journal。每条 Observation 保存来源身份及来源类别
+（`formal` 或 `progress`）；插入、去重、排序与视图更新在同一事务内完成，并按 Run
+串行化。正式来源重放复用原有 Observation Cut。进度遥测写入失败不会导致 Activity
+失败，因此视图必须披露缺失覆盖范围，不能把遥测当成完整历史。
+
+类型化查询服务在同一 `PlaybackBoundary` 下重建 Run、Step、Timeline、Approval、
+Artifact 和 Message 视图。Boundary 固定 `run_id`、`formal_position`、
+`progress_position`、`observed_order`、Projection Revision、Projector Version 与
+Observation 时间。签名 Cursor 还绑定 OwnerScope 与 Query Digest，因此只保存 Event
+Position 无法标识执行视图切面。列表/Cohort Capture、Shadow Generation 和 Read Cache
+加速有界查询，不产生执行事实。切面不可用或已过期时明确返回错误；历史不完整时保留
+Completeness 与 Missing Interval 元数据。
+
+分析、对比与导出消费这些读模型上的 Capture 和 Pin。指标及保存视图不能覆盖正式 Run
+状态；保留的查询产物仍受当前访问权限与脱敏规则约束。
 
 恢复始终从 PostgreSQL 开始：校验事件链、读取有效 Snapshot、重放后续事件、重新认领
 过期数据库工作。Redis 丢失、进程重启和重复投递都属于正常故障模型。完整性或 OwnerScope
@@ -93,7 +107,7 @@ SSE 实时流和 replay 读取同一份脱敏公开事件投影，cursor 即正�
 
 `app.composition.kernel` 构建一个不可变 `KernelRuntime`，不会与 API 共享资源。
 `TaskSupervisor` 持有执行循环、Heartbeat、Scheduler、Policy Listener、Sandbox Pool 与
-Maintenance Loop。关键任务失败会请求进程关闭；辅助监听器只按声明的有界策略重启。
+Maintenance Loop，以及调度、对账、评分、清理四条关键评测 Lane。关键任务失败会请求进程关闭；辅助监听器只按声明的有界策略重启。
 
 健康 Marker 由归属明确的 Heartbeat 原子写入，并在其 `finally` 中删除。Readiness 同时要求
 Marker、Runtime Policy、执行 Schema 与专用数据库角色就绪；Liveness 只检查进程身份和
@@ -113,3 +127,15 @@ post-commit Effect。
 
 所有 OwnerScope 执行表都启用并强制 RLS。即使调用方拥有 system authorization，Event Store
 也会拒绝与既有 Stream OwnerScope 不一致的追加。
+
+## 实现锚点
+
+- 运行时归属：`api/app/composition/kernel.py`、
+  `api/app/composition/kernel_runtime.py`。
+- 正式事实与投影：`api/app/infrastructure/execution/postgres_event_store.py`、
+  `api/app/infrastructure/execution/postgres_formal_projector.py`。
+- 进度与 Observation Journal：`api/app/infrastructure/execution/postgres_progress_sink.py`、
+  `api/app/infrastructure/execution/postgres_view_observations.py`。
+- 有界视图与 Cursor：`api/app/application/services/execution_view_service.py`、
+  `api/app/application/execution/view_cursor.py`、
+  `api/app/infrastructure/execution/postgres_execution_view.py`。

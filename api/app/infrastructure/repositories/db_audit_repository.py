@@ -77,6 +77,390 @@ class DBAuditRepository(AuditRepository):
         log.entry_hash = entry_hash
         self.db_session.add(AuditLogORM.from_domain(log))
 
+    async def add_evaluation(self, log: AuditLog, *, authorization) -> None:
+        """Closed same-transaction bridge; never exposes a privileged callback."""
+        from app.domain.models.authorization import AuthorizationContext
+        from app.infrastructure.security.db_authorization import configure_session_authorization
+
+        allowed = {
+            "create",
+            "import_validate",
+            "import_apply",
+            "update_case",
+            "from_run",
+            "publish",
+        }
+        configuration_actions = {
+            "evaluation.config.create": ("config", "create"),
+            "evaluation.config.update": ("config", "update"),
+            "evaluation.config.delete": ("config", "delete"),
+            "evaluation.config.publish": ("config", "publish"),
+            "evaluation.rubric.create": ("rubric", "create"),
+            "evaluation.rubric.update": ("rubric", "update"),
+            "evaluation.rubric.delete": ("rubric", "delete"),
+            "evaluation.rubric.publish": ("rubric", "publish"),
+            "evaluation.suite.create": ("suite", "create"),
+            "evaluation.suite.update": ("suite", "update"),
+            "evaluation.suite.delete": ("suite", "delete"),
+            "evaluation.suite.publish": ("suite", "publish"),
+        }
+        environment = log.action in {
+            "evaluation.environment.register",
+            "evaluation.environment.repair",
+        }
+        recording = log.action in {"evaluation.recording.create", "evaluation.recording.publish"}
+        configuration = configuration_actions.get(log.action)
+        operation = (
+            (configuration[0] + "." + configuration[1])
+            if configuration
+            else (
+                log.action.removeprefix("evaluation.")
+                if recording or environment
+                else log.action.removeprefix("evaluation.dataset.")
+            )
+        )
+        principal, scope = authorization.principal, authorization.scope
+        if (
+            (
+                configuration is None
+                and not recording
+                and not environment
+                and (operation not in allowed or log.action != "evaluation.dataset." + operation)
+            )
+            or principal is None
+            or scope is None
+            or principal.is_auditor
+            or log.actor_user_id != principal.user_id
+            or scope.user_id != principal.user_id
+            or log.team_id != scope.team_id
+            or log.request_id != authorization.request_id
+            or log.resource_type
+            != (
+                "evaluation_environment"
+                if environment
+                else "evaluation_recording"
+                if recording
+                else ("evaluation_" + configuration[0] if configuration else "evaluation_dataset")
+            )
+            or log.session_id is not None
+            or log.actor_ip
+            or set(log.metadata) != {"revision"}
+            or type(log.metadata["revision"]) is not int
+        ):
+            raise PermissionError("invalid evaluation audit intent")
+        # Flush ordinary writes under original authority before the narrow bridge.
+        await self.db_session.flush()
+        scope_key = "team:" + scope.team_id if scope.team_id else "user:" + scope.user_id
+        receipt = (
+            (
+                await self.db_session.execute(
+                    text(
+                        "SELECT created_by,result FROM evaluation_mutations WHERE scope_key=:scope AND request_id=:request"
+                    ),
+                    {"scope": scope_key, "request": log.request_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            not receipt
+            or receipt["created_by"] != principal.user_id
+            or receipt["result"].get("operation") != operation
+            or receipt["result"].get("audit_resource_id") != log.resource_id
+            or receipt["result"].get("revision") != log.metadata["revision"]
+        ):
+            raise PermissionError("evaluation audit receipt mismatch")
+        if environment:
+            if not principal.is_admin:
+                raise PermissionError("invalid environment audit intent")
+            if operation == "environment.register":
+                if receipt["result"].get("kind") not in {"environment", "target", "credential"}:
+                    raise PermissionError("invalid environment audit intent")
+                exists = await self.db_session.scalar(
+                    text(
+                        "SELECT 1 FROM evaluation_environment_registry WHERE scope_key=:scope AND id::text=:id AND kind=:kind AND revision=:revision"
+                    ),
+                    {
+                        "scope": scope_key,
+                        "id": log.resource_id,
+                        "kind": receipt["result"]["kind"],
+                        "revision": log.metadata["revision"],
+                    },
+                )
+            else:
+                exists = await self.db_session.scalar(
+                    text(
+                        "SELECT 1 FROM evaluation_environment_repairs WHERE scope_key=:scope AND id::text=:id AND lease_revision=:revision AND created_by=:actor"
+                    ),
+                    {
+                        "scope": scope_key,
+                        "id": log.resource_id,
+                        "revision": log.metadata["revision"],
+                        "actor": principal.user_id,
+                    },
+                )
+            if not exists:
+                raise PermissionError("environment audit registry mismatch")
+        elif recording:
+            row = (
+                (
+                    await self.db_session.execute(
+                        text(
+                            "SELECT revision,status,result_version FROM evaluation_recording_jobs WHERE scope_key=:scope AND id::text=:id"
+                        ),
+                        {"scope": scope_key, "id": log.resource_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                not row
+                or row["revision"] != log.metadata["revision"]
+                or (
+                    operation == "recording.publish"
+                    and (
+                        row["status"] != "ready"
+                        or str(row["result_version"]) != receipt["result"].get("result_version")
+                    )
+                )
+            ):
+                raise PermissionError("evaluation audit recording mismatch")
+        elif configuration:
+            kind, mutation = configuration
+            row = (
+                (
+                    await self.db_session.execute(
+                        text(
+                            "SELECT revision,deleted FROM evaluation_configuration_drafts WHERE scope_key=:scope AND id::text=:id AND kind=:kind"
+                        ),
+                        {"scope": scope_key, "id": log.resource_id, "kind": kind},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                not row
+                or row["revision"] != log.metadata["revision"]
+                or row["deleted"] != (mutation == "delete")
+            ):
+                raise PermissionError("evaluation audit configuration mismatch")
+            if mutation == "publish":
+                version = await self.db_session.scalar(
+                    text(
+                        f"SELECT 1 FROM evaluation_{kind}_versions WHERE scope_key=:scope AND id::text=:id AND entity_id::text=:entity AND revision=:revision"
+                    ),
+                    {
+                        "scope": scope_key,
+                        "id": receipt["result"].get("id"),
+                        "entity": log.resource_id,
+                        "revision": log.metadata["revision"],
+                    },
+                )
+                if not version:
+                    raise PermissionError("evaluation audit version mismatch")
+        else:
+            exists = await self.db_session.scalar(
+                text("SELECT 1 FROM evaluation_datasets WHERE scope_key=:scope AND id::text=:id"),
+                {"scope": scope_key, "id": log.resource_id},
+            )
+            if not exists:
+                raise PermissionError("evaluation audit dataset unavailable")
+            if operation == "publish":
+                version = await self.db_session.scalar(
+                    text(
+                        "SELECT 1 FROM evaluation_dataset_versions WHERE scope_key=:scope AND id::text=:id AND dataset_id::text=:dataset AND revision=:revision"
+                    ),
+                    {
+                        "scope": scope_key,
+                        "id": receipt["result"].get("id"),
+                        "dataset": log.resource_id,
+                        "revision": log.metadata["revision"],
+                    },
+                )
+                if not version:
+                    raise PermissionError("evaluation audit version mismatch")
+        try:
+            await configure_session_authorization(
+                self.db_session, AuthorizationContext.system("evaluation-audit-append")
+            )
+            await self.add(log)
+            await self.db_session.flush()
+        finally:
+            # Restoration failure propagates: caller UoW must roll back, never commit.
+            await configure_session_authorization(self.db_session, authorization)
+
+    async def add_archive(self, log: AuditLog, *, authorization) -> None:
+        from app.domain.models.authorization import AuthorizationContext
+        from app.infrastructure.security.db_authorization import configure_session_authorization
+
+        principal, scope = authorization.principal, authorization.scope
+        if (
+            principal is None
+            or scope is None
+            or principal.is_auditor
+            or log.action != "evaluation.archive"
+            or log.actor_user_id != principal.user_id
+            or log.team_id != scope.team_id
+            or log.request_id != authorization.request_id
+            or log.session_id is not None
+            or log.actor_ip
+            or set(log.metadata) != {"revision"}
+        ):
+            raise PermissionError("invalid archive audit intent")
+        row = (
+            (
+                await self.db_session.execute(
+                    text(
+                        "SELECT kind,resource_id,revision,created_by FROM evaluation_resource_archives WHERE scope_key=:scope AND request_id=:request"
+                    ),
+                    {
+                        "scope": "team:" + scope.team_id
+                        if scope.team_id
+                        else "user:" + scope.user_id,
+                        "request": log.request_id,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            row is None
+            or row["created_by"] != principal.user_id
+            or str(row["resource_id"]) != log.resource_id
+            or log.resource_type != "evaluation_" + row["kind"]
+            or log.metadata["revision"] != row["revision"]
+        ):
+            raise PermissionError("archive audit receipt mismatch")
+        try:
+            await configure_session_authorization(
+                self.db_session, AuthorizationContext.system("evaluation-audit-append")
+            )
+            await self.add(log)
+            await self.db_session.flush()
+        finally:
+            await configure_session_authorization(self.db_session, authorization)
+
+    async def add_review(self, log: AuditLog, *, authorization) -> None:
+        """Closed command-receipt bridge, retaining the caller transaction/actor."""
+        from app.domain.models.authorization import AuthorizationContext
+        from app.infrastructure.security.db_authorization import configure_session_authorization
+
+        principal, scope = authorization.principal, authorization.scope
+        if (
+            principal is None
+            or scope is None
+            or principal.is_auditor
+            or log.action
+            not in {
+                "evaluation.review.human",
+                "evaluation.review.rescore",
+                "evaluation.review.cancel",
+            }
+            or log.actor_user_id != principal.user_id
+            or scope.user_id != principal.user_id
+            or log.team_id != scope.team_id
+            or log.request_id != authorization.request_id
+            or log.resource_type != "evaluation_result"
+            or log.session_id is not None
+            or log.actor_ip
+            or set(log.metadata) != {"command_id", "evaluation_revision", "result_revision"}
+        ):
+            raise PermissionError("invalid review audit intent")
+        await self.db_session.flush()
+        scope_key = "team:" + scope.team_id if scope.team_id else "user:" + scope.user_id
+        row = (
+            (
+                await self.db_session.execute(
+                    text(
+                        "SELECT * FROM evaluation_review_commands WHERE scope_key=:scope AND id::text=:id"
+                    ),
+                    {"scope": scope_key, "id": log.metadata["command_id"]},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            not row
+            or row["created_by"] != principal.user_id
+            or str(row["result_id"]) != log.resource_id
+            or row["request_id"] != log.request_id
+            or "evaluation.review." + row["kind"] != log.action
+            or any(
+                row["receipt"][key] != log.metadata[key]
+                for key in ("evaluation_revision", "result_revision")
+            )
+        ):
+            raise PermissionError("review audit receipt mismatch")
+        try:
+            await configure_session_authorization(
+                self.db_session, AuthorizationContext.system("evaluation-audit-append")
+            )
+            await self.add(log)
+            await self.db_session.flush()
+        finally:
+            await configure_session_authorization(self.db_session, authorization)
+
+    async def add_batch(self, log: AuditLog, *, authorization) -> None:
+        from app.domain.models.authorization import AuthorizationContext
+        from app.infrastructure.security.db_authorization import configure_session_authorization
+
+        principal, scope = authorization.principal, authorization.scope
+        if (
+            principal is None
+            or scope is None
+            or principal.is_auditor
+            or log.action
+            not in {
+                "evaluation.batch.start",
+                "evaluation.batch.cancel",
+                "evaluation.batch.retry_failed",
+            }
+            or log.actor_user_id != principal.user_id
+            or scope.user_id != principal.user_id
+            or log.team_id != scope.team_id
+            or log.request_id != authorization.request_id
+            or log.resource_type != "evaluation_batch"
+            or log.session_id is not None
+            or log.actor_ip
+            or set(log.metadata) != {"command_id"}
+        ):
+            raise PermissionError("invalid batch audit intent")
+        await self.db_session.flush()
+        scope_key = "team:" + scope.team_id if scope.team_id else "user:" + scope.user_id
+        row = (
+            (
+                await self.db_session.execute(
+                    text(
+                        "SELECT * FROM evaluation_batch_commands WHERE scope_key=:scope AND id::text=:id"
+                    ),
+                    {"scope": scope_key, "id": log.metadata["command_id"]},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            not row
+            or row["created_by"] != principal.user_id
+            or str(row["batch_id"]) != log.resource_id
+            or row["request_id"] != log.request_id
+            or "evaluation.batch." + row["kind"] != log.action
+        ):
+            raise PermissionError("batch audit receipt mismatch")
+        try:
+            await configure_session_authorization(
+                self.db_session, AuthorizationContext.system("evaluation-audit-append")
+            )
+            await self.add(log)
+            await self.db_session.flush()
+        finally:
+            await configure_session_authorization(self.db_session, authorization)
+
     async def list(
         self,
         *,

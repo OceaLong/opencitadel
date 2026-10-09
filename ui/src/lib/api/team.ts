@@ -1,4 +1,4 @@
-import { del, get, patch, post } from "./fetch";
+import { del, get, patch, post, type RequestOptions } from "./fetch";
 
 export type Team = {
   id: string;
@@ -41,7 +41,8 @@ export const teamApi = {
   list: () => get<{ teams: Team[] }>("/teams"),
   get: (teamId: string) => get<Team>(`/teams/${teamId}`),
   create: (name: string, description = "") => post<Team>("/teams", { name, description }),
-  members: (teamId: string) => get<{ members: TeamMemberDetail[] }>(`/teams/${teamId}/members`),
+  members: (teamId: string, options?: RequestOptions) =>
+    get<{ members: TeamMemberDetail[] }>(`/teams/${teamId}/members`, undefined, options),
   invite: (teamId: string, role: TeamMember["role"] = "member", email?: string) =>
     post<{ url: string }>(`/teams/${teamId}/invitations`, { role, email: email?.trim() || null }),
   preview: (token: string) =>

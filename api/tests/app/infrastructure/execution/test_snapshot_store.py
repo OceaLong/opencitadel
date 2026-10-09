@@ -183,11 +183,18 @@ async def test_stale_serializer_snapshot_is_ignored(snapshot_database) -> None:
     stream, events = await seed_stream(session_factory)
     streams.append(stream)
     prefix = replay(RunAggregate(), events[:1], stream_id=stream.stream_id)
+    from pydantic import RootModel
+
+    from app.domain.execution.serialization import canonical_state_hash
+
+    legacy_state = RootModel(
+        prefix.state.model_dump(mode="json", exclude={"started_activity_claims"})
+    )
     candidate = ReplaySnapshot(
         stream_id=stream.stream_id,
         stream_version=prefix.stream_version,
-        state=prefix.state,
-        state_hash=prefix.state_hash,
+        state=legacy_state,
+        state_hash=canonical_state_hash(legacy_state),
         last_event_hash=prefix.last_event_hash,
     )
 
@@ -202,7 +209,7 @@ async def test_stale_serializer_snapshot_is_ignored(snapshot_database) -> None:
             candidate,
             owner_user_id="snapshot-user",
             team_id=None,
-            serializer_version=1,
+            serializer_version=5,
         )
         await session.commit()
 
@@ -215,10 +222,19 @@ async def test_stale_serializer_snapshot_is_ignored(snapshot_database) -> None:
             stream.stream_type,
             stream.stream_id,
             state_type=RunState,
-            serializer_version=2,
+            serializer_version=6,
         )
 
+        persisted = await session.scalar(
+            select(ExecutionSnapshotORM).where(ExecutionSnapshotORM.stream_id == stream.stream_id)
+        )
+        assert persisted.serializer_version == 5
+        assert "started_activity_claims" not in persisted.state
     assert loaded is None
+    assert (
+        replay(RunAggregate(), events, snapshot=loaded, stream_id=stream.stream_id).state
+        == replay(RunAggregate(), events, stream_id=stream.stream_id).state
+    )
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "images": ["sha256:2985396f077503042754ff2673e0d10a3c8903c03b9a38ec711a9e64947659fd"],
+  "fixture_image": "sha256:4185d2c55ba89731509d80ef7972b16c75553fdda1cb61d46ede5aac3595b1aa",
+  "bootstrap_image": "sha256:b200139c59c438b5ab199e7b0886c95583cfb1a2508de05dd77a25930d99d13f",
+  "targets": [{
+    "id": "d9861548-f599-4e75-9800-86c00fda99b0",
+    "revision": 1,
+    "physical_resource": "owned-local-http-fixture-v1",
+    "kind": "http",
+    "endpoint": "http://allowed.e04.test:8081",
+    "protocol": "http-fixture-v1",
+    "shared": false
+  }],
+  "credentials": []
+}

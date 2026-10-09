@@ -62,3 +62,24 @@ describe("event store cursor ordering", () => {
     expect(store.getSnapshot()).toHaveLength(1);
   });
 });
+
+describe("ordered status reduction treats cursor IDs as opaque", () => {
+  it("accepts waiting then running and never numerically compares public IDs", async () => {
+    const { reduceSessionStatusState } = await import("./normalize");
+    const status = (value: string, event_id: string) =>
+      ({
+        type: "session_status",
+        data: { status: value, event_id, persist: true },
+      }) as SSEEventData;
+    const waiting = reduceSessionStatusState([status("waiting", "100")]);
+    expect(waiting.persistedTerminal).toBeUndefined();
+    expect(reduceSessionStatusState([status("running", "2")], waiting).status).toBe("running");
+    expect(
+      reduceSessionStatusState([
+        status("waiting", "opaque+/"),
+        status("running", "opaque-_"),
+        status("completed", "signed=="),
+      ]).status,
+    ).toBe("completed");
+  });
+});

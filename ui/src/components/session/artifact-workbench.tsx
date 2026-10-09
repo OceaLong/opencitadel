@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Download, FileText, Globe, Link2, Link2Off, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { MarkdownContent } from "@/components/markdown-content";
+import { SafeArtifactPreview } from "@/components/session/safe-artifact-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,8 +20,25 @@ import {
 
 import { formatDateTime } from "@/lib/admin-utils";
 import { artifactsApi } from "@/lib/api/artifacts";
+import { executionViewApi } from "@/lib/api/execution-view";
+import { ApiError, type RequestOptions } from "@/lib/api/fetch";
 import type { ArtifactEventSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
+
+function unavailable(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    ([401, 403, 404].includes(error.code) ||
+      Boolean(
+        error.data &&
+        typeof error.data === "object" &&
+        "code" in error.data &&
+        error.data.code === "resource_unavailable",
+      ))
+  );
+}
 
 type ShareInfo = {
   isShared: boolean;
@@ -33,19 +51,63 @@ export type ArtifactWorkbenchProps = {
   artifacts: ArtifactEventSummary[];
   focusedArtifactId?: string | null;
   className?: string;
+  version?: number | null;
+  onVersionChange?: (version: number) => void;
+  visibleVersions?: number[];
+  onArtifactChange?: (artifactId: string) => void;
+  /** Execution callers supply the U05-owned reader body; legacy loaders stay off. */
+  body?: React.ReactNode;
 };
 
-export function ArtifactWorkbench({
+export function ArtifactWorkbench(props: ArtifactWorkbenchProps) {
+  return props.body !== undefined ? (
+    <ArtifactWorkbenchContent {...props} />
+  ) : (
+    <LegacyArtifactWorkbench {...props} />
+  );
+}
+function LegacyArtifactWorkbench(props: ArtifactWorkbenchProps) {
+  const { user, loading } = useAuth();
+  const { scope, scopeRevision } = useClientDataScope();
+  const t = useTranslations("artifactWorkbench");
+  const requestOptions = useMemo(
+    () => ({ workspaceId: scope?.workspaceId, skipErrorHandler: true }),
+    [scope?.workspaceId],
+  );
+  if (loading || !user || scope?.userId !== user.id) return <p role="status">{t("loadFailed")}</p>;
+  return (
+    <ArtifactWorkbenchContent
+      key={JSON.stringify([user.id, scope.workspaceId, scopeRevision])}
+      {...props}
+      requestOptions={requestOptions}
+    />
+  );
+}
+function ArtifactWorkbenchContent({
   sessionId,
   artifacts,
   focusedArtifactId,
   className,
-}: ArtifactWorkbenchProps) {
+  version: controlledVersion,
+  onVersionChange,
+  visibleVersions,
+  onArtifactChange,
+  body,
+  requestOptions,
+}: ArtifactWorkbenchProps & { requestOptions?: RequestOptions }) {
   const t = useTranslations("artifactWorkbench");
   const locale = useLocale();
+  const generation = useRef(0);
+  const requests = useRef(new Set<AbortController>());
+  const revoked = useRef(false);
+  const [denied, setDenied] = useState(false);
+
   const sortedArtifacts = useMemo(
-    () => [...artifacts].sort((a, b) => a.title.localeCompare(b.title, "zh-CN")),
-    [artifacts],
+    () =>
+      body !== undefined
+        ? artifacts
+        : [...artifacts].sort((a, b) => a.title.localeCompare(b.title, "zh-CN")),
+    [artifacts, body],
   );
 
   const statusLabel = useCallback(
@@ -60,17 +122,57 @@ export function ArtifactWorkbench({
   const [selectedId, setSelectedId] = useState<string | null>(
     focusedArtifactId ?? sortedArtifacts[0]?.artifact_id ?? null,
   );
-  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [content, setContent] = useState<string>("");
-  const [contentType, setContentType] = useState<string>("text/markdown");
+  const active = sortedArtifacts.find((item) => item.artifact_id === selectedId) ?? null;
+  const [localVersion, setLocalVersion] = useState<{
+    artifactId: string | null;
+    version: number | null;
+  }>({ artifactId: null, version: null });
+  const selectedVersion =
+    controlledVersion !== undefined
+      ? controlledVersion
+      : localVersion.artifactId === selectedId
+        ? localVersion.version
+        : (active?.version ?? null);
+  const setSelectedVersion = (value: number | null) => {
+    if (controlledVersion === undefined)
+      setLocalVersion({ artifactId: selectedId, version: value });
+    if (value != null) onVersionChange?.(value);
+  };
+  const [storedContent, setContent] = useState<string>("");
+  const [contentKey, setContentKey] = useState("");
+  const content = contentKey === `${selectedId}:${selectedVersion}` ? storedContent : "";
   const [contentIncomplete, setContentIncomplete] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const [revoking, setRevoking] = useState(false);
+  const selectionKey = `${selectedId}:${selectedVersion}`;
+  const [sharingKey, setSharing] = useState<string | null>(null);
+  const [revokingKey, setRevoking] = useState<string | null>(null);
+  const sharing = sharingKey === selectionKey;
+  const revoking = revokingKey === selectionKey;
   // 常驻分享状态:从后端 artifact 详情读取,刷新后仍可见/可撤销,不依赖内存中的一次性 id。
   const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
 
-  const active = sortedArtifacts.find((item) => item.artifact_id === selectedId) ?? null;
+  const invalidate = useCallback(() => {
+    generation.current++;
+    for (const controller of requests.current) controller.abort();
+    requests.current.clear();
+  }, []);
+  const revoke = useCallback(() => {
+    revoked.current = true;
+    invalidate();
+    setDenied(true);
+    setContent("");
+    setContentKey("");
+    setContentIncomplete(false);
+    setShareInfo(null);
+    setSharing(null);
+    setRevoking(null);
+    setLoading(false);
+  }, [invalidate]);
+
+  useLayoutEffect(() => {
+    generation.current++;
+    return invalidate;
+  }, [selectedId, selectedVersion, invalidate]);
 
   useEffect(() => {
     if (focusedArtifactId) {
@@ -85,93 +187,132 @@ export function ArtifactWorkbench({
   }, [selectedId, sortedArtifacts]);
 
   useEffect(() => {
-    if (active) {
-      setSelectedVersion(active.version);
-    }
-  }, [active]);
-
-  useEffect(() => {
-    if (!selectedId) {
+    if (revoked.current || body !== undefined || !selectedId) {
       setShareInfo(null);
       return;
     }
     let cancelled = false;
+    const captured = generation.current;
+    const current = () => !cancelled && !revoked.current && captured === generation.current;
+    const ownedRequests = requests.current;
+    const controller = new AbortController();
+    ownedRequests.add(controller);
     setShareInfo(null);
     void artifactsApi
-      .get(selectedId)
+      .get(selectedId, { ...requestOptions, signal: controller.signal })
       .then((artifact) => {
-        if (cancelled) return;
+        if (!current()) return;
         setShareInfo({
           isShared: artifact.is_shared,
           expiresAt: artifact.share_expires_at,
           tokenPreview: artifact.share_token_preview,
         });
       })
-      .catch(() => {
-        if (!cancelled) setShareInfo(null);
-      });
+      .catch((error) => {
+        if (current()) {
+          setShareInfo(null);
+          if (unavailable(error)) revoke();
+        }
+      })
+      .finally(() => ownedRequests.delete(controller));
     return () => {
       cancelled = true;
+      controller.abort();
+      ownedRequests.delete(controller);
     };
-  }, [selectedId]);
+  }, [selectedId, selectedVersion, body, requestOptions, revoke]);
 
   useEffect(() => {
-    if (!selectedId || selectedVersion == null) {
+    if (revoked.current || body !== undefined || !selectedId || selectedVersion == null) {
       setContent("");
       setContentIncomplete(false);
       return;
     }
     let cancelled = false;
+    const captured = generation.current;
+    const current = () => !cancelled && !revoked.current && captured === generation.current;
+    const ownedRequests = requests.current;
+    const controller = new AbortController();
+    ownedRequests.add(controller);
+    setContent("");
     setLoading(true);
     void artifactsApi
-      .getContent(selectedId, selectedVersion)
+      .getContent(selectedId, selectedVersion, { ...requestOptions, signal: controller.signal })
       .then((data) => {
-        if (cancelled) return;
+        if (!current()) return;
+        setContentKey(`${selectedId}:${selectedVersion}`);
         setContent(data.content);
-        setContentType(data.content_type);
         setContentIncomplete(data.incomplete === true);
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (!current()) return;
+        if (unavailable(error)) revoke();
         toast.error(error instanceof Error ? error.message : t("loadFailed"));
         setContent("");
         setContentIncomplete(false);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        ownedRequests.delete(controller);
+        if (current()) setLoading(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
+      ownedRequests.delete(controller);
     };
-  }, [selectedId, selectedVersion, t]);
+  }, [selectedId, selectedVersion, body, t, requestOptions, revoke]);
 
   const versionOptions = useMemo(() => {
+    if (visibleVersions) return [...visibleVersions];
     if (!active) return [];
     return Array.from({ length: active.version }, (_, index) => index + 1);
-  }, [active]);
+  }, [active, visibleVersions]);
 
-  const handleExport = useCallback(() => {
-    if (!content || !active) return;
-    const ext = active.kind === "doc" ? "md" : "html";
-    const blob = new Blob([content], { type: contentType });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${active.title || "artifact"}.${ext}`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    toast.success(t("exportSuccess"));
-  }, [active, content, contentType, t]);
+  const handleExport = useCallback(async () => {
+    if (revoked.current || !active || !selectedId || selectedVersion == null) return;
+    const captured = generation.current;
+    const controller = new AbortController();
+    requests.current.add(controller);
+    try {
+      const blob = await executionViewApi.downloadArtifact(
+        selectedId,
+        { version: selectedVersion, presentation: false },
+        { ...requestOptions, signal: controller.signal },
+      );
+      if (captured !== generation.current) return;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${active.title || "artifact"}.${active.kind === "doc" ? "md" : "html"}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success(t("exportSuccess"));
+    } catch (error) {
+      if (captured !== generation.current) return;
+      if (unavailable(error)) revoke();
+      toast.error(error instanceof Error ? error.message : t("loadFailed"));
+    } finally {
+      requests.current.delete(controller);
+    }
+  }, [active, selectedId, selectedVersion, requestOptions, t, revoke]);
 
   const handleShare = useCallback(async () => {
-    if (!selectedId) return;
-    setSharing(true);
+    if (revoked.current || !selectedId) return;
+    const captured = generation.current;
+    const controller = new AbortController();
+    requests.current.add(controller);
+    setSharing(selectionKey);
     try {
-      const result = await artifactsApi.share(selectedId);
+      const result = await artifactsApi.share(selectedId, {
+        ...requestOptions,
+        signal: controller.signal,
+      });
+      if (captured !== generation.current) return;
       const url = result.share_url.startsWith("http")
         ? result.share_url
         : `${window.location.origin}${result.share_url}`;
       await navigator.clipboard.writeText(url);
+      if (captured !== generation.current) return;
       // 用一次性返回的完整 share_token 拼链接复制;常驻状态仅保留后 4 位辅助辨认。
       setShareInfo({
         isShared: true,
@@ -180,26 +321,37 @@ export function ArtifactWorkbench({
       });
       toast.success(t("shareLinkCopied"));
     } catch (error) {
+      if (captured !== generation.current) return;
+      if (unavailable(error)) revoke();
       toast.error(error instanceof Error ? error.message : t("shareLinkFailed"));
     } finally {
-      setSharing(false);
+      requests.current.delete(controller);
+      if (captured === generation.current) setSharing(null);
     }
-  }, [selectedId, t]);
+  }, [selectedId, t, requestOptions, selectionKey, revoke]);
 
   const handleRevoke = useCallback(async () => {
-    if (!selectedId) return;
-    setRevoking(true);
+    if (revoked.current || !selectedId) return;
+    const captured = generation.current;
+    const controller = new AbortController();
+    requests.current.add(controller);
+    setRevoking(selectionKey);
     try {
-      await artifactsApi.revokeShare(selectedId);
+      await artifactsApi.revokeShare(selectedId, { ...requestOptions, signal: controller.signal });
+      if (captured !== generation.current) return;
       setShareInfo({ isShared: false, expiresAt: null, tokenPreview: null });
       toast.success(t("shareRevoked"));
     } catch (error) {
+      if (captured !== generation.current) return;
+      if (unavailable(error)) revoke();
       toast.error(error instanceof Error ? error.message : t("shareRevokeFailed"));
     } finally {
-      setRevoking(false);
+      requests.current.delete(controller);
+      if (captured === generation.current) setRevoking(null);
     }
-  }, [selectedId, t]);
+  }, [selectedId, t, requestOptions, selectionKey, revoke]);
 
+  if (denied) return <p role="status">{t("loadFailed")}</p>;
   if (sortedArtifacts.length === 0) {
     return <EmptyState title={t("empty")} className={cn("h-full justify-center", className)} />;
   }
@@ -220,9 +372,13 @@ export function ArtifactWorkbench({
         <Select
           value={selectedId ?? undefined}
           onValueChange={(value) => {
+            if (onArtifactChange) {
+              onArtifactChange(value);
+              return;
+            }
             setSelectedId(value);
             const next = sortedArtifacts.find((item) => item.artifact_id === value);
-            setSelectedVersion(next?.version ?? null);
+            setLocalVersion({ artifactId: value, version: next?.version ?? null });
           }}
         >
           <SelectTrigger size="sm" className="max-w-[220px]">
@@ -239,7 +395,7 @@ export function ArtifactWorkbench({
 
         {versionOptions.length > 0 && (
           <Select
-            value={selectedVersion != null ? String(selectedVersion) : undefined}
+            value={selectedVersion != null ? String(selectedVersion) : ""}
             onValueChange={(value) => setSelectedVersion(Number(value))}
           >
             <SelectTrigger size="sm" className="w-[100px]">
@@ -255,7 +411,7 @@ export function ArtifactWorkbench({
           </Select>
         )}
 
-        {active && (
+        {active && body === undefined && (
           <Badge variant="secondary" className="gap-1">
             {active.kind === "doc" ? <FileText className="size-3" /> : <Globe className="size-3" />}
             {statusLabel(active.status)}
@@ -269,28 +425,40 @@ export function ArtifactWorkbench({
           </Badge>
         )}
 
-        <div className="ml-auto flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={!content || loading}>
-            <Download className="size-3.5" />
-            {t("export")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void handleShare()} disabled={sharing}>
-            <Link2 className="size-3.5" />
-            {sharing ? t("generating") : shareInfo?.isShared ? t("reshare") : t("share")}
-          </Button>
-          {shareInfo?.isShared && selectedId !== null && (
+        {body === undefined && (
+          <div className="ml-auto flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={() => void handleRevoke()}
-              disabled={revoking}
+              onClick={handleExport}
+              disabled={!content || loading}
             >
-              <Link2Off className="size-3.5" />
-              {revoking ? t("generating") : t("revokeShare")}
+              <Download className="size-3.5" />
+              {t("export")}
             </Button>
-          )}
-        </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleShare()}
+              disabled={sharing}
+            >
+              <Link2 className="size-3.5" />
+              {sharing ? t("generating") : shareInfo?.isShared ? t("reshare") : t("share")}
+            </Button>
+            {shareInfo?.isShared && selectedId !== null && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => void handleRevoke()}
+                disabled={revoking}
+              >
+                <Link2Off className="size-3.5" />
+                {revoking ? t("generating") : t("revokeShare")}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -304,12 +472,14 @@ export function ArtifactWorkbench({
             {t("incompleteContentWarning")}
           </div>
         )}
-        {active?.kind === "web" ? (
-          <iframe
+        {body !== undefined ? (
+          body
+        ) : active?.kind === "web" ? (
+          <SafeArtifactPreview
+            notice={t("safePreview")}
             title={active.title}
-            srcDoc={content}
+            content={content}
             className="h-full w-full border-0 bg-white"
-            sandbox="allow-scripts"
           />
         ) : (
           <div className="h-full overflow-y-auto px-4 py-4">
@@ -317,9 +487,11 @@ export function ArtifactWorkbench({
           </div>
         )}
       </div>
-      <p className="text-muted-foreground border-border/70 border-t px-4 py-2 text-xs">
-        {t("sessionLabel", { id: sessionId.slice(0, 8) })}
-      </p>
+      {body === undefined && (
+        <p className="text-muted-foreground border-border/70 border-t px-4 py-2 text-xs">
+          {t("sessionLabel", { id: sessionId.slice(0, 8) })}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Knowledge Base · Document revision states</title>
+<desc id="desc">Document processing states are distinct from Build Run states and version publication. A parsed document is not production-readable; retrieval requires an indexed revision in a published closure. Partial document failure can publish a degraded version only when mandatory retrievable content remains.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="820" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Knowledge Base · Document revision states</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Document processing states are distinct from Build Run states and version publication.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="uploaded" data-target="parsing" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="parsing" data-target="parsed" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="parsed" data-target="indexing" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="indexing" data-target="indexed" d="M 900,500 L 780,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="parsing" data-target="failed" d="M 630,280 L 630,365 L 210,365 L 210,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="indexing" data-target="failed" d="M 1110,550 L 1110,635 L 210,635 L 210,550" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="uploaded" data-node-id="uploaded" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="213" font-size="20" font-weight="600">uploaded</text>
+<text x="78" y="240" font-size="15" class="secondary">Persisted document revision</text>
+<text x="78" y="262" font-size="14" class="secondary">Not yet retrievable</text>
+</g>
+<g id="parsing" data-node-id="parsing" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">parsing</text>
+<text x="498" y="240" font-size="15" class="secondary">Parser / OCR extracts content</text>
+<text x="498" y="262" font-size="14" class="secondary">Failure is explicit</text>
+</g>
+<g id="parsed" data-node-id="parsed" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">parsed</text>
+<text x="918" y="240" font-size="15" class="secondary">Persisted ordered content</text>
+<text x="918" y="262" font-size="14" class="secondary">Parsing alone does not enable Q&amp;A</text>
+</g>
+<g id="indexing" data-node-id="indexing" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">indexing</text>
+<text x="918" y="510" font-size="15" class="secondary">Build chunks and required indexes</text>
+<text x="918" y="532" font-size="14" class="secondary">Publication still waits for closure</text>
+</g>
+<g id="indexed" data-node-id="indexed" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">indexed</text>
+<text x="498" y="510" font-size="15" class="secondary">Indexed revision in manifest</text>
+<text x="498" y="532" font-size="14" class="secondary">Readable only in a published version</text>
+</g>
+<g id="failed" data-node-id="failed" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">failed</text>
+<text x="78" y="510" font-size="15" class="secondary">Parsing or indexing failed</text>
+<text x="78" y="532" font-size="14" class="secondary">Excluded from retrievable closure</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">start parsing</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">parse success</text>
+<text x="1160" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">start indexing</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">index success</text>
+<text x="420" y="353" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">parse failure</text>
+<text x="630" y="623" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">index failure</text>
+<g data-graph-role="legend">
+<line x1="60" y1="692" x2="96" y2="692" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="697" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="692" x2="536" y2="692" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="697" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="692" x2="976" y2="692" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="697" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="740" font-size="15" class="secondary" data-graph-role="label">A parsed document is not production-readable; retrieval requires an indexed revision in a published closure.</text>
+<text x="60" y="764" font-size="15" class="secondary" data-graph-role="label">Partial document failure can publish a degraded version only when mandatory retrievable content remains.</text>
+</svg>

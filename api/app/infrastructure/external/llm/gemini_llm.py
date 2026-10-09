@@ -11,6 +11,7 @@ from app.infrastructure.external.llm.base_llm import (
     normalize_usage,
     openai_content_to_gemini_parts,
 )
+from app.infrastructure.external.llm.dispatch import physical_send, physical_stream
 from app.infrastructure.external.llm.structured_output import to_gemini_schema
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
@@ -151,7 +152,9 @@ class GeminiLLM(LLM):
             f"{self._base_url}/v1beta/models/"
             f"{self._model_name}:generateContent?key={self._credential}"
         )
-        response = await self._client.post(url, json=payload)
+        response = await physical_send(
+            lambda: self._client.post(url, json=payload), payload, provider="gemini"
+        )
         if response.status_code >= 400:
             raise ServerRequestsError(f"Gemini API error: {response.text}")
         data = response.json()
@@ -181,16 +184,9 @@ class GeminiLLM(LLM):
         if tool_calls:
             message["tool_calls"] = tool_calls
         usage_meta = data.get("usageMetadata") or {}
-        usage = normalize_usage(
-            {
-                "promptTokenCount": usage_meta.get("promptTokenCount"),
-                "candidatesTokenCount": usage_meta.get("candidatesTokenCount"),
-                "totalTokenCount": usage_meta.get("totalTokenCount"),
-                "cachedContentTokenCount": usage_meta.get("cachedContentTokenCount"),
-            }
-        )
-        if usage.get("total_tokens"):
-            message["_usage"] = usage
+        usage = normalize_usage(usage_meta, provider="gemini")
+        message["_usage"] = usage
+        message["_model_revision"] = data.get("modelVersion")
         return message
 
     async def stream_invoke(
@@ -223,12 +219,11 @@ class GeminiLLM(LLM):
             f"streamGenerateContent?alt=sse&key={self._credential}"
         )
 
-        prompt_tokens = 0
-        completion_tokens = 0
-        total_tokens = 0
-        cached_tokens = 0
+        raw_usage = {}
         tool_index_by_name: dict[str, int] = {}
-        async with self._client.stream("POST", url, json=payload) as response:
+        async with physical_stream(
+            self._client, url, payload=payload, provider="gemini"
+        ) as response:
             if response.status_code >= 400:
                 body = await response.aread()
                 raise ServerRequestsError(f"Gemini API error: {body.decode(errors='ignore')}")
@@ -246,10 +241,7 @@ class GeminiLLM(LLM):
                     continue
 
                 usage_meta = chunk.get("usageMetadata") or {}
-                prompt_tokens = int(usage_meta.get("promptTokenCount") or prompt_tokens)
-                completion_tokens = int(usage_meta.get("candidatesTokenCount") or completion_tokens)
-                total_tokens = int(usage_meta.get("totalTokenCount") or total_tokens)
-                cached_tokens = int(usage_meta.get("cachedContentTokenCount") or cached_tokens)
+                raw_usage.update(usage_meta)
 
                 for candidate in chunk.get("candidates") or []:
                     finish_reason = candidate.get("finishReason")
@@ -279,13 +271,7 @@ class GeminiLLM(LLM):
                                 ]
                             }
 
-        usage = normalize_usage(
-            {
-                "promptTokenCount": prompt_tokens,
-                "candidatesTokenCount": completion_tokens,
-                "totalTokenCount": total_tokens,
-                "cachedContentTokenCount": cached_tokens,
-            }
-        )
-        if usage.get("total_tokens"):
-            yield {"usage": usage}
+        yield {"usage": normalize_usage(raw_usage, provider="gemini")}
+
+    async def aclose(self):
+        await self._client.aclose()

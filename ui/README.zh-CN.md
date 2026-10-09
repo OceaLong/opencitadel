@@ -3,7 +3,7 @@
 [English](README.md)
 
 基于 Next.js 16 / React 19 的前端，覆盖事件溯源 Agent 会话、不可变知识版本、
-自动化、巡检、治理与平台管理。
+自动化、巡检、执行工作台、分析/比较/导出、评测、治理与平台管理。
 
 ## 契约边界
 
@@ -18,34 +18,26 @@ UI 是投影客户端：提交 API Command，展示正式 Run、Activity、审�
 
 ## 源码地图
 
-```text
-src/
-├── app/                 App Router 页面
-├── components/
-│   ├── session/         时间线、审批、错误、VNC、交付物
-│   ├── resource/        候选构建与版本状态
-│   ├── knowledge/       知识库与文档阅读
-│   ├── patrol/          巡检与修复
-│   ├── admin/           治理、用量、合规
-│   ├── settings/        通用、Agent、推理、Skill、记忆、集成、运行时
-│   └── ui/              Radix 基础组件
-├── hooks/               状态与流式编排
-├── lib/api/             强类型 HTTP/SSE 客户端
-├── lib/session-events.ts
-├── providers/
-└── i18n/
-messages/                权威中英文词典
-scripts/                 严格 i18n 一致性检查
-```
+![Frontend module map](../docs/assets/diagrams/frontend-module-map.png)
 
 主要路由包括 `/sessions/[id]`、`/knowledge`、`/automation`、
 `/patrols`、`/patrol-runs/[id]`、`/teams` 与 `/admin/*`。设置包含通用、Agent、
 推理、Skill、记忆、集成，以及仅管理员可见的运行时配置。
 
+## 执行与评测入口
+
+- `/runs/[id]`：Live/Playback 工作台与有界正文，历史模式不能直接触发当前动作。
+- `/analysis`、`/analysis/comparisons/[id]`：固定源分析、比较 Revision、差异与导出。
+- `/evaluations`：Dataset、Configuration、Rubric、Suite、Recording、Environment、Batch、Review 页面。
+- Provider 缓存 `inference`/`skills` 资源并提供 Scope；执行、分析和正文响应由各自 Hook 持有。身份/工作区切换使旧 Generation 失效，晚到响应不能跨作用域。
+- SSE 触发正式 View 回读；Feed Cursor、分页 Cursor 和历史 `at` 不能互换。Generated OpenAPI 类型位于 `src/lib/api/generated/schema.d.ts`，`npm run api:check` 检查契约同步。
+
 ## 开发
 
 ```bash
-npm install
+npm ci
+npm run format:check
+npm run api:check
 npm run i18n:check
 npm run typecheck
 npm run lint
@@ -60,8 +52,11 @@ npm run build
 API 访问统一使用 `src/lib/api/fetch.ts`；保持 TypeScript strict；业务组件放在对应
 领域目录；不要在 `src/lib/api/` 之外硬编码 API 路径。
 
-开发服务器为 `http://localhost:3000`，默认 API 为
-`http://localhost:8088/api`；生产通过反向代理使用 `/api`。
+开发服务地址是 `http://localhost:3000`。浏览器 API 默认是相对路径 `/api`；
+Next.js Rewrite 把它代理到 `NEXT_PUBLIC_API_PROXY_TARGET`（默认 `http://localhost:8088`）。
+`NEXT_PUBLIC_API_BASE_URL` 可显式覆盖浏览器 Base URL；生产流量由 Nginx 统一代理。
 
 参见[前端架构](../docs/architecture/frontend-ui.zh-CN.md)与
 [执行内核](../docs/architecture/execution-kernel.zh-CN.md)。
+
+[执行分析](../docs/architecture/execution-analysis.zh-CN.md) · [评测控制面](../docs/architecture/evaluation-control-plane.zh-CN.md)

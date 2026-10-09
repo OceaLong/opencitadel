@@ -37,7 +37,7 @@ class _FakeStorage:
     async def download_file(self, file_id: str):
         return BytesIO(b"ok"), File(id=file_id, filename="raw.txt")
 
-    async def delete_file(self, file_id: str):
+    async def delete_file(self, file_id: str, *, scope, force=False):
         self.deleted.append(file_id)
 
 

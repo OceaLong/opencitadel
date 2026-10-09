@@ -261,6 +261,36 @@ async def test_model_activity_rehydrates_history_and_governs_tool_intent() -> No
 
 
 @pytest.mark.asyncio
+async def test_model_without_tools_captures_empty_catalog_before_provider_dispatch() -> None:
+    events = []
+
+    class DisabledCatalog(Catalog):
+        async def definitions(self, payload, context):
+            pytest.fail("disabled tools must not build a catalog")
+
+        async def capture_disabled(self, context):
+            events.append(("capture", context.activity_id))
+
+    class PlainClient(Client):
+        async def invoke(self, messages, tools=None):
+            assert tools is None
+            events.append(("dispatch", None))
+            return {"content": "done", "tool_calls": []}
+
+    activity = request("model.call", input_payload={"allow_tools": False, "round": 0})
+    context = CONTEXT.model_copy(update={"activity_id": activity.activity_id})
+    outcome = await ModelCallActivityHandler(
+        objects=Objects(),
+        models=Models(),
+        tools=DisabledCatalog(),
+        client_factory=lambda *args, **kwargs: PlainClient(),
+    ).execute(activity, context)
+
+    assert outcome.status == "succeeded"
+    assert events == [("capture", activity.activity_id), ("dispatch", None)]
+
+
+@pytest.mark.asyncio
 async def test_model_activity_applies_temperature_and_records_provider_usage() -> None:
     objects = Objects()
     objects.input["temperature_override"] = 0.2
@@ -501,4 +531,12 @@ async def test_model_call_reports_token_usage_progress_when_sink_present() -> No
     )
 
     assert outcome.status == "succeeded"
-    assert reports == [{"kind": "model_usage", "prompt_tokens": 11, "completion_tokens": 7}]
+    assert reports == [
+        {
+            "kind": "step",
+            "phase": "model_response",
+            "status": "completed",
+            "progress": 100,
+            "message": "Model response complete",
+        }
+    ]

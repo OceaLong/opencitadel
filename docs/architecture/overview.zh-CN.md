@@ -2,39 +2,24 @@
 
 [English](overview.md)
 
-OpenCitadel 只有一个事件溯源执行内核。Agent、Ask、资源摄取、自动化、巡检和修复统一使用 PostgreSQL 命令、事件、Activity、定时器、审批与投影协议；系统中不存在第二套任务生命周期，也不让传输层持有工作流状态。
+OpenCitadel 只有一个事件溯源执行内核。Agent、Ask、资源摄取、自动化、巡检、修复及评测 Subject/Judge 统一使用 PostgreSQL 命令、事件、Activity、定时器、审批与投影协议；系统中不存在第二套任务生命周期，也不让传输层持有工作流状态。
 
 ## 运行拓扑
 
-```mermaid
-flowchart LR
-  Client[Web / API 客户端] --> API[无状态 API]
-  API --> Inbox[(命令收件箱)]
-  Scheduler[调度器 / Webhook] --> Inbox
-  Inbox --> Kernel[执行内核]
-  Kernel --> Events[(执行事件)]
-  Events --> Activities[(Activity 任务)]
-  Activities --> Kernel
-  Kernel --> Providers[LLM / 沙箱 / MCP / 存储]
-  Events --> Views[(正式投影)]
-  Views --> API
-  Events --> Public[(公开事件投影)]
-  Public --> SSE[SSE 重放与实时推送]
-  Kernel -. 可丢弃唤醒 .-> Redis[(Redis)]
-```
+![运行拓扑](../assets/diagrams/runtime-topology.png)
 
 PostgreSQL 是生命周期唯一权威。Redis 只用于降低唤醒和通知延迟；通知丢失不会丢失已接收工作，执行内核会轮询数据库待处理行并从已校验事件恢复。
 
 ## 进程与信任边界
 
-| 进程 | 职责 | 数据库角色 |
-| --- | --- | --- |
-| API | 认证授权、提交幂等命令、读取投影、提供 SSE | API 角色 |
-| 执行内核 | 决策 Run、追加事件、认领 Activity/定时器、构建正式投影 | 执行角色 |
-| Migrate | 执行 Alembic schema 与配置种子迁移 | 迁移角色 |
-| UI | 展示 API 投影与公开事件，不自行推断权威状态 | 无 |
-| 沙箱 Broker | 创建隔离沙箱，不向 API/内核暴露容器 socket | 无 |
-| Ops Collector / Actuator | 固定只读探针与审批后窄写入 | 服务专用 |
+| 进程                     | 职责                                                   | 数据库角色 |
+| ------------------------ | ------------------------------------------------------ | ---------- |
+| API                      | 认证授权、提交幂等命令、读取投影、提供 SSE             | API 角色   |
+| 执行内核                 | 决策 Run、追加事件、认领 Activity/定时器、构建正式投影 | 执行角色   |
+| Migrate                  | 执行 Alembic schema 与配置种子迁移                     | 迁移角色   |
+| UI                       | 展示 API 投影与公开事件，不自行推断权威状态            | 无         |
+| 沙箱 Broker              | 创建隔离沙箱，不向 API/内核暴露容器 socket             | 无         |
+| Ops Collector / Actuator | 固定只读探针与审批后窄写入                             | 服务专用   |
 
 Schema 所有权与运行时 DML 分离。所有按所有者隔离的执行表强制启用行级安全；事件存储还会校验每次追加的上下文与该流首次建立的 owner scope 完全一致。
 
@@ -86,7 +71,24 @@ Run、Activity、审批、资源构建和公开事件表都是可重建投影；
 
 ## API 与流式契约
 
-写接口只提交类型化命令。审批只能通过专用端点决策，聊天文本不能绕过审批。读接口返回正式投影。SSE 实时和重放统一读取脱敏后的 `execution_public_events`，以正式事件位置作为 cursor；Activity 私有输入和供应商载荷永不进入公开投影。
+执行写接口提交类型化命令；评测配置、分析偏好和捕获等产品写入遵循各自的授权事务。审批只能通过专用端点决策，聊天文本不能绕过审批。读接口返回正式投影或固定的观察切面。SSE 实时和重放统一读取脱敏后的 `execution_public_events`，以公开 Feed 的 `seq` 签名编码为不透明 Cursor。Feed 包含正式投影与离流进度，Cursor 不是正式事件位置，也不能充当历史回放的 `at`。Activity 私有输入和供应商载荷永不进入公开投影。
+
+## 执行工作台、分析与评测
+
+执行观察日志将正式投影和 Activity 进度分开记录，读模型以 `PlaybackBoundary` 固定 Run、
+OwnerScope、正式/进度位置、观察顺序、Projector Version 和 Revision。工作台展示有界
+Run/Step/Timeline/Body 页面，缺失历史显式显示完整性状态；浏览器不能从通知推断成功。
+
+分析、比较与导出固定源捕获及成员版本，并在读取和 Worker I/O 时重新检查当前权限。
+捕获不授予永久访问能力，旧捕获不会悄悄变成最新实时查询。
+
+评测控制面持有 Dataset、Suite、Configuration、Batch、Result、Score、Review、Environment
+及物理调用预算账本。Subject 使用原有 `agent`/`ask` Family，Judge 使用受限 `ask` 子 Run，
+以 `purpose` 区分用途，不增加 Run Family。四条评测消费通道归 `KernelRuntime` 的关键任务所有。
+隔离环境租约和未知调用预算义务分别治理；释放沙箱或关闭准入不能证明供应商调用已结算。
+
+实现文档与完整容量验收分别维护：AC21 的全规模参考环境、多轮采集及清理复用仍未闭环，
+不能由组件测试或本地工作台运行推导为通过。见[架构演进](architecture-evolution.zh-CN.md)。
 
 ## 失败与恢复规则
 
@@ -99,17 +101,20 @@ Run、Activity、审批、资源构建和公开事件表都是可重建投影；
 
 ## 代码地图
 
-| 边界 | 位置 |
-| --- | --- |
-| 命令、事件、聚合、决策 | `api/app/domain/execution/` |
-| 编排与 Activity | `api/app/application/execution/` |
-| PostgreSQL 存储与正式投影器 | `api/app/infrastructure/execution/` |
-| API/Kernel 强类型装配 | `api/app/composition/api.py`、`api/app/composition/kernel.py` |
-| 任务所有权与有界排空 | `api/app/composition/tasks.py` |
-| 执行内核进程 | `api/app/execution_kernel_main.py` |
-| 资源绑定模型 | `api/app/domain/models/resource_bindings.py` |
-| HTTP 接入与投影路由 | `api/app/interfaces/endpoints/` |
-| 浏览器作用域资源 | `ui/src/providers/client-data-provider.tsx` |
+| 边界                        | 位置                                                                                                                       |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 命令、事件、聚合、决策      | `api/app/domain/execution/`                                                                                                |
+| 编排与 Activity             | `api/app/application/execution/`                                                                                           |
+| PostgreSQL 存储与正式投影器 | `api/app/infrastructure/execution/`                                                                                        |
+| API/Kernel 强类型装配       | `api/app/composition/api.py`、`api/app/composition/kernel.py`                                                              |
+| 任务所有权与有界排空        | `api/app/composition/tasks.py`                                                                                             |
+| 执行内核进程                | `api/app/execution_kernel_main.py`                                                                                         |
+| 资源绑定模型                | `api/app/domain/models/resource_bindings.py`                                                                               |
+| HTTP 接入与投影路由         | `api/app/interfaces/endpoints/`                                                                                            |
+| 浏览器作用域资源            | `ui/src/providers/client-data-provider.tsx`                                                                                |
+| 执行读模型与观察日志        | `api/app/application/services/execution_view_service.py`、`api/app/infrastructure/execution/postgres_view_observations.py` |
+| 分析、比较与导出            | `api/app/composition/execution_analysis.py`、`api/app/interfaces/endpoints/execution_*_routes.py`                          |
+| 评测与物理调用预算          | `api/app/composition/evaluation.py`、`api/app/application/evaluation/`                                                     |
 
 ## 相关文档
 
@@ -117,3 +122,6 @@ Run、Activity、审批、资源构建和公开事件表都是可重建投影；
 - [安全模型](security-model.zh-CN.md)
 - [知识库摄取](knowledge-base-ingestion.zh-CN.md)
 - [自动化与调度器](automation-scheduler.zh-CN.md)
+- [执行分析、比较与导出](execution-analysis.zh-CN.md)
+- [评测控制面](evaluation-control-plane.zh-CN.md)
+- [前端 UI](frontend-ui.zh-CN.md)

@@ -45,6 +45,8 @@ function resolveApiMessage(body: {
  */
 export type RequestOptions = RequestInit & {
   timeout?: number;
+  /** Snapshot of the authorized workspace for a logical multi-request read. */
+  workspaceId?: string;
   skipErrorHandler?: boolean;
   skipAuthRefresh?: boolean;
   skipAuthRedirect?: boolean;
@@ -90,7 +92,11 @@ async function refreshAuthOnce(): Promise<unknown> {
   return refreshPromise;
 }
 
-function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): HeadersInit {
+function buildAuthHeaders(
+  method: string = "GET",
+  headers: HeadersInit = {},
+  workspaceId = activeWorkspaceId(),
+): HeadersInit {
   const mergedHeaders: HeadersInit = {
     ...headers,
   };
@@ -99,7 +105,6 @@ function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): He
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(upperMethod)) {
     (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
   }
-  const workspaceId = activeWorkspaceId();
   if (workspaceId) {
     (mergedHeaders as Record<string, string>)["X-Workspace-Id"] = workspaceId;
   }
@@ -112,10 +117,15 @@ export async function authenticatedFetch(
 ): Promise<Response> {
   const url = input.startsWith("http") ? input : `${API_CONFIG.baseURL}${input}`;
   const method = (options.method || "GET").toString().toUpperCase();
-  const { skipAuthRefresh = false, skipAuthRedirect = false, ...fetchOptions } = options;
+  const {
+    skipAuthRefresh = false,
+    skipAuthRedirect = false,
+    workspaceId = activeWorkspaceId(),
+    ...fetchOptions
+  } = options;
   const response = await fetch(url, {
     ...fetchOptions,
-    headers: buildAuthHeaders(method, fetchOptions.headers || {}),
+    headers: buildAuthHeaders(method, fetchOptions.headers || {}, workspaceId),
     credentials: "include",
   });
   if (response.status === 401 && !skipAuthRefresh) {
@@ -129,7 +139,7 @@ export async function authenticatedFetch(
     }
     return fetch(url, {
       ...fetchOptions,
-      headers: buildAuthHeaders(method, fetchOptions.headers || {}),
+      headers: buildAuthHeaders(method, fetchOptions.headers || {}, workspaceId),
       credentials: "include",
     });
   }
@@ -167,7 +177,8 @@ async function handleErrorResponse(response: Response): Promise<never> {
 
   try {
     errorData = await parseResponse(response);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
     errorData = {
       code: response.status,
       msg: response.statusText || translate("errors.requestFailed"),
@@ -191,41 +202,42 @@ function isRateLimitError(code: number, errorKey?: string | null): boolean {
 /**
  * 带超时的 fetch
  */
-function fetchWithTimeout(
+async function fetchWithTimeout<T>(
   url: string,
   options: RequestOptions = {},
-  timeout: number = API_CONFIG.timeout,
-): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new ApiError(408, translate("errors.requestTimeout")));
-    }, timeout);
-
-    fetch(url, {
-      ...options,
-      signal: controller.signal,
-    })
-      .then((response) => {
-        clearTimeout(timeoutId);
-        resolve(response);
-      })
-      .catch((error) => {
-        clearTimeout(timeoutId);
-        if (error.name === "AbortError") {
-          reject(new ApiError(408, translate("errors.requestTimeout")));
-        } else {
-          reject(error);
-        }
-      });
-  });
+  timeout: number,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    // Fetch resolves at headers; retain cancellation and timeout through the body.
+    return await consume(response);
+  } catch (error) {
+    if (timedOut) throw new ApiError(408, translate("errors.requestTimeout"));
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    options.signal?.removeEventListener("abort", abort);
+  }
 }
 
 /**
  * 核心请求函数
  */
-async function request<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+async function request<T = unknown>(
+  endpoint: string,
+  options: RequestOptions = {},
+  workspaceId = options.workspaceId ?? activeWorkspaceId(),
+): Promise<T> {
   const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
 
   const {
@@ -234,9 +246,11 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
     skipAuthRefresh = false,
     skipAuthRedirect = false,
     headers = {},
+    workspaceId: _workspaceId,
     ...fetchOptions
   } = options;
 
+  void _workspaceId;
   // 合并请求头
   const mergedHeaders: HeadersInit = {
     "Content-Type": "application/json",
@@ -247,7 +261,6 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
     (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
   }
-  const workspaceId = activeWorkspaceId();
   if (workspaceId) {
     (mergedHeaders as Record<string, string>)["X-Workspace-Id"] = workspaceId;
   }
@@ -258,7 +271,7 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
   }
 
   try {
-    const response = await fetchWithTimeout(
+    return await fetchWithTimeout<T>(
       url,
       {
         ...fetchOptions,
@@ -266,44 +279,46 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
         credentials: "include",
       },
       timeout,
-    );
-
-    // 处理 HTTP 错误状态码
-    if (!response.ok) {
-      if (response.status === 401 && !skipAuthRefresh) {
-        try {
-          await refreshAuthOnce();
-          return request<T>(endpoint, { ...options, skipAuthRefresh: true });
-        } catch {
-          if (!skipAuthRedirect) {
-            dispatchAuthRequired();
+      async (response) => {
+        // 处理 HTTP 错误状态码
+        if (!response.ok) {
+          if (response.status === 401 && !skipAuthRefresh) {
+            try {
+              await refreshAuthOnce();
+              return request<T>(endpoint, { ...options, skipAuthRefresh: true }, workspaceId);
+            } catch {
+              if (!skipAuthRedirect) {
+                dispatchAuthRequired();
+              }
+            }
           }
+          if (skipErrorHandler) {
+            return parseResponse<T>(response) as Promise<T>;
+          }
+          await handleErrorResponse(response);
         }
-      }
-      if (skipErrorHandler) {
-        return parseResponse<T>(response) as Promise<T>;
-      }
-      await handleErrorResponse(response);
-    }
 
-    const result = await parseResponse<T>(response);
+        const result = await parseResponse<T>(response);
 
-    // 处理业务错误（code 不在成功范围内）
-    if (result.code !== 0 && result.code !== 200) {
-      if (skipErrorHandler) {
+        // 处理业务错误（code 不在成功范围内）
+        if (result.code !== 0 && result.code !== 200) {
+          if (skipErrorHandler) {
+            return result.data as T;
+          }
+          throw new ApiError(
+            result.code,
+            resolveApiMessage(result),
+            result.data,
+            result.error_key,
+            result.error_params,
+          );
+        }
+
         return result.data as T;
-      }
-      throw new ApiError(
-        result.code,
-        resolveApiMessage(result),
-        result.data,
-        result.error_key,
-        result.error_params,
-      );
-    }
-
-    return result.data as T;
+      },
+    );
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
     if (error instanceof ApiError) {
       if (isRateLimitError(error.code, error.errorKey) && typeof window !== "undefined") {
         const { toast } = await import("sonner");
@@ -491,7 +506,7 @@ export async function createSSEStream(
         method: "POST",
         headers: {
           ...mergedHeaders,
-          ...buildAuthHeaders("POST", mergedHeaders),
+          ...buildAuthHeaders("POST", mergedHeaders, workspaceId),
         },
         body: JSON.stringify(data),
         signal: controller.signal,
@@ -531,6 +546,7 @@ export async function parseSSEStream(
   stream: ReadableStream<Uint8Array>,
   onEvent: (event: MessageEvent) => void,
   onError?: (error: Error) => void,
+  options: { propagateAbort?: boolean } = {},
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -540,17 +556,10 @@ export async function parseSSEStream(
     while (true) {
       const { done, value } = await reader.read();
 
-      if (done) {
-        // 处理缓冲区中剩余的数据
-        if (buffer.trim()) {
-          processSSEBuffer(buffer, onEvent, onError);
-        }
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // 标准化行尾：服务端可能使用 \r\n (CRLF)，统一转为 \n (LF)
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      // A trailing CR may be the first half of a CRLF in the next chunk.
+      const pendingCR = !done && buffer.endsWith("\r");
+      if (pendingCR) buffer = buffer.slice(0, -1);
       buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
       const parts = buffer.split("\n\n");
@@ -564,10 +573,17 @@ export async function parseSSEStream(
           processSSEEvent(part, onEvent, onError);
         }
       }
+      if (pendingCR) buffer += "\r";
+      if (done) {
+        if (buffer.trim()) processSSEBuffer(buffer, onEvent, onError);
+        break;
+      }
     }
   } catch (error) {
-    // 忽略 AbortError，这是正常的连接中止
+    // Legacy subscriptions deliberately consume cancellation; execution callers
+    // need AbortError to distinguish cancelled work from a completed stream.
     if (error instanceof Error && error.name === "AbortError") {
+      if (options.propagateAbort) throw error;
       return;
     }
     if (onError) {
@@ -704,4 +720,35 @@ function processSSEBuffer(
   for (const event of events) {
     processSSEEvent(event, onEvent, onError);
   }
+}
+
+/** Authenticated persistent GET SSE. The id is opaque and is never parsed. */
+export async function createAuthenticatedEventStream(
+  endpoint: string,
+  lastEventId?: string,
+  options: RequestOptions = {},
+): Promise<ReadableStream<Uint8Array>> {
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "text/event-stream");
+  if (lastEventId !== undefined) headers.set("Last-Event-ID", lastEventId);
+  const response = await authenticatedFetch(endpoint, {
+    ...options,
+    method: "GET",
+    headers: Object.fromEntries(headers.entries()),
+  });
+  if (!response.ok) await handleErrorResponse(response);
+  if (!response.body) throw new ApiError(500, translate("errors.emptyBody"));
+  return response.body;
+}
+
+/** Freeze scope across pagination; callers still guard user/generation ownership. */
+export function snapshotRequestOptions(options: RequestOptions = {}): RequestOptions {
+  return { ...options, workspaceId: options.workspaceId ?? activeWorkspaceId() };
+}
+
+/** Complete protected binary response, with common auth/scope/error handling. */
+export async function getBlob(endpoint: string, options: RequestOptions = {}): Promise<Blob> {
+  const response = await authenticatedFetch(endpoint, { ...options, method: "GET" });
+  if (!response.ok) await handleErrorResponse(response);
+  return response.blob();
 }

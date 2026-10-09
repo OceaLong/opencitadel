@@ -10,7 +10,9 @@
 ./scripts/quickstart.sh --demo
 ```
 
-Demo Profile 启动 Ops Collector 与 OpsConsole，注册只读 Collector Policy，并创建
+首次配置时设置 `BOOTSTRAP_ADMIN_PASSWORD` 与至少 32 字符的强 `OPS_COLLECTOR_TOKEN`。
+Quickstart 先构建动态 Sandbox 镜像，再启动服务栈。Demo Profile 启动 Ops Collector
+与 OpsConsole，注册只读 Collector Policy，并创建
 **Demo Governance Patrol**。如果未提供可选 `DEMO_INFERENCE_*` Seed 值，请在设置 → 推理中配置
 一个支持 Tool Call 的 Chat Binding。
 
@@ -30,7 +32,7 @@ Collector 返回注册 Evidence；由服务端 Assertion Engine 而非 LLM 决�
 ## 3. 批准一次 Browser Action
 
 1. 首页选择 **Web Operator**。
-2. 要求它打开 `http://localhost:9099` 并登录。
+2. 要求它打开 `http://ops-console:9099` 并登录。
 3. 保留精确 Host `ops-console, localhost`，声明目标为企业自有。
 4. Interactive Browser Activity 请求 Approval 时，检查冻结 Tool/Risk 细节并点击**批准**。
 

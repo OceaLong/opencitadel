@@ -1,9 +1,16 @@
-import { Stethoscope } from "lucide-react";
+import { BarChart3, FlaskConical, Stethoscope } from "lucide-react";
 import type { ComponentType } from "react";
 
 import { IconAdmin, IconAgent, IconAutomation, IconKnowledge } from "@/lib/icons";
 
-export type NavModuleKey = "chat" | "patrol" | "automation" | "knowledge" | "admin";
+export type NavModuleKey =
+  | "chat"
+  | "patrol"
+  | "automation"
+  | "knowledge"
+  | "admin"
+  | "evaluations"
+  | "analysis";
 
 export type NavModule = {
   key: NavModuleKey;
@@ -20,11 +27,19 @@ const prefixMatch = (prefix: string) => (pathname: string) =>
   pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 export const NAV_MODULES: NavModule[] = [
+  { key: "analysis", href: "/analysis", icon: BarChart3, match: prefixMatch("/analysis") },
+  {
+    key: "evaluations",
+    href: "/evaluations",
+    icon: FlaskConical,
+    match: prefixMatch("/evaluations"),
+  },
   {
     key: "chat",
     href: "/",
     icon: IconAgent,
-    match: (pathname) => pathname === "/" || pathname.startsWith("/sessions/"),
+    match: (pathname) =>
+      pathname === "/" || pathname.startsWith("/sessions/") || pathname.startsWith("/runs/"),
     hasContextPanel: true,
     mobilePrimary: true,
   },

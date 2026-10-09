@@ -13,7 +13,7 @@
 
 ## Testing
 
-- [ ] `uv run pytest` (api)
+- [ ] `make test-api` (API tests; the six current-invocation consumers run in acceptance)
 - [ ] `npm run test` (ui)
 - [ ] Manual smoke test (describe):
 
@@ -22,3 +22,7 @@
 - [ ] Documentation updated if needed
 - [ ] No secrets or credentials in diff
 - [ ] Follows existing code style
+
+- [ ] Bilingual docs and indexes synchronized; architecture diagrams regenerated with the skill and SVG/PNG reviewed
+- [ ] `./scripts/check-docs.sh`
+- [ ] `make quality-check`

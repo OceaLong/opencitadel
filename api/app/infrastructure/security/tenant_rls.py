@@ -29,6 +29,15 @@ POLICY_ROOT_TABLES = {
     "runtime_policy_heads",
 }
 
+EXECUTION_VIEW_TABLES = {
+    "execution_view_runs",
+    "execution_view_steps",
+    "execution_view_checkpoints",
+    "execution_view_observations",
+    "artifact_version_provenance",
+    "execution_usage_facts",
+}
+
 EXECUTION_ROOT_TABLES = {
     "execution_stream_owners",
     "execution_events",
@@ -325,7 +334,7 @@ def apply_row_level_security(execute) -> None:
                 inherited_predicate=child_predicate(table, parent, foreign_key, parent_key),
             )
         )
-    for table in sorted(EXECUTION_ROOT_TABLES):
+    for table in sorted(EXECUTION_ROOT_TABLES | EXECUTION_VIEW_TABLES):
         execute(policy_statements(table))
     execute(
         policy_statements(

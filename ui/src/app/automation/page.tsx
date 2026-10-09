@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Copy, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +40,7 @@ type WebhookCredentials = {
 };
 
 export default function AutomationPage() {
+  const router = useRouter();
   const t = useTranslations("automation");
   const tCommon = useTranslations("common");
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
@@ -188,7 +190,7 @@ export default function AutomationPage() {
       toast.success(t("runNowStarted"));
       await loadJobs();
       if (result.session_id) {
-        window.location.href = `/sessions/${result.session_id}`;
+        router.push(`/sessions/${result.session_id}`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("runNowFailed"));

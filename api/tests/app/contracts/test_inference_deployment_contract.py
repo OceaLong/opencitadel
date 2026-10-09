@@ -55,6 +55,7 @@ EXPECTED_RELEASE_IMAGES = {
     "api",
     "execution-kernel",
     "migrate",
+    "sandbox-broker",
     "ui",
     "sandbox",
     "ops-collector",

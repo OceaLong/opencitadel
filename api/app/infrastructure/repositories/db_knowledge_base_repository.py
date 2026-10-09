@@ -14,6 +14,7 @@ from app.domain.repositories.knowledge_base_repository import (
     KnowledgeBaseRepository,
 )
 from app.domain.repositories.patch import UNSET, UnsetType
+from app.infrastructure.execution.original_evidence import retain_read
 from app.infrastructure.models.knowledge_base import (
     KnowledgeBaseModel,
     KnowledgeDocumentModel,
@@ -91,7 +92,22 @@ class DBKnowledgeBaseRepository(
             )
         )
         result = await self.db_session.execute(stmt)
-        record = result.scalar_one_or_none()
+        try:
+            record = result.scalar_one_or_none()
+            retain_read(
+                self.db_session,
+                "resource-source",
+                "db_knowledge_base_repository.py",
+                {"scope": scope, "id": kb_id},
+                record,
+                source_result=result,
+            )
+        finally:
+            result.close()
+            synchronous = getattr(self.db_session, "sync_session", self.db_session)
+            forget_result = getattr(synchronous, "forget_result", None)
+            if callable(forget_result):
+                forget_result(result)
         return record.to_domain() if record else None
 
     async def get_kb_for_update(
@@ -173,7 +189,9 @@ class DBKnowledgeBaseRepository(
         result = await self.db_session.execute(stmt)
         return result.rowcount > 0
 
-    async def purge_kb(self, kb_id: str, scope: OwnerScope | None = None) -> bool:
+    async def purge_kb(
+        self, kb_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> bool:
         """清除：物理删除回收站中的知识库（owner 作用域内）。"""
         guard = self._apply_scope(
             select(KnowledgeBaseModel.id).where(
@@ -182,13 +200,24 @@ class DBKnowledgeBaseRepository(
             ),
             scope,
         )
-        result = await self.db_session.execute(guard)
+        result = await self.db_session.execute(guard.with_for_update())
         if result.scalar_one_or_none() is None:
             return False
+        from .db_resource_pin_repository import DBResourcePinRepository
+
+        await DBResourcePinRepository(self.db_session).guard_delete(
+            "knowledge_base", kb_id, force=force
+        )
         await self.delete_kb(kb_id)
         return True
 
     async def delete_kb(self, kb_id: str) -> None:
+        from .db_resource_pin_repository import DBResourcePinRepository
+
+        await self.db_session.execute(
+            select(KnowledgeBaseModel.id).where(KnowledgeBaseModel.id == kb_id).with_for_update()
+        )
+        await DBResourcePinRepository(self.db_session).guard_delete("knowledge_base", kb_id)
         await self.clear_index_data(kb_id)
         await self.db_session.execute(
             delete(KnowledgeVersionDocumentORM).where(

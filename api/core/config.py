@@ -45,6 +45,29 @@ def _is_overbroad_private_proxy_cidr(network: ipaddress._BaseNetwork) -> bool:
 class DeploymentSettings(BaseSettings):
     """Restart-bound process topology, connectivity, and secrets."""
 
+    # Evaluation deployment ceilings. Administrator environment settings; restart-bound.
+    evaluation_poll_interval_seconds: float = Field(default=1.0, gt=0, le=60)
+    evaluation_case_timeout_seconds: int = Field(default=1800, gt=0)
+    evaluation_batch_timeout_seconds: int = Field(default=86400, gt=0)
+    evaluation_subject_concurrency: int = Field(default=5, gt=0)
+    evaluation_judge_concurrency: int = Field(default=2, gt=0)
+    evaluation_execution_policy_revision: int = Field(default=1, gt=0)
+    evaluation_execution_global_limit: int | None = Field(default=None, gt=0)
+    evaluation_execution_user_limit: int | None = Field(default=None, gt=0)
+    physical_budget_policy_revision: int = Field(default=1, gt=0)
+    physical_global_concurrency: int | None = Field(default=None, gt=0)
+    physical_user_concurrency: int | None = Field(default=None, gt=0)
+    physical_provider_concurrency: int | None = Field(default=None, gt=0)
+    evaluation_environment_concurrency: int = Field(default=2, gt=0)
+    evaluation_environment_policy_revision: int = Field(default=1, gt=0)
+    evaluation_environment_global_limit: int | None = Field(default=None, gt=0)
+    evaluation_environment_user_limit: int | None = Field(default=None, gt=0)
+    evaluation_acceptance_enabled: bool = False
+    evaluation_budget_inventory_path: str = ""
+    evaluation_test_inventory_path: str = ""
+    evaluation_local_docker_enabled: bool = False
+    evaluation_broker_journal_path: str = "/var/lib/opencitadel-evaluation/operations.sqlite"
+
     # 项目基础
     env: str = "development"
     log_level: str = "INFO"

@@ -5,8 +5,13 @@ from importlib import import_module
 from app.infrastructure.models.base import Base
 
 MODEL_MODULES = (
+    "app.infrastructure.models.resource_pin",
     "app.infrastructure.execution.models",
     "app.infrastructure.models.audit_log",
+    "app.infrastructure.models.execution_view",
+    "app.infrastructure.models.execution_configuration",
+    "app.infrastructure.models.evaluation_dataset",
+    "app.infrastructure.models.evaluation_configuration",
     "app.infrastructure.models.delivery_artifact",
     "app.infrastructure.models.file",
     "app.infrastructure.models.integration_server",

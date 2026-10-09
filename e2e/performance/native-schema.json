@@ -1,0 +1,2898 @@
+{
+  "command": {
+    "$defs": {
+      "NativeFilters": {
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Start",
+            "type": "string"
+          },
+          "end": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "End",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "grain": {
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "title": "Grain",
+            "type": "string"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Family"
+          },
+          "configuration_revision": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Configuration Revision"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mode"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Purpose"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "timezone",
+          "grain"
+        ],
+        "title": "NativeFilters",
+        "type": "object"
+      },
+      "NativeHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "previous",
+              "next",
+              "time"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "anchor_at": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Anchor At",
+            "type": "string"
+          },
+          "target_time": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Time"
+          }
+        },
+        "required": [
+          "direction",
+          "anchor_at"
+        ],
+        "title": "NativeHistory",
+        "type": "object"
+      },
+      "NativeIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "enum": [
+              "first_screen",
+              "switch",
+              "history",
+              "analysis",
+              "matrix",
+              "live_visible"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "scope_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "view": {
+            "enum": [
+              "task",
+              "debug"
+            ],
+            "title": "View",
+            "type": "string"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NativeHistory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NativeFilters"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_rule": {
+            "const": "first-authenticated-causal-response-v1",
+            "default": "first-authenticated-causal-response-v1",
+            "title": "Binding Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "scope_id",
+          "session_id",
+          "run_id",
+          "step_id",
+          "batch_id",
+          "view",
+          "history",
+          "filters"
+        ],
+        "title": "NativeIntent",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "wire_version": {
+        "const": 1,
+        "title": "Wire Version",
+        "type": "integer"
+      },
+      "command": {
+        "const": "collect",
+        "title": "Command",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "warm",
+          "cold"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "attempt_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Attempt Id",
+        "type": "string"
+      },
+      "protocol_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Protocol Id",
+        "type": "string"
+      },
+      "sample_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Sample Id",
+        "type": "string"
+      },
+      "action_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Action Id",
+        "type": "string"
+      },
+      "context_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Context Id",
+        "type": "string"
+      },
+      "page_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Page Id",
+        "type": "string"
+      },
+      "window_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Window Id",
+        "type": "string"
+      },
+      "clock_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Clock Id",
+        "type": "string"
+      },
+      "intent": {
+        "$ref": "#/$defs/NativeIntent"
+      },
+      "deadline_ns": {
+        "pattern": "^(0|[1-9][0-9]{0,19})$",
+        "title": "Deadline Ns",
+        "type": "string"
+      },
+      "window_open_ns": {
+        "anyOf": [
+          {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Window Open Ns"
+      },
+      "resource_offset_ns": {
+        "pattern": "^(0|[1-9][0-9]{0,19})$",
+        "title": "Resource Offset Ns",
+        "type": "string"
+      },
+      "resource_duration_ns": {
+        "pattern": "^(0|[1-9][0-9]{0,19})$",
+        "title": "Resource Duration Ns",
+        "type": "string"
+      },
+      "require_positive_scroll": {
+        "title": "Require Positive Scroll",
+        "type": "boolean"
+      },
+      "max_captures": {
+        "const": 121,
+        "title": "Max Captures",
+        "type": "integer"
+      },
+      "viewport_width": {
+        "const": 1440,
+        "title": "Viewport Width",
+        "type": "integer"
+      },
+      "viewport_height": {
+        "const": 900,
+        "title": "Viewport Height",
+        "type": "integer"
+      },
+      "collector_feature": {
+        "const": "CDPScreenshotNewSurface",
+        "title": "Collector Feature",
+        "type": "string"
+      }
+    },
+    "required": [
+      "wire_version",
+      "command",
+      "mode",
+      "attempt_id",
+      "protocol_id",
+      "sample_id",
+      "action_id",
+      "context_id",
+      "page_id",
+      "window_id",
+      "clock_id",
+      "intent",
+      "deadline_ns",
+      "window_open_ns",
+      "resource_offset_ns",
+      "resource_duration_ns",
+      "require_positive_scroll",
+      "max_captures",
+      "viewport_width",
+      "viewport_height",
+      "collector_feature"
+    ],
+    "title": "NativeCommand",
+    "type": "object"
+  },
+  "record": {
+    "$defs": {
+      "NativeAction": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "action",
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "first_screen",
+              "switch",
+              "history",
+              "analysis",
+              "matrix",
+              "live_visible"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "trigger_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Trigger Ns",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "operation",
+          "trigger_ns"
+        ],
+        "title": "NativeAction",
+        "type": "object"
+      },
+      "NativeBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "sample_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Sample Id",
+            "type": "string"
+          },
+          "action_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Action Id",
+            "type": "string"
+          },
+          "page_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Page Id",
+            "type": "string"
+          },
+          "context_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Context Id",
+            "type": "string"
+          },
+          "clock_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Clock Id",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "response_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Response Id",
+            "type": "string"
+          },
+          "request_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Request Ns",
+            "type": "string"
+          },
+          "received_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Received Ns",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/Target"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          }
+        },
+        "required": [
+          "sample_id",
+          "action_id",
+          "page_id",
+          "context_id",
+          "clock_id",
+          "request_id",
+          "response_id",
+          "request_ns",
+          "received_ns",
+          "target",
+          "session_id",
+          "batch_id"
+        ],
+        "title": "NativeBinding",
+        "type": "object"
+      },
+      "NativeBindingObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "binding",
+            "title": "Kind",
+            "type": "string"
+          },
+          "binding": {
+            "$ref": "#/$defs/NativeBinding"
+          }
+        },
+        "required": [
+          "kind",
+          "binding"
+        ],
+        "title": "NativeBindingObservation",
+        "type": "object"
+      },
+      "NativeCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "capability",
+            "title": "Kind",
+            "type": "string"
+          },
+          "product": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Product",
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "protocol_version": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "executable_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executable Sha256"
+          },
+          "feature_enabled": {
+            "title": "Feature Enabled",
+            "type": "boolean"
+          },
+          "feature_conflict": {
+            "title": "Feature Conflict",
+            "type": "boolean"
+          },
+          "platform": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Platform",
+            "type": "string"
+          },
+          "browser_pid": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Pid"
+          },
+          "browser_start": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Start"
+          },
+          "renderer_pid": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renderer Pid"
+          },
+          "renderer_start": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renderer Start"
+          },
+          "frame_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "source_qualification_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Qualification Digest"
+          }
+        },
+        "required": [
+          "kind",
+          "product",
+          "revision",
+          "protocol_version",
+          "executable_sha256",
+          "feature_enabled",
+          "feature_conflict",
+          "platform",
+          "browser_pid",
+          "browser_start",
+          "renderer_pid",
+          "renderer_start",
+          "frame_id",
+          "source_qualification_digest"
+        ],
+        "title": "NativeCapability",
+        "type": "object"
+      },
+      "NativeCapture": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "capture",
+            "title": "Kind",
+            "type": "string"
+          },
+          "capture_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "readback_sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Readback Sequence",
+            "type": "integer"
+          },
+          "renderer_candidates": {
+            "items": {
+              "$ref": "#/$defs/NativeProcess"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Renderer Candidates",
+            "type": "array"
+          },
+          "dispatched_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Dispatched Ns",
+            "type": "string"
+          },
+          "received_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Received Ns",
+            "type": "string"
+          },
+          "postcheck_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Postcheck Ns",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 8388608,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "chunks": {
+            "exclusiveMinimum": 0,
+            "maximum": 171,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "width": {
+            "const": 1440,
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "const": 900,
+            "title": "Height",
+            "type": "integer"
+          },
+          "qualification": {
+            "enum": [
+              "pending-runtime-qualification",
+              "matched-reviewed-build"
+            ],
+            "title": "Qualification",
+            "type": "string"
+          },
+          "retention": {
+            "enum": [
+              "full",
+              "progress-region"
+            ],
+            "title": "Retention",
+            "type": "string"
+          },
+          "retained_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Retained Sha256",
+            "type": "string"
+          },
+          "retained_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 8388608,
+            "title": "Retained Bytes",
+            "type": "integer"
+          },
+          "crop_rect": {
+            "anyOf": [
+              {
+                "items": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop Rect"
+          },
+          "transform": {
+            "enum": [
+              "png-native-full-v1",
+              "png-lossless-text-hull-pad4-v1"
+            ],
+            "title": "Transform",
+            "type": "string"
+          },
+          "channels": {
+            "enum": [
+              3,
+              4
+            ],
+            "title": "Channels",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "capture_id",
+          "request_id",
+          "target_id",
+          "readback_sequence",
+          "renderer_candidates",
+          "dispatched_ns",
+          "received_ns",
+          "postcheck_ns",
+          "sha256",
+          "bytes",
+          "chunks",
+          "width",
+          "height",
+          "qualification",
+          "retention",
+          "retained_sha256",
+          "retained_bytes",
+          "crop_rect",
+          "transform",
+          "channels"
+        ],
+        "title": "NativeCapture",
+        "type": "object"
+      },
+      "NativeFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "error",
+            "title": "Kind",
+            "type": "string"
+          },
+          "code": {
+            "enum": [
+              "invalid-command",
+              "late-resource-open",
+              "response-binding",
+              "not-ready",
+              "hidden-content",
+              "unstable-content",
+              "missing-element-timing",
+              "observer-loss",
+              "unsupported-native-build",
+              "renderer-binding",
+              "capture-failed",
+              "deadline",
+              "transport",
+              "cancelled",
+              "resource-clock",
+              "progress-mapping"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "stage": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Stage",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "stage",
+          "request_id",
+          "evidence_digest"
+        ],
+        "title": "NativeFailure",
+        "type": "object"
+      },
+      "NativeImage": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "capture_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "chunk_index": {
+            "minimum": 0,
+            "title": "Chunk Index",
+            "type": "integer"
+          },
+          "data": {
+            "maxLength": 65536,
+            "minLength": 4,
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+            "title": "Data",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "capture_id",
+          "chunk_index",
+          "data"
+        ],
+        "title": "NativeImage",
+        "type": "object"
+      },
+      "NativeMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "progress-mapping",
+            "title": "Kind",
+            "type": "string"
+          },
+          "capture_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "progress_ids": {
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 120,
+            "minItems": 1,
+            "title": "Progress Ids",
+            "type": "array"
+          },
+          "painted_progress_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Painted Progress Id",
+            "type": "string"
+          },
+          "step_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          },
+          "revision": {
+            "exclusiveMinimum": 0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "public_message": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Public Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "capture_id",
+          "progress_ids",
+          "painted_progress_id",
+          "step_id",
+          "revision",
+          "public_message"
+        ],
+        "title": "NativeMapping",
+        "type": "object"
+      },
+      "NativeOpen": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "open",
+            "title": "Kind",
+            "type": "string"
+          },
+          "control_sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Control Sequence",
+            "type": "integer"
+          },
+          "source_receipt_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Source Receipt Id",
+            "type": "string"
+          },
+          "opened_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Opened Ns",
+            "type": "string"
+          },
+          "received_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Received Ns",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "control_sequence",
+          "source_receipt_id",
+          "opened_ns",
+          "received_ns"
+        ],
+        "title": "NativeOpen",
+        "type": "object"
+      },
+      "NativeOwner": {
+        "additionalProperties": false,
+        "properties": {
+          "serial": {
+            "exclusiveMinimum": 0,
+            "title": "Serial",
+            "type": "integer"
+          },
+          "content": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 4096,
+            "title": "Text",
+            "type": "string"
+          },
+          "identifier": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Identifier",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "result_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Id"
+          },
+          "rect": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Rect",
+            "type": "array"
+          },
+          "native_rect": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Native Rect",
+            "type": "array"
+          },
+          "text_rects": {
+            "items": {
+              "items": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Text Rects",
+            "type": "array"
+          },
+          "render_time_ms": {
+            "minimum": 0,
+            "title": "Render Time Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "serial",
+          "content",
+          "text",
+          "identifier",
+          "run_id",
+          "step_id",
+          "revision",
+          "result_id",
+          "rect",
+          "native_rect",
+          "text_rects",
+          "render_time_ms"
+        ],
+        "title": "NativeOwner",
+        "type": "object"
+      },
+      "NativePostcheck": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "postcheck",
+            "title": "Kind",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/Target"
+          },
+          "document_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "frame_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "execution_context_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Execution Context Id",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "mutation_sequence": {
+            "minimum": 0,
+            "title": "Mutation Sequence",
+            "type": "integer"
+          },
+          "owners": {
+            "items": {
+              "$ref": "#/$defs/NativeOwner"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "title": "Owners",
+            "type": "array"
+          },
+          "visible": {
+            "const": true,
+            "title": "Visible",
+            "type": "boolean"
+          },
+          "capture_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "readback_sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Readback Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "target",
+          "document_id",
+          "frame_id",
+          "execution_context_id",
+          "target_id",
+          "mutation_sequence",
+          "owners",
+          "visible",
+          "capture_id",
+          "readback_sequence"
+        ],
+        "title": "NativePostcheck",
+        "type": "object"
+      },
+      "NativePreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "preparation",
+            "title": "Kind",
+            "type": "string"
+          },
+          "started_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Started Ns",
+            "type": "string"
+          },
+          "completed_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Completed Ns",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "at": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "At",
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "started_ns",
+          "completed_ns",
+          "run_id",
+          "at",
+          "revision"
+        ],
+        "title": "NativePreparation",
+        "type": "object"
+      },
+      "NativePrivateChunk": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "private-chunk",
+            "title": "Kind",
+            "type": "string"
+          },
+          "artifact_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "native-trace",
+              "rejected-capture"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "chunk_index": {
+            "minimum": 0,
+            "title": "Chunk Index",
+            "type": "integer"
+          },
+          "data": {
+            "maxLength": 65536,
+            "minLength": 4,
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+            "title": "Data",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "purpose",
+          "chunk_index",
+          "data"
+        ],
+        "title": "NativePrivateChunk",
+        "type": "object"
+      },
+      "NativeProcess": {
+        "additionalProperties": false,
+        "properties": {
+          "pid": {
+            "exclusiveMinimum": 0,
+            "title": "Pid",
+            "type": "integer"
+          },
+          "start": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pid",
+          "start"
+        ],
+        "title": "NativeProcess",
+        "type": "object"
+      },
+      "NativePublicResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "public-response",
+            "title": "Kind",
+            "type": "string"
+          },
+          "binding": {
+            "$ref": "#/$defs/NativeBinding"
+          }
+        },
+        "required": [
+          "kind",
+          "binding"
+        ],
+        "title": "NativePublicResponse",
+        "type": "object"
+      },
+      "NativeReadback": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "readback",
+            "title": "Kind",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/Target"
+          },
+          "document_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "frame_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "execution_context_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Execution Context Id",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "mutation_sequence": {
+            "minimum": 0,
+            "title": "Mutation Sequence",
+            "type": "integer"
+          },
+          "owners": {
+            "items": {
+              "$ref": "#/$defs/NativeOwner"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "title": "Owners",
+            "type": "array"
+          },
+          "visible": {
+            "const": true,
+            "title": "Visible",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "target",
+          "document_id",
+          "frame_id",
+          "execution_context_id",
+          "target_id",
+          "mutation_sequence",
+          "owners",
+          "visible"
+        ],
+        "title": "NativeReadback",
+        "type": "object"
+      },
+      "NativeReady": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "ready",
+            "title": "Kind",
+            "type": "string"
+          },
+          "principal_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "scope_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "target_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "frame_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "subscription_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Request Id"
+          },
+          "subscription_event_seen": {
+            "title": "Subscription Event Seen",
+            "type": "boolean"
+          },
+          "subscription_event_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Event Id"
+          },
+          "subscription_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Cursor"
+          },
+          "subscription_started_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Started Ns"
+          },
+          "subscription_response_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Response Ns"
+          },
+          "observer_installed_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Observer Installed Ns",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "principal_id",
+          "scope_id",
+          "run_id",
+          "target_id",
+          "frame_id",
+          "subscription_request_id",
+          "subscription_event_seen",
+          "subscription_event_id",
+          "subscription_cursor",
+          "subscription_started_ns",
+          "subscription_response_ns",
+          "observer_installed_ns"
+        ],
+        "title": "NativeReady",
+        "type": "object"
+      },
+      "NativeResource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "resource",
+            "title": "Kind",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "preopen",
+              "capture",
+              "tail"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "document_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "frame_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "execution_context_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Execution Context Id",
+            "type": "string"
+          },
+          "local_ms": {
+            "minimum": 0,
+            "title": "Local Ms",
+            "type": "number"
+          },
+          "host_before_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Host Before Ns",
+            "type": "string"
+          },
+          "host_after_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Host After Ns",
+            "type": "string"
+          },
+          "frame_intervals_ms": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "title": "Frame Intervals Ms",
+            "type": "array"
+          },
+          "frame_times_ms": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "title": "Frame Times Ms",
+            "type": "array"
+          },
+          "long_tasks": {
+            "items": {
+              "items": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "maxItems": 128,
+            "title": "Long Tasks",
+            "type": "array"
+          },
+          "heap_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heap Bytes"
+          },
+          "mounted_rows": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mounted Rows"
+          },
+          "visible": {
+            "title": "Visible",
+            "type": "boolean"
+          },
+          "observer_lost": {
+            "title": "Observer Lost",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "phase",
+          "document_id",
+          "frame_id",
+          "execution_context_id",
+          "local_ms",
+          "host_before_ns",
+          "host_after_ns",
+          "frame_intervals_ms",
+          "frame_times_ms",
+          "long_tasks",
+          "heap_bytes",
+          "mounted_rows",
+          "visible",
+          "observer_lost"
+        ],
+        "title": "NativeResource",
+        "type": "object"
+      },
+      "NativeResourceBoundary": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "resource-boundary",
+            "title": "Kind",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "begin",
+              "end"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "observed_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Observed Ns",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "phase",
+          "observed_ns"
+        ],
+        "title": "NativeResourceBoundary",
+        "type": "object"
+      },
+      "NativeScroll": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "scroll",
+            "title": "Kind",
+            "type": "string"
+          },
+          "before": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Before",
+            "type": "array"
+          },
+          "after": {
+            "items": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "After",
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "realized-native-wheel",
+              "observed-nonoverflow"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "before",
+          "after",
+          "reason"
+        ],
+        "title": "NativeScroll",
+        "type": "object"
+      },
+      "NativeStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "closed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "observations-closed",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "records": {
+            "minimum": 0,
+            "title": "Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "outcome",
+          "records"
+        ],
+        "title": "NativeStatus",
+        "type": "object"
+      },
+      "NativeTraceCompletion": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "trace-completion",
+            "title": "Kind",
+            "type": "string"
+          },
+          "artifact_id": {
+            "const": "native-trace",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "stream_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Id"
+          },
+          "end_dispatched_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "End Dispatched Ns",
+            "type": "string"
+          },
+          "end_received_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Received Ns"
+          },
+          "complete_received_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete Received Ns"
+          },
+          "eof_received_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eof Received Ns"
+          },
+          "data_loss": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Loss"
+          },
+          "parser": {
+            "enum": [
+              "complete",
+              "failed",
+              "incomplete"
+            ],
+            "title": "Parser",
+            "type": "string"
+          },
+          "observed_bytes": {
+            "minimum": 0,
+            "title": "Observed Bytes",
+            "type": "integer"
+          },
+          "retained_bytes": {
+            "minimum": 0,
+            "title": "Retained Bytes",
+            "type": "integer"
+          },
+          "retained_chunks": {
+            "minimum": 0,
+            "title": "Retained Chunks",
+            "type": "integer"
+          },
+          "retained_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Retained Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "stream_id",
+          "end_dispatched_ns",
+          "end_received_ns",
+          "complete_received_ns",
+          "eof_received_ns",
+          "data_loss",
+          "parser",
+          "observed_bytes",
+          "retained_bytes",
+          "retained_chunks",
+          "retained_sha256"
+        ],
+        "title": "NativeTraceCompletion",
+        "type": "object"
+      },
+      "Target": {
+        "additionalProperties": false,
+        "properties": {
+          "scope_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "public_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Public Id",
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
+          }
+        },
+        "required": [
+          "scope_id",
+          "run_id",
+          "public_id",
+          "revision",
+          "step_id"
+        ],
+        "title": "Target",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "wire_version": {
+        "const": 1,
+        "title": "Wire Version",
+        "type": "integer"
+      },
+      "attempt_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Attempt Id",
+        "type": "string"
+      },
+      "protocol_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Protocol Id",
+        "type": "string"
+      },
+      "sample_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Sample Id",
+        "type": "string"
+      },
+      "action_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Action Id",
+        "type": "string"
+      },
+      "context_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Context Id",
+        "type": "string"
+      },
+      "page_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Page Id",
+        "type": "string"
+      },
+      "window_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Window Id",
+        "type": "string"
+      },
+      "clock_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Clock Id",
+        "type": "string"
+      },
+      "sequence": {
+        "exclusiveMinimum": 0,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "received_ns": {
+        "pattern": "^(0|[1-9][0-9]{0,19})$",
+        "title": "Received Ns",
+        "type": "string"
+      },
+      "observation": {
+        "discriminator": {
+          "mapping": {
+            "action": "#/$defs/NativeAction",
+            "binding": "#/$defs/NativeBindingObservation",
+            "capability": "#/$defs/NativeCapability",
+            "capture": "#/$defs/NativeCapture",
+            "closed": "#/$defs/NativeStatus",
+            "error": "#/$defs/NativeFailure",
+            "image": "#/$defs/NativeImage",
+            "open": "#/$defs/NativeOpen",
+            "postcheck": "#/$defs/NativePostcheck",
+            "preparation": "#/$defs/NativePreparation",
+            "private-chunk": "#/$defs/NativePrivateChunk",
+            "progress-mapping": "#/$defs/NativeMapping",
+            "public-response": "#/$defs/NativePublicResponse",
+            "readback": "#/$defs/NativeReadback",
+            "ready": "#/$defs/NativeReady",
+            "resource": "#/$defs/NativeResource",
+            "resource-boundary": "#/$defs/NativeResourceBoundary",
+            "scroll": "#/$defs/NativeScroll",
+            "trace-completion": "#/$defs/NativeTraceCompletion"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/NativeReady"
+          },
+          {
+            "$ref": "#/$defs/NativeBindingObservation"
+          },
+          {
+            "$ref": "#/$defs/NativeReadback"
+          },
+          {
+            "$ref": "#/$defs/NativePostcheck"
+          },
+          {
+            "$ref": "#/$defs/NativeImage"
+          },
+          {
+            "$ref": "#/$defs/NativeCapture"
+          },
+          {
+            "$ref": "#/$defs/NativeResource"
+          },
+          {
+            "$ref": "#/$defs/NativeResourceBoundary"
+          },
+          {
+            "$ref": "#/$defs/NativeOpen"
+          },
+          {
+            "$ref": "#/$defs/NativeTraceCompletion"
+          },
+          {
+            "$ref": "#/$defs/NativeAction"
+          },
+          {
+            "$ref": "#/$defs/NativeScroll"
+          },
+          {
+            "$ref": "#/$defs/NativeCapability"
+          },
+          {
+            "$ref": "#/$defs/NativeFailure"
+          },
+          {
+            "$ref": "#/$defs/NativeStatus"
+          },
+          {
+            "$ref": "#/$defs/NativePreparation"
+          },
+          {
+            "$ref": "#/$defs/NativePrivateChunk"
+          },
+          {
+            "$ref": "#/$defs/NativePublicResponse"
+          },
+          {
+            "$ref": "#/$defs/NativeMapping"
+          }
+        ],
+        "title": "Observation"
+      }
+    },
+    "required": [
+      "wire_version",
+      "attempt_id",
+      "protocol_id",
+      "sample_id",
+      "action_id",
+      "context_id",
+      "page_id",
+      "window_id",
+      "clock_id",
+      "sequence",
+      "received_ns",
+      "observation"
+    ],
+    "title": "NativeRecord",
+    "type": "object"
+  },
+  "control": {
+    "$defs": {
+      "Progress": {
+        "additionalProperties": false,
+        "properties": {
+          "phase": {
+            "enum": [
+              "setup",
+              "premeasurement",
+              "measured",
+              "tail"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "progress_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Progress Id",
+            "type": "string"
+          },
+          "window_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Window Id",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "activity_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Activity Id",
+            "type": "string"
+          },
+          "generation": {
+            "minimum": 0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "claim_generation": {
+            "exclusiveMinimum": 0,
+            "title": "Claim Generation",
+            "type": "integer"
+          },
+          "boot_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Boot Id",
+            "type": "string"
+          },
+          "pid": {
+            "exclusiveMinimum": 0,
+            "title": "Pid",
+            "type": "integer"
+          },
+          "marker_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Marker Id",
+            "type": "string"
+          },
+          "marker_sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Marker Sequence",
+            "type": "integer"
+          },
+          "marker_captured_ns": {
+            "minimum": 0,
+            "title": "Marker Captured Ns",
+            "type": "integer"
+          },
+          "event_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "before_ns": {
+            "minimum": 0,
+            "title": "Before Ns",
+            "type": "integer"
+          },
+          "after_ns": {
+            "minimum": 0,
+            "title": "After Ns",
+            "type": "integer"
+          },
+          "ack": {
+            "title": "Ack",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "source_identity": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Source Identity",
+            "type": "string"
+          },
+          "source_activity_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Source Activity Id",
+            "type": "string"
+          },
+          "source_generation": {
+            "minimum": 0,
+            "title": "Source Generation",
+            "type": "integer"
+          },
+          "source_claim_generation": {
+            "exclusiveMinimum": 0,
+            "title": "Source Claim Generation",
+            "type": "integer"
+          },
+          "source_sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Source Sequence",
+            "type": "integer"
+          },
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "observed_order": {
+            "exclusiveMinimum": 0,
+            "title": "Observed Order",
+            "type": "integer"
+          },
+          "projection_revision": {
+            "exclusiveMinimum": 0,
+            "title": "Projection Revision",
+            "type": "integer"
+          },
+          "public_event_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Public Event Id",
+            "type": "string"
+          },
+          "public_run_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Public Run Id",
+            "type": "string"
+          },
+          "public_message": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Public Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "progress_id",
+          "window_id",
+          "run_id",
+          "activity_id",
+          "generation",
+          "claim_generation",
+          "boot_id",
+          "pid",
+          "marker_id",
+          "marker_sequence",
+          "marker_captured_ns",
+          "event_id",
+          "sequence",
+          "before_ns",
+          "after_ns",
+          "ack",
+          "error",
+          "message",
+          "source_identity",
+          "source_activity_id",
+          "source_generation",
+          "source_claim_generation",
+          "source_sequence",
+          "applied",
+          "observed_order",
+          "projection_revision",
+          "public_event_id",
+          "public_run_id",
+          "public_message"
+        ],
+        "title": "Progress",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "wire_version": {
+        "const": 1,
+        "title": "Wire Version",
+        "type": "integer"
+      },
+      "command": {
+        "enum": [
+          "open",
+          "progress",
+          "close",
+          "cancel"
+        ],
+        "title": "Command",
+        "type": "string"
+      },
+      "attempt_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Attempt Id",
+        "type": "string"
+      },
+      "protocol_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Protocol Id",
+        "type": "string"
+      },
+      "sample_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Sample Id",
+        "type": "string"
+      },
+      "action_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Action Id",
+        "type": "string"
+      },
+      "context_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Context Id",
+        "type": "string"
+      },
+      "page_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Page Id",
+        "type": "string"
+      },
+      "window_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Window Id",
+        "type": "string"
+      },
+      "clock_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Clock Id",
+        "type": "string"
+      },
+      "sequence": {
+        "exclusiveMinimum": 0,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "source_receipt_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Source Receipt Id",
+        "type": "string"
+      },
+      "progress": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Progress"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "opened_ns": {
+        "anyOf": [
+          {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Opened Ns"
+      }
+    },
+    "required": [
+      "wire_version",
+      "command",
+      "attempt_id",
+      "protocol_id",
+      "sample_id",
+      "action_id",
+      "context_id",
+      "page_id",
+      "window_id",
+      "clock_id",
+      "sequence",
+      "source_receipt_id",
+      "progress"
+    ],
+    "title": "NativeControl",
+    "type": "object"
+  },
+  "failure": {
+    "$defs": {
+      "NativeLateHandle": {
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "new-context",
+              "new-page",
+              "new-session",
+              "browser-session"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind"
+        ],
+        "title": "NativeLateHandle",
+        "type": "object"
+      },
+      "NativePendingOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "sample_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Sample Id",
+            "type": "string"
+          },
+          "action_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Action Id",
+            "type": "string"
+          },
+          "stage": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Stage",
+            "type": "string"
+          },
+          "started_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Started Ns",
+            "type": "string"
+          },
+          "settled_ns": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]{0,19})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled Ns"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "fulfilled",
+              "rejected"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "late": {
+            "title": "Late",
+            "type": "boolean"
+          },
+          "error_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Digest"
+          }
+        },
+        "required": [
+          "operation_id",
+          "sample_id",
+          "action_id",
+          "stage",
+          "started_ns",
+          "settled_ns",
+          "state",
+          "late"
+        ],
+        "title": "NativePendingOperation",
+        "type": "object"
+      },
+      "NativeRetainedArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "observed_bytes": {
+            "minimum": 0,
+            "title": "Observed Bytes",
+            "type": "integer"
+          },
+          "retained_bytes": {
+            "maximum": 134217728,
+            "minimum": 0,
+            "title": "Retained Bytes",
+            "type": "integer"
+          },
+          "acknowledged_bytes": {
+            "minimum": 0,
+            "title": "Acknowledged Bytes",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "received_ns": {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "title": "Received Ns",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "observed_bytes",
+          "retained_bytes",
+          "acknowledged_bytes",
+          "sha256",
+          "received_ns"
+        ],
+        "title": "NativeRetainedArtifact",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "wire_version": {
+        "const": 1,
+        "title": "Wire Version",
+        "type": "integer"
+      },
+      "attempt_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Attempt Id",
+        "type": "string"
+      },
+      "protocol_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Protocol Id",
+        "type": "string"
+      },
+      "sample_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Sample Id",
+        "type": "string"
+      },
+      "action_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Action Id",
+        "type": "string"
+      },
+      "context_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Context Id",
+        "type": "string"
+      },
+      "page_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Page Id",
+        "type": "string"
+      },
+      "window_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Window Id",
+        "type": "string"
+      },
+      "clock_id": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Clock Id",
+        "type": "string"
+      },
+      "observed_ns": {
+        "pattern": "^(0|[1-9][0-9]{0,19})$",
+        "title": "Observed Ns",
+        "type": "string"
+      },
+      "failure_ns": {
+        "anyOf": [
+          {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Failure Ns"
+      },
+      "retention_deadline_ns": {
+        "anyOf": [
+          {
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Retention Deadline Ns"
+      },
+      "cause": {
+        "anyOf": [
+          {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Cause"
+      },
+      "discarded_bytes": {
+        "minimum": 0,
+        "title": "Discarded Bytes",
+        "type": "integer"
+      },
+      "held_bytes": {
+        "maximum": 134217728,
+        "minimum": 0,
+        "title": "Held Bytes",
+        "type": "integer"
+      },
+      "operations": {
+        "items": {
+          "$ref": "#/$defs/NativePendingOperation"
+        },
+        "maxItems": 128,
+        "title": "Operations",
+        "type": "array"
+      },
+      "handles": {
+        "items": {
+          "$ref": "#/$defs/NativeLateHandle"
+        },
+        "maxItems": 128,
+        "title": "Handles",
+        "type": "array"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/NativeRetainedArtifact"
+        },
+        "maxItems": 128,
+        "title": "Artifacts",
+        "type": "array"
+      },
+      "disposition": {
+        "enum": [
+          "pending",
+          "partial",
+          "settled"
+        ],
+        "title": "Disposition",
+        "type": "string"
+      }
+    },
+    "required": [
+      "wire_version",
+      "attempt_id",
+      "protocol_id",
+      "sample_id",
+      "action_id",
+      "context_id",
+      "page_id",
+      "window_id",
+      "clock_id",
+      "observed_ns",
+      "failure_ns",
+      "retention_deadline_ns",
+      "cause",
+      "discarded_bytes",
+      "held_bytes",
+      "operations",
+      "handles",
+      "artifacts",
+      "disposition"
+    ],
+    "title": "NativeFailureSnapshot",
+    "type": "object"
+  }
+}

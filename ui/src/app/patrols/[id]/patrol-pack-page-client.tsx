@@ -89,7 +89,7 @@ export function PatrolPackPageClient({ id }: { id: string }) {
           pack.id,
           globalThis.crypto?.randomUUID?.() ?? `${pack.id}-${Date.now()}`,
         );
-        window.location.href = `/patrol-runs/${run.id}`;
+        router.push(`/patrol-runs/${run.id}`);
       }
       await load();
     } catch (error) {

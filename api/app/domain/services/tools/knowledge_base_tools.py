@@ -204,6 +204,7 @@ class KnowledgeBaseTool(BaseTool):
             lines.append(f"- {src.name} --{relation.relation}--> {dst.name}")
         citations = [
             KnowledgeCitation(
+                knowledge_base_id=self._kb_id,
                 version_id=self._version_id,
                 document_revision_id=record.document_revision_id,
                 doc_id=record.document.id,
@@ -279,6 +280,7 @@ class KnowledgeBaseTool(BaseTool):
             lines.append(f"## p{chunk.page_no or '?'} {chunk.heading_path}\n{chunk.content}")
             citations.append(
                 KnowledgeCitation(
+                    knowledge_base_id=self._kb_id,
                     version_id=self._version_id,
                     document_revision_id=revision_id,
                     doc_id=doc.id,

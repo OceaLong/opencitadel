@@ -137,7 +137,9 @@ async def test_admission_injects_policy_snapshot_not_caller_input() -> None:
         ),
     )
     assert policy_heads.calls == [(True, NOW)]
-    assert objects.payloads == [{"policy_snapshot": "caller-controlled"}]
+    assert objects.payloads == [
+        {"policy_snapshot": "caller-controlled", "_execution_usage": {"purpose": "production"}}
+    ]
 
 
 @pytest.mark.asyncio
@@ -169,7 +171,9 @@ async def test_private_input_factory_uses_the_same_policy_as_the_run_snapshot() 
     )
 
     assert seen == [active.revision.policy]
-    assert objects.payloads == [{"max_iterations": 8}]
+    assert objects.payloads == [
+        {"max_iterations": 8, "_execution_usage": {"purpose": "production"}}
+    ]
     assert commands.commands[0].payload["policy_snapshot"]["family_policy"]["agent"] == {
         "max_iterations": 8,
         "max_retries": 4,

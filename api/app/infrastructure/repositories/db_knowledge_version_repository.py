@@ -131,6 +131,7 @@ class DBKnowledgeVersionRepository(
             deleted_versions=len(collected),
             protected_active_versions=protected["active"],
             protected_bound_versions=protected["bound"],
+            protected_pinned_versions=protected["pinned"],
             protected_building_versions=protected["building"],
             protected_age_versions=protected["age"],
             protected_retention_versions=protected["retention"],

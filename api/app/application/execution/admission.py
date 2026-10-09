@@ -11,6 +11,7 @@ from app.domain.execution.commands import CommandContext, JsonValue, RegisteredC
 from app.domain.execution.errors import AdmissionLimitExceededError
 from app.domain.execution.run import RunFamily
 from app.domain.models.scope import OwnerScope
+from app.domain.repositories.uow import IUnitOfWork
 from app.domain.runtime_policy import ExecutionPolicy
 from app.domain.runtime_policy.snapshot import derive_run_policy_snapshot
 
@@ -30,9 +31,11 @@ class RunAdmissionService:
         policy_heads: PolicyHeadReader,
         max_active_runs_per_scope: int = 0,
         clock=None,
+        configuration_resolver: Callable | None = None,
     ) -> None:
         if max_active_runs_per_scope < 0:
             raise ValueError("max_active_runs_per_scope must not be negative")
+        self._configuration_resolver = configuration_resolver
         self._commands = command_ingress
         self._objects = activity_objects
         self._policy_heads = policy_heads
@@ -57,6 +60,10 @@ class RunAdmissionService:
         parent_run_id: UUID | None = None,
         correlation_id: UUID | None = None,
         command_sink: CommandSink | None = None,
+        usage_purpose: str = "production",
+        configuration_resolver: Callable | None = None,
+        inference_read_context: IUnitOfWork | None = None,
+        judge_admission=None,
     ) -> UUID:
         resolved_run_id = run_id or (
             run_id_for_idempotency_key(idempotency_key) if idempotency_key else uuid4()
@@ -81,6 +88,50 @@ class RunAdmissionService:
         )
         if resolved_private_input is None:
             raise RuntimeError("private Run input resolution failed")
+        if usage_purpose == "business":
+            usage_purpose = "production"
+        if usage_purpose not in {"production", "evaluation_subject", "evaluation_judge", "unknown"}:
+            raise ValueError("invalid admitted usage purpose")
+        # Trusted server call parameter, never a marker copied from private input.
+        marker = {"purpose": usage_purpose}
+        if configuration_resolver is not None:
+            marker["configuration_id"] = await configuration_resolver(
+                owner_scope, resolved_run_id, active_policy.revision.policy
+            )
+        elif self._configuration_resolver is not None:
+            configuration_id = await self._configuration_resolver(
+                owner_scope,
+                resolved_run_id,
+                active_policy.revision.id,
+                resolved_private_input,
+                usage_purpose,
+                **(
+                    {"inference_read_context": inference_read_context}
+                    if inference_read_context is not None
+                    else {}
+                ),
+            )
+            if configuration_id is not None:
+                marker["configuration_id"] = configuration_id
+        workflow = dict(workflow or {})
+        workflow.pop("judge_protocol", None)
+        workflow.pop("judge_intent", None)
+        if judge_admission is not None:
+            from app.domain.evaluation.judge_protocol import JudgeAdmission
+
+            if (
+                type(judge_admission) is not JudgeAdmission
+                or judge_admission.run_id != resolved_run_id
+                or family != RunFamily.ASK
+                or usage_purpose != "evaluation_judge"
+                or source_entity_type != "evaluation_judge"
+                or source_entity_id != str(judge_admission.intent_id)
+            ):
+                raise ValueError("judge_admission_invalid")
+            workflow.update(judge_protocol=1, judge_intent=str(judge_admission.intent_id))
+        elif usage_purpose == "evaluation_judge":
+            raise ValueError("judge_admission_required")
+        resolved_private_input = {**resolved_private_input, "_execution_usage": marker}
         input_ref, input_digest = await self._objects.put_input(
             resolved_run_id,
             resolved_private_input,

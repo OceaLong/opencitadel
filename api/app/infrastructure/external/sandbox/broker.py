@@ -11,6 +11,13 @@ from typing import Any
 import docker
 from fastapi import Depends, FastAPI, Header, HTTPException
 
+from app.infrastructure.evaluation.broker_protocol import (
+    BrowserRequest,
+    ControlRequest,
+    LeaseRequest,
+    LifecycleRequest,
+    TargetRequest,
+)
 from app.infrastructure.external.sandbox.sandbox_container_policy import (
     CreateSandboxRequest,
     build_docker_sandbox_config,
@@ -176,8 +183,9 @@ def create_broker_app(
 ) -> FastAPI:
     """Create one broker app with immutable validated process configuration."""
 
+    settings = settings or load_deployment_settings()
     runtime = build_broker_runtime(
-        settings or load_deployment_settings(),
+        settings,
         docker_factory=docker_factory,
     )
     application = FastAPI(
@@ -216,6 +224,46 @@ def create_broker_app(
     )
     async def delete_route(sandbox_id: str) -> dict:
         return await delete_sandbox(sandbox_id, runtime)
+
+    if settings.evaluation_local_docker_enabled:
+        from app.infrastructure.evaluation.broker_service import EvaluationBroker
+
+        evaluations = EvaluationBroker(settings)
+
+        async def bounded(action):
+            import asyncio
+
+            try:
+                async with asyncio.timeout(140):
+                    return await action
+            except (ValueError, RuntimeError, TimeoutError) as error:
+                raise HTTPException(
+                    status_code=409, detail="evaluation_operation_unavailable"
+                ) from error
+
+        @application.post("/v1/evaluation/lifecycle", dependencies=[Depends(authorize)])
+        async def evaluation_lifecycle(body: LifecycleRequest):
+            return await bounded(evaluations.lifecycle(body))
+
+        @application.post("/v1/evaluation/case", dependencies=[Depends(authorize)])
+        async def evaluation_case(body: LeaseRequest):
+            return await bounded(evaluations.case(body.lease))
+
+        @application.post("/v1/evaluation/check", dependencies=[Depends(authorize)])
+        async def evaluation_check(body: LeaseRequest):
+            return await bounded(evaluations.check(body.lease))
+
+        @application.post("/v1/evaluation/control", dependencies=[Depends(authorize)])
+        async def evaluation_control(body: ControlRequest):
+            return await bounded(evaluations.control(body))
+
+        @application.post("/v1/evaluation/browser", dependencies=[Depends(authorize)])
+        async def evaluation_browser(body: BrowserRequest):
+            return await bounded(evaluations.browser(body))
+
+        @application.post("/v1/evaluation/target", dependencies=[Depends(authorize)])
+        async def evaluation_target(body: TargetRequest):
+            return await bounded(evaluations.target(body))
 
     return application
 

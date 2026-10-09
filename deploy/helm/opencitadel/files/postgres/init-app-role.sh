@@ -124,6 +124,10 @@ SELECT format(
   :'migration_user'
 )
 \gexec
+-- Fixed-DDL validation creates and drops a private scratch schema.
+-- This is database-local CREATE, not CREATEDB or an inheritable runtime grant.
+SELECT format('GRANT CREATE ON DATABASE %I TO %I', current_database(), :'migration_user')
+\gexec
 SELECT format('GRANT CREATE ON SCHEMA public TO %I', :'migration_user')
 \gexec
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

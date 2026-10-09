@@ -1,0 +1,50 @@
+# Acceptance-only publication: replace, rather than append to, deployment ports.
+services:
+  opencitadel-nginx:
+    ports: !override
+      - "127.0.0.1:${NGINX_PORT:-8088}:80"
+      - "127.0.0.1:${NGINX_HTTPS_PORT:-443}:443"
+  ops-console:
+    ports: !override
+      - "127.0.0.1:${OPS_CONSOLE_PORT:-9099}:9099"
+  opencitadel-api:
+    environment: &evaluation-settings
+      ENV: test
+      EVALUATION_ACCEPTANCE_ENABLED: "true"
+      EVALUATION_LOCAL_DOCKER_ENABLED: "true"
+      EVALUATION_TEST_INVENTORY_PATH: /etc/opencitadel-evaluation/environment.json
+      EVALUATION_BUDGET_INVENTORY_PATH: /etc/opencitadel-evaluation/budget.json
+      EVALUATION_EXECUTION_GLOBAL_LIMIT: "8"
+      EVALUATION_EXECUTION_USER_LIMIT: "8"
+      EVALUATION_ENVIRONMENT_GLOBAL_LIMIT: "2"
+      EVALUATION_ENVIRONMENT_USER_LIMIT: "2"
+      PHYSICAL_GLOBAL_CONCURRENCY: "8"
+      PHYSICAL_USER_CONCURRENCY: "8"
+      PHYSICAL_PROVIDER_CONCURRENCY: "8"
+      SANDBOX_LABELS: ${SANDBOX_LABELS}
+    volumes: &evaluation-configs
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-environment.json:/etc/opencitadel-evaluation/environment.json:ro
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-budget.json:/etc/opencitadel-evaluation/budget.json:ro
+  opencitadel-execution-kernel:
+    environment:
+      <<: *evaluation-settings
+      ACCEPTANCE_PROJECT_ID: ${ACCEPTANCE_PROJECT_ID}
+      ACCEPTANCE_RUN_ID: ${ACCEPTANCE_RUN_ID}
+    entrypoint: ["/app/.venv/bin/python", "/acceptance-driver/observed_kernel.py"]
+    command: []
+    volumes:
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-environment.json:/etc/opencitadel-evaluation/environment.json:ro
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-budget.json:/etc/opencitadel-evaluation/budget.json:ro
+      - ./scripts/acceptance:/acceptance-driver:ro
+  opencitadel-sandbox-broker:
+    environment: *evaluation-settings
+    volumes:
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-environment.json:/etc/opencitadel-evaluation/environment.json:ro
+      - ${ACCEPTANCE_EVIDENCE_DIR}/evaluation-budget.json:/etc/opencitadel-evaluation/budget.json:ro
+      - evaluation_broker_receipts:/var/lib/opencitadel-evaluation
+volumes:
+  evaluation_broker_receipts:
+    labels:
+      com.docker.compose.project: ${COMPOSE_PROJECT_NAME}
+      com.opencitadel.acceptance.project: ${ACCEPTANCE_PROJECT_ID}
+      com.opencitadel.acceptance.run: ${ACCEPTANCE_RUN_ID}

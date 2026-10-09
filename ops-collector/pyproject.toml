@@ -30,3 +30,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = ["integration: requires an explicitly configured disposable environment"]
+
+[tool.uv]
+# Kubernetes/MCP pull these transitively; enforce their fixed security versions.
+constraint-dependencies = ["pyjwt>=2.14.0", "urllib3>=2.8.0"]

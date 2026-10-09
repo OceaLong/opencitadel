@@ -33,11 +33,15 @@ def ensure_rls_capable_role(
 class Postgres:
     """Postgres数据库基础类，用于完成数据库连接等配置操作"""
 
-    def __init__(self, settings: DeploymentSettings) -> None:
+    def __init__(self, settings: DeploymentSettings, *, engine_observer=None) -> None:
         """构造函数，完成postgres数据库引擎、会话工厂的创建"""
         self._engine: AsyncEngine | None = None
         self._session_factory: async_sessionmaker | None = None
         self._settings = settings
+        self._engine_observer = engine_observer
+        self._observation_handles = []
+        self._upload_intent_engine: AsyncEngine | None = None
+        self._upload_intent_session_factory: async_sessionmaker | None = None
 
     async def init(self) -> None:
         """初始化postgres连接"""
@@ -46,6 +50,8 @@ class Postgres:
             logger.warning("Postgres引擎已初始化，无需重复操作")
             return
 
+        if self._observation_handles:
+            raise RuntimeError("observed capacity resource is single-use; owning process must exit")
         try:
             # 2.创建异步引擎
             logger.info("正在初始化Postgres连接...")
@@ -58,6 +64,9 @@ class Postgres:
                 pool_recycle=self._settings.postgres_pool_recycle_seconds,
             )
 
+            if self._engine_observer is not None:
+                self._observation_handles.append(self._engine_observer(self._engine.sync_engine))
+
             # 3.创建会话工厂
             self._session_factory = async_sessionmaker(
                 autocommit=False,
@@ -67,6 +76,27 @@ class Postgres:
                     "database_authorization_signing_secret": (
                         self._settings.database_authorization_signing_secret
                     ),
+                },
+            )
+            # Intent commits must make progress even when every ordinary write
+            # connection holds an artifact lock. Never borrow from that pool.
+            self._upload_intent_engine = create_async_engine(
+                self._settings.sqlalchemy_database_uri,
+                pool_size=2,
+                max_overflow=0,
+                pool_timeout=10,
+                pool_pre_ping=True,
+                connect_args={"command_timeout": 10},
+            )
+            if self._engine_observer is not None:
+                self._observation_handles.append(
+                    self._engine_observer(self._upload_intent_engine.sync_engine)
+                )
+            self._upload_intent_session_factory = async_sessionmaker(
+                self._upload_intent_engine,
+                autoflush=False,
+                info={
+                    "database_authorization_signing_secret": self._settings.database_authorization_signing_secret
                 },
             )
             logger.info("Postgres会话工厂创建完毕")
@@ -97,7 +127,14 @@ class Postgres:
             raise
 
     async def shutdown(self) -> None:
+        # Capacity observers remain installed through process exit. Disposing a
+        # pool does not prove every engine user drained; never mutate listeners
+        # here based only on active captures or checked-out connection counts.
         """关闭Postgres连接"""
+        if self._upload_intent_engine:
+            await self._upload_intent_engine.dispose()
+            self._upload_intent_engine = None
+            self._upload_intent_session_factory = None
         if self._engine:
             await self._engine.dispose()
             self._engine = None
@@ -110,3 +147,9 @@ class Postgres:
         if self._session_factory is None:
             raise RuntimeError("Postgres未初始化，请先调用init()函数初始化")
         return self._session_factory
+
+    @property
+    def upload_intent_session_factory(self) -> async_sessionmaker[AsyncSession]:
+        if self._upload_intent_session_factory is None:
+            raise RuntimeError("Postgres upload intent pool is not initialized")
+        return self._upload_intent_session_factory

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1290" viewBox="0 0 1440 1290" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">OpenCitadel · Security boundaries</title>
+<desc id="desc">Identity, scope, database roles, sandbox isolation and external effects are separate enforcement boundaries. Ops Collector and Actuator stay private and require bearer tokens plus narrow namespace/workload rules. Squid is a destination/port block policy, not a rendered hostname allowlist; model-call holds survive cleanup.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1290" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">OpenCitadel · Security boundaries</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Identity, scope, database roles, sandbox isolation and external effects are separate enforcement boundaries.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="client" data-target="proxy" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="proxy" data-target="api" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="api" data-target="pg" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="kernel" data-target="pg" d="M 780,500 L 900,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="kernel" data-target="broker" d="M 480,500 L 360,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="broker" data-target="sandbox" d="M 210,550 L 210,720" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="sandbox" data-target="egress" d="M 360,770 L 480,770" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-7" data-edge-id="edge-7" data-graph-role="edge" data-source="egress" data-target="public" d="M 780,770 L 900,770" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-8" data-edge-id="edge-8" data-graph-role="edge" data-source="kernel" data-target="providers" d="M 630,550 L 630,635 L 1360,635 L 1360,990" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="client" data-node-id="client" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Browser / API client</text>
+<text x="78" y="240" font-size="15" class="secondary">Untrusted content and model outputs</text>
+<text x="78" y="262" font-size="14" class="secondary">Only intended public entry points</text>
+</g>
+<g id="proxy" data-node-id="proxy" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Reverse proxy</text>
+<text x="498" y="240" font-size="15" class="secondary">HTTP / HTTPS; request hardening</text>
+<text x="498" y="262" font-size="14" class="secondary">API / UI behind gateway</text>
+</g>
+<g id="api" data-node-id="api" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Stateless API</text>
+<text x="918" y="240" font-size="15" class="secondary">Authenticated OwnerScope + admission</text>
+<text x="918" y="262" font-size="14" class="secondary">API database role; no workflow execution</text>
+</g>
+<g id="broker" data-node-id="broker" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Sandbox broker</text>
+<text x="78" y="510" font-size="15" class="secondary">Owns Docker socket in Compose</text>
+<text x="78" y="532" font-size="14" class="secondary">Validates sandbox admission</text>
+</g>
+<g id="kernel" data-node-id="kernel" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Execution kernel</text>
+<text x="498" y="510" font-size="15" class="secondary">Separate execution database role</text>
+<text x="498" y="532" font-size="14" class="secondary">Activities + fenced external calls</text>
+</g>
+<g id="pg" data-node-id="pg" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="473" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,473 V 486 Q 921,493 931,486 V 473" fill="none" stroke="#16a34a"/>
+<text x="944" y="483" font-size="20" font-weight="600">PostgreSQL</text>
+<text x="918" y="510" font-size="15" class="secondary">Forced RLS + append-only facts</text>
+<text x="918" y="532" font-size="14" class="secondary">Separate bootstrap / migration roles</text>
+</g>
+<g id="sandbox" data-node-id="sandbox" data-graph-role="node" data-bounds="60,720,360,820">
+<rect x="60" y="720" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="753" font-size="20" font-weight="600">Isolated workload</text>
+<text x="78" y="780" font-size="15" class="secondary">Browser / shell / files</text>
+<text x="78" y="802" font-size="14" class="secondary">Resource limits and authenticated API</text>
+</g>
+<g id="egress" data-node-id="egress" data-graph-role="node" data-bounds="480,720,780,820">
+<rect x="480" y="720" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="753" font-size="20" font-weight="600">Squid egress proxy</text>
+<text x="498" y="780" font-size="15" class="secondary">Block private targets / unsafe ports</text>
+<text x="498" y="802" font-size="14" class="secondary">Helm NetworkPolicy funnels egress</text>
+</g>
+<g id="public" data-node-id="public" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">Public web destinations</text>
+<text x="918" y="780" font-size="15" class="secondary">Browser / shell outbound traffic</text>
+<text x="918" y="802" font-size="14" class="secondary">Private targets and unsafe ports denied</text>
+</g>
+<g id="providers" data-node-id="providers" data-graph-role="node" data-bounds="900,990,1380,1090">
+<rect x="900" y="990" width="480" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="1008" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="1023" font-size="20" font-weight="600">Provider / Ops planes</text>
+<text x="918" y="1050" font-size="15" class="secondary">LLM / MCP / A2A / object storage</text>
+<text x="918" y="1072" font-size="14" class="secondary">Collector reads; approved Actuator writes</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">request</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">forward</text>
+<text x="1160" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">scoped I/O</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">scoped I/O</text>
+<text x="420" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">admit</text>
+<text x="249" y="640" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">create</text>
+<text x="420" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">outbound</text>
+<text x="840" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-7">public only</text>
+<text x="1210" y="623" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-8">provider / Ops call</text>
+<g data-graph-role="legend">
+<line x1="60" y1="1162" x2="96" y2="1162" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="1167" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="1162" x2="536" y2="1162" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="1167" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="1162" x2="976" y2="1162" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="1167" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="1210" font-size="15" class="secondary" data-graph-role="label">Ops Collector and Actuator stay private and require bearer tokens plus narrow namespace/workload rules.</text>
+<text x="60" y="1234" font-size="15" class="secondary" data-graph-role="label">Squid is a destination/port block policy, not a rendered hostname allowlist; model-call holds survive cleanup.</text>
+</svg>

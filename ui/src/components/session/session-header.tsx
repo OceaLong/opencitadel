@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -118,6 +118,13 @@ export const SessionHeader = memo(function SessionHeader({
   const t = useTranslations("sessionHeader");
   const tCommon = useTranslations("common");
   const [mounted, setMounted] = useState(false);
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = fileListOpen !== undefined;
   const openState = isControlled ? fileListOpen : internalOpen;
@@ -157,13 +164,15 @@ export const SessionHeader = memo(function SessionHeader({
     setTokenDetailLoading(true);
     try {
       const data = await sessionApi.getTokenUsage(sessionId);
+      if (!active.current) return;
       setTokenRecords(data.records ?? []);
     } catch (err) {
+      if (!active.current) return;
       const msg = err instanceof Error ? err.message : t("loadTokenDetailFailed");
       toast.error(msg);
       setTokenRecords([]);
     } finally {
-      setTokenDetailLoading(false);
+      if (active.current) setTokenDetailLoading(false);
     }
   }, [sessionId, t]);
 
@@ -174,13 +183,15 @@ export const SessionHeader = memo(function SessionHeader({
       setDownloadingId(file.id);
       try {
         const blob = await fileApi.downloadFile(file.id);
+        if (!active.current) return;
         downloadBlob(blob, file.filename || `file-${file.id}`);
         toast.success(t("downloadSuccess", { filename: file.filename }));
       } catch (err) {
+        if (!active.current) return;
         const msg = err instanceof Error ? err.message : t("downloadFailed");
         toast.error(t("downloadFailedWithName", { filename: file.filename, error: msg }));
       } finally {
-        setDownloadingId(null);
+        if (active.current) setDownloadingId(null);
       }
     },
     [downloadingId, t],

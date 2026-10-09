@@ -3,27 +3,17 @@
 [简体中文](execution-kernel.zh-CN.md)
 
 OpenCitadel has one execution runtime for Agent, Ask, knowledge ingestion,
-automation, patrol, and remediation. PostgreSQL execution
+automation, patrol, remediation, and evaluation subject/Judge Runs. PostgreSQL execution
 events are the only lifecycle authority. Product tables store content and query
 projections; Redis is only a disposable wake-up transport.
 
 ## Runtime topology
 
-```mermaid
-flowchart LR
-  Client[API / scheduler] --> Inbox[(Command inbox)]
-  Inbox --> Decision[Deterministic decisions]
-  Decision --> Events[(execution_events)]
-  Events --> Activity[(Activity tasks)]
-  Events --> Timer[(Scheduled commands)]
-  Events --> Outbox[(Wake-up outbox)]
-  Activity --> Worker[Execution kernel]
-  Worker --> Providers[LLM / sandbox / MCP / A2A / storage]
-  Worker --> Inbox
-  Events --> Projection[Formal projectors]
-  Projection --> Query[Run / approval / resource views]
-  Projection --> SSE[Public SSE replay]
-```
+![Execution kernel and bounded read models](../assets/diagrams/execution-read-model.png)
+
+The diagram separates lifecycle facts, off-stream progress, and query views.
+Evaluation orchestrators submit commands through the same admission boundary;
+they do not introduce another execution engine.
 
 The API validates identity and owner scope, persists a command, and returns or
 streams projections. It never executes workflow steps. The execution-kernel
@@ -68,14 +58,21 @@ Multiple execution-kernel replicas run safely against the same database:
   slow or duplicated projection can never overwrite newer state.
 - **Poison isolation.** A decision row that cannot be processed is quarantined
   by `run_id` in `execution_poisoned_runs` and counted
-  (`execution_poisoned_runs_total`) rather than aborting the whole batch; each
-  control-plane lane also isolates its own failures so one lane cannot crash the
-  others.
+  (`execution_poisoned_runs_total`) rather than aborting the whole batch.
+  Owner-scoped authorization revocation is handled locally. Unexpected failures
+  in critical runtime lanes still withdraw readiness and request shutdown; poison
+  isolation does not suppress durable-store or control-plane failures.
 
 ## Run and Activity protocol
 
 Every production behavior is a `Run` in one of six families: `agent`, `ask`,
 `kb_ingest`, `automation`, `patrol`, or `remediation`.
+
+Evaluation subjects reuse the configured `agent` or `ask` family; a restricted
+Judge is an `ask` child Run with source type `evaluation_judge`. Batch, score, and
+review state belong to the [evaluation control plane](evaluation-control-plane.md),
+not to additional Run families.
+
 A Run accepts typed commands and produces typed events through a pure decision
 handler. Only one terminal event can be accepted.
 
@@ -104,10 +101,34 @@ readable. Session resource bindings pin a concrete published version.
 
 ## Public events and recovery
 
-SSE live delivery and replay read the same sanitized public-event projection.
-The cursor is the formal event position; reconnecting does not change workflow
-state. Private Activity inputs and provider payloads never enter the public
-projection.
+Live delivery and replay use sanitized database projections. Formal events
+carry their original event position. Activity progress is an off-stream telemetry
+source and is not a lifecycle fact; it cannot complete, fail, or cancel a Run.
+Private Activity inputs and provider payloads never enter the public projection.
+
+## Execution visualization read model
+
+The formal projector and `PostgresActivityProgressSink` feed the per-Run
+`execution_view_observations` journal. Each observation records its source
+identity and source kind (`formal` or `progress`); insertion, deduplication,
+ordering, and view updates share one transaction and per-Run serialization.
+Formal source replay reuses its original observation cut. Progress telemetry
+failure is nonfatal to the executing Activity, so a view must expose missing
+coverage instead of assuming a complete history.
+
+The typed query service reconstructs Run, step, timeline, approval, artifact, and
+message views at one `PlaybackBoundary`. That boundary binds `run_id`,
+`formal_position`, `progress_position`, `observed_order`, projection revision,
+projector version, and observation time. Signed cursors also bind OwnerScope and
+the query digest. An event position alone is therefore insufficient to identify
+an execution-view cut. List/cohort captures, shadow generations, and read caches
+accelerate bounded queries; they do not create execution facts. An unavailable
+or expired cut is reported explicitly, and partial history retains completeness
+and missing-interval metadata.
+
+Analysis, comparisons, and exports consume captured sources and pins over these
+read models. Their metrics and saved views do not override formal Run state;
+current access checks and redaction still apply to retained query artifacts.
 
 Recovery always starts from PostgreSQL: verify the event chain, load a valid
 snapshot when available, replay later events, and reclaim expired database
@@ -119,7 +140,9 @@ closed and emits operational evidence.
 
 `app.composition.kernel` constructs one immutable `KernelRuntime`; it never
 shares the API's resources. Its `TaskSupervisor` owns the execution loop,
-heartbeat, scheduler, policy listener, sandbox pool, and maintenance loops.
+heartbeat, scheduler, policy listener, sandbox pool, and maintenance loops. It
+also owns four critical evaluation lanes: scheduling, reconciliation, scoring,
+and cleanup.
 Critical-task failure requests process shutdown, while an auxiliary listener
 may restart under its declared bounded policy.
 
@@ -147,3 +170,15 @@ are post-commit effects.
 Row-level security is enabled and forced on every owner-scoped execution table.
 The store rejects an append whose context differs from the existing stream
 scope even when the caller has system authorization.
+
+## Implementation anchors
+
+- Runtime ownership: `api/app/composition/kernel.py`,
+  `api/app/composition/kernel_runtime.py`.
+- Formal authority and projections: `api/app/infrastructure/execution/postgres_event_store.py`,
+  `api/app/infrastructure/execution/postgres_formal_projector.py`.
+- Progress and observation journal: `api/app/infrastructure/execution/postgres_progress_sink.py`,
+  `api/app/infrastructure/execution/postgres_view_observations.py`.
+- Bounded views and cursors: `api/app/application/services/execution_view_service.py`,
+  `api/app/application/execution/view_cursor.py`,
+  `api/app/infrastructure/execution/postgres_execution_view.py`.

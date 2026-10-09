@@ -13,8 +13,9 @@ It is composed of three explicit resources:
   `rerank`.
 
 There is no environment-key fallback, implicit default model, or separate
-vector credential path. A consumer resolves a purpose binding or fails closed
-with a stable error key.
+vector credential path. A consumer resolves an explicitly selected configured
+model or a purpose binding, and fails closed with a stable error key when that
+selection cannot be authorized/resolved.
 
 ## Scope and resolution
 
@@ -26,14 +27,16 @@ scope.
 
 Resolution verifies the purpose/kind contract. `chat` and `rerank` require a
 chat model; `embedding` requires an embedding model with the platform dimension
-of 1536. When no explicit rerank binding exists, rerank may resolve the chat
+of 1536. Team-purpose binding changes require team `OWNER` or `ADMIN` (global
+binding changes require platform admin). When no explicit rerank binding exists, rerank may resolve the chat
 binding. Missing, inaccessible, or mismatched resources never fall through to
 an unrelated provider.
 
 ## Providers and credentials
 
 The registry is the single source of truth for supported provider/kind pairs:
-OpenAI, Azure OpenAI, Ollama, Anthropic, and Gemini. Mutation validates the
+OpenAI, Azure OpenAI, and Ollama support chat and embedding; Anthropic and
+Gemini support chat only. Mutation validates the
 pair before persistence. Ollama may run without a credential; providers that
 require one fail closed when it is absent.
 
@@ -45,13 +48,17 @@ explicit previous-key ring supports planned rotation.
 ## Capabilities and consumers
 
 `GET /api/capabilities` projects owner-scoped availability for chat,
-embeddings, rerank, A2A, Patrol, and Patrol remediation. UI and server admission
+embeddings, rerank, A2A, Patrol, Patrol remediation, PDF reports, and web search.
+The response also includes caller/workspace execution grants, distinct from
+provider availability. UI and server admission
 consume the same states (`available`, `degraded`, `not_configured`, `disabled`,
 or `denied`) and stable reason keys.
 
 Chat execution, knowledge/memory vectorization, and reranking resolve
-the control plane at call time. Vector consumers can be individually disabled
-through the active Execution Policy, but enabled consumers never read a standalone API key or
+the control plane under OwnerScope; admission/configuration records pin selected
+identities for execution evidence. Vector enablement and resilience use the
+Run's frozen Execution Policy. Vector consumers can be individually disabled
+through Execution Policy, but enabled consumers never read a standalone API key or
 base URL. The UI guides missing capabilities to **Settings → Inference**.
 
 ## API and operations

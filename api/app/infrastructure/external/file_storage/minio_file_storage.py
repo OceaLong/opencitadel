@@ -9,8 +9,11 @@ from starlette.concurrency import run_in_threadpool
 
 from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.models.file import File
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.storage.minio import Minio
+
+from .immutable_upload import immutable_upload
 
 logger = logging.getLogger(__name__)
 
@@ -30,42 +33,45 @@ class MinioFileStorage(FileStorage):
 
     async def upload_file(self, payload: FileUploadPayload) -> File:
         try:
-            file_id = str(uuid.uuid4())
-            _, file_extension = os.path.splitext(payload.filename)
-            if not file_extension:
-                file_extension = ""
+            with immutable_upload(payload.file) as (prepared, content_digest, verified_size):
+                file_id = str(uuid.uuid4())
+                _, file_extension = os.path.splitext(payload.filename)
+                if not file_extension:
+                    file_extension = ""
 
-            date_path = datetime.now(UTC).strftime("%Y/%m/%d")
-            object_key = f"{date_path}/{file_id}{file_extension}"
+                date_path = datetime.now(UTC).strftime("%Y/%m/%d")
+                object_key = f"{date_path}/{file_id}{file_extension}"
 
-            length = payload.size if payload.size is not None else -1
-            put_kwargs = {
-                "bucket_name": self.bucket,
-                "object_name": object_key,
-                "data": payload.file,
-                "length": length,
-                "content_type": payload.content_type or "application/octet-stream",
-            }
-            if length == -1:
-                put_kwargs["part_size"] = 10 * 1024 * 1024
-            await run_in_threadpool(self.minio.client.put_object, **put_kwargs)
-            logger.info("文件上传成功: %s (ID: %s)", payload.filename, file_id)
+                length = verified_size
+                put_kwargs = {
+                    "bucket_name": self.bucket,
+                    "object_name": object_key,
+                    "data": prepared,
+                    "length": length,
+                    "content_type": payload.content_type or "application/octet-stream",
+                }
+                if length == -1:
+                    put_kwargs["part_size"] = 10 * 1024 * 1024
+                await run_in_threadpool(self.minio.client.put_object, **put_kwargs)
+                logger.info("文件上传成功: %s (ID: %s)", payload.filename, file_id)
 
-            file = File(
-                id=file_id,
-                filename=payload.filename,
-                key=object_key,
-                extension=file_extension,
-                mime_type=payload.content_type or "",
-                size=payload.size,
-                owner_user_id=payload.owner_user_id,
-                team_id=payload.team_id,
-            )
-            async with self._uow_factory() as uow:
-                await uow.file.save(file)
-                await uow.commit()
+                file = File(
+                    id=file_id,
+                    filename=payload.filename,
+                    key=object_key,
+                    extension=file_extension,
+                    mime_type=payload.content_type or "",
+                    size=verified_size,
+                    content_digest=content_digest,
+                    object_identity=str(uuid.uuid4()),
+                    owner_user_id=payload.owner_user_id,
+                    team_id=payload.team_id,
+                )
+                async with self._uow_factory() as uow:
+                    await uow.file.save(file)
+                    await uow.commit()
 
-            return file
+                return file
         except (OSError, RuntimeError, ValueError) as exc:
             logger.error("上传文件[%s]失败: %s", payload.filename, exc)
             raise
@@ -74,7 +80,7 @@ class MinioFileStorage(FileStorage):
         try:
             async with self._uow_factory() as uow:
                 file = await uow.file.get_by_id(file_id)
-            if not file:
+            if not file or not file.content_available:
                 raise ValueError(f"该文件不存在, 文件id: {file_id}")
 
             response = await run_in_threadpool(
@@ -87,19 +93,21 @@ class MinioFileStorage(FileStorage):
             logger.error("下载文件[%s]失败: %s", file_id, exc)
             raise
 
-    async def delete_file(self, file_id: str) -> None:
+    async def delete_file(
+        self, file_id: str, *, scope: OwnerScope | None = None, force: bool = False
+    ) -> None:
         """根据文件id删除 MinIO 对象及数据库记录。"""
         try:
+            # Durable unavailability precedes external deletion. A failed object
+            # call leaves a retryable tombstone; a concurrent pin cannot revive it.
             async with self._uow_factory() as uow:
-                file = await uow.file.get_by_id(file_id)
+                file = await uow.file.prepare_delete(file_id, scope=scope, force=force)
                 if not file:
                     raise ValueError(f"该文件不存在, 文件id: {file_id}")
-                await run_in_threadpool(
-                    self.minio.client.remove_object,
-                    self.bucket,
-                    file.key,
-                )
-                await uow.file.delete(file_id)
+                await uow.commit()
+            await run_in_threadpool(self.minio.client.remove_object, self.bucket, file.key)
+            async with self._uow_factory() as uow:
+                await uow.file.delete(file_id, scope=scope)
                 await uow.commit()
             logger.info("文件删除成功: %s (ID: %s)", file.filename, file_id)
         except (OSError, RuntimeError, ValueError) as exc:

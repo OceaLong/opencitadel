@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="740" viewBox="0 0 1440 740" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Runtime Policy · Revision, head and consumers</title>
+<desc id="desc">A mutation activates an immutable revision under CAS; each process verifies the atomic policy pair. Redis publishes refresh hints after commit; a lost hint never changes the PostgreSQL policy head. Transient storage loss may use a verified bounded cache, while readiness reports policy unavailable.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="740" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Runtime Policy · Revision, head and consumers</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">A mutation activates an immutable revision under CAS; each process verifies the atomic policy pair.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="admin" data-target="mutation" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="mutation" data-target="pg" d="M 780,230 L 900,230" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="pg" data-target="reader" d="M 1110.0,280 L 1110.0,450" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="reader" data-target="consumer" d="M 900,500 L 780,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="consumer" data-target="envelope" d="M 480,500 L 360,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="admin" data-node-id="admin" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Administrator</text>
+<text x="78" y="240" font-size="15" class="secondary">Execution / Operations family routes</text>
+<text x="78" y="262" font-size="14" class="secondary">Expected head version required</text>
+</g>
+<g id="mutation" data-node-id="mutation" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Policy mutation</text>
+<text x="498" y="240" font-size="15" class="secondary">Canonical digest + author + revision</text>
+<text x="498" y="262" font-size="14" class="secondary">Persist revision and activate atomically</text>
+</g>
+<g id="pg" data-node-id="pg" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="921" cy="203" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 911,203 V 216 Q 921,223 931,216 V 203" fill="none" stroke="#16a34a"/>
+<text x="944" y="213" font-size="20" font-weight="600">PostgreSQL policy head</text>
+<text x="918" y="240" font-size="15" class="secondary">Execution + Operations revision IDs</text>
+<text x="918" y="262" font-size="14" class="secondary">Monotonic head version</text>
+</g>
+<g id="reader" data-node-id="reader" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Verified local reader</text>
+<text x="918" y="510" font-size="15" class="secondary">Schema / digest / pair / staleness</text>
+<text x="918" y="532" font-size="14" class="secondary">Process-owned bounded cache</text>
+</g>
+<g id="consumer" data-node-id="consumer" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">API / kernel consumers</text>
+<text x="498" y="510" font-size="15" class="secondary">Execution admission snapshots policy</text>
+<text x="498" y="532" font-size="14" class="secondary">Operations checks current boundaries</text>
+</g>
+<g id="envelope" data-node-id="envelope" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Sandbox create envelope</text>
+<text x="78" y="510" font-size="15" class="secondary">Kernel admission passes policy values</text>
+<text x="78" y="532" font-size="14" class="secondary">Broker validates; no policy DB access</text>
+</g>
+<text x="420.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">CAS request</text>
+<text x="840.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">commit</text>
+<text x="1144.2" y="370.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">verify</text>
+<text x="840.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">apply</text>
+<text x="420.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">admit</text>
+<g data-graph-role="legend">
+<line x1="60" y1="612" x2="96" y2="612" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="617" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="612" x2="536" y2="612" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="617" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="612" x2="976" y2="612" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="617" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="660" font-size="15" class="secondary" data-graph-role="label">Redis publishes refresh hints after commit; a lost hint never changes the PostgreSQL policy head.</text>
+<text x="60" y="684" font-size="15" class="secondary" data-graph-role="label">Transient storage loss may use a verified bounded cache, while readiness reports policy unavailable.</text>
+</svg>

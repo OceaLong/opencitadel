@@ -77,7 +77,10 @@ export function evaluateAcceptance(
         `acceptance requirement ${record.requirementId} belongs to ${owner}, not ${record.project}`,
       );
     }
-    counts.set(record.requirementId, (counts.get(record.requirementId) ?? 0) + 1);
+    counts.set(
+      record.requirementId,
+      (counts.get(record.requirementId) ?? 0) + 1,
+    );
     if (record.status !== "passed") {
       errors.push(`acceptance test ${record.testId} was ${record.status}`);
     }
@@ -88,7 +91,9 @@ export function evaluateAcceptance(
     if (count === 0) {
       errors.push(`acceptance requirement ${requirementId} is missing`);
     } else if (count !== 1) {
-      errors.push(`acceptance requirement ${requirementId} is covered ${count} times`);
+      errors.push(
+        `acceptance requirement ${requirementId} is covered ${count} times`,
+      );
     }
   }
 
@@ -102,7 +107,9 @@ export function evaluateAcceptance(
         project: record.project,
         status: coverageStatus(record.status),
       }))
-      .sort((left, right) => left.requirement_id.localeCompare(right.requirement_id)),
+      .sort((left, right) =>
+        left.requirement_id.localeCompare(right.requirement_id),
+      ),
   };
 }
 
@@ -115,13 +122,18 @@ function loadRequiredIds(): string[] {
     $defs?: { requirementId?: { enum?: unknown } };
   };
   const values = schema.$defs?.requirementId?.enum;
-  if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) {
-    throw new Error("acceptance evidence schema has no string requirement enum");
+  if (
+    !Array.isArray(values) ||
+    values.some((value) => typeof value !== "string")
+  ) {
+    throw new Error(
+      "acceptance evidence schema has no string requirement enum",
+    );
   }
   return values as string[];
 }
 
-function requirementProject(requirementId: string): AcceptanceProject {
+export function requirementProject(requirementId: string): AcceptanceProject {
   if (requirementId.startsWith("ID-")) return "identity";
   if (requirementId.startsWith("INF-") || requirementId.startsWith("POL-")) {
     return "control-plane";
@@ -129,6 +141,11 @@ function requirementProject(requirementId: string): AcceptanceProject {
   if (requirementId.startsWith("KB-")) {
     return "resources";
   }
+  if (
+    /^AC\d{2}$/.test(requirementId) &&
+    loadRequiredIds().includes(requirementId)
+  )
+    return "execution";
   if (requirementId.startsWith("RUN-")) return "execution";
   if (
     requirementId.startsWith("PAT-") ||
@@ -137,7 +154,9 @@ function requirementProject(requirementId: string): AcceptanceProject {
   ) {
     return "patrol-admin";
   }
-  throw new Error(`acceptance requirement has no owning project: ${requirementId}`);
+  throw new Error(
+    `acceptance requirement has no owning project: ${requirementId}`,
+  );
 }
 
 function selectedProjects(): Set<string> {
@@ -162,7 +181,10 @@ function projectName(test: TestCase): string {
 
 function recordFor(test: TestCase, result: TestResult): AcceptanceRecord[] {
   return result.annotations
-    .filter((annotation) => annotation.type === "acceptance" && annotation.description)
+    .filter(
+      (annotation) =>
+        annotation.type === "acceptance" && annotation.description,
+    )
     .map((annotation) => ({
       requirementId: annotation.description as string,
       testId: test.id,
@@ -174,19 +196,24 @@ function recordFor(test: TestCase, result: TestResult): AcceptanceRecord[] {
 
 function projectEvidence(tests: readonly TestCase[]): EvidenceProject[] {
   return ACCEPTANCE_PROJECTS.map((name) => {
-    const results = tests
-      .filter((test) => projectName(test) === name)
-      .map(finalResult)
-      .filter((result): result is TestResult => result !== undefined);
+    const projectTests = tests.filter((test) => projectName(test) === name);
+    const results = projectTests.map(finalResult);
     return {
       name,
       tests: results.length,
-      passed: results.filter((result) => result.status === "passed").length,
-      failed: results.filter((result) =>
-        ["failed", "timedOut", "interrupted"].includes(result.status),
+      passed: results.filter((result) => result?.status === "passed").length,
+      failed: results.filter(
+        (result) =>
+          result &&
+          ["failed", "timedOut", "interrupted"].includes(result.status),
       ).length,
-      skipped: results.filter((result) => result.status === "skipped").length,
-      duration_ms: results.reduce((total, result) => total + result.duration, 0),
+      skipped: results.filter(
+        (result) => !result || result.status === "skipped",
+      ).length,
+      duration_ms: results.reduce(
+        (total, result) => total + (result?.duration ?? 0),
+        0,
+      ),
     };
   });
 }
@@ -212,11 +239,13 @@ export default class ZeroSkipReporter implements Reporter {
     result: FullResult,
   ): Promise<{ status?: FullResult["status"] } | undefined> {
     const tests = this.suite?.allTests() ?? [];
-    const records = tests.flatMap((test) => {
-      const final = finalResult(test);
-      return final ? recordFor(test, final) : [];
-    });
     const selected = selectedProjects();
+    const records = tests
+      .filter((test) => selected.has(projectName(test)))
+      .flatMap((test) => {
+        const final = finalResult(test);
+        return final ? recordFor(test, final) : [];
+      });
     const requiredIds = loadRequiredIds().filter((requirementId) =>
       selected.has(requirementProject(requirementId)),
     );
@@ -224,9 +253,14 @@ export default class ZeroSkipReporter implements Reporter {
 
     for (const test of tests) {
       const status = finalResult(test)?.status ?? "not_run";
-      if (status === "skipped" || status === "interrupted") {
+      if (
+        status === "skipped" ||
+        status === "interrupted" ||
+        status === "not_run"
+      ) {
         const message = `Playwright test ${test.id} was ${status}`;
-        if (!evaluation.errors.includes(message)) evaluation.errors.push(message);
+        if (!evaluation.errors.includes(message))
+          evaluation.errors.push(message);
       }
     }
 

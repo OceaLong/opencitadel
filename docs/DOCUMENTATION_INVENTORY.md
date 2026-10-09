@@ -2,95 +2,135 @@
 
 # Documentation Inventory
 
-Authoritative inventory of OpenCitadel Markdown documentation. Update this file when adding, moving, or deprecating docs.
+This inventory covers 116 maintained Markdown files in the current workspace (53 bilingual pairs and 10 single-language files), plus 13 historical specs. Maintained references follow current implementation; archives provide historical context and do not establish current behavior, versions or acceptance status. Update this file when adding, moving or deprecating documentation.
+
+Dependency/cache files, nested worktrees, temporary artifacts and local execution records are outside this inventory (`node_modules/`, `.venv/`, `.pytest_cache/`, `.worktrees/`, `tmp/`, `.superpowers/`, `docs/superpowers/`). The `specs/` files are listed separately as historical archives, not promoted to maintained references.
 
 **Legend**
 
-| Column | Meaning |
-|--------|---------|
-| Authority | `primary` = source of truth; `index` = navigation only; `module` = component dev entry; `governance` = OSS policy |
-| Bilingual | `paired` = `*.md` + `*.zh-CN.md`; `single` = one language only |
-| Diagrams | `mermaid` / `none` |
-| Stale risk | `low` / `medium` / `high` (manual review) |
+| Column     | Meaning                                                                                                                                                                                                                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authority  | `primary` = maintained reference (implementation is authoritative); `index` = navigation; `module` = component entry; `tutorial` = walkthrough; `governance` = OSS policy; `internal` = operator/developer contract; `fixture` = test input; `archive` = historical record |
+| Bilingual  | `paired` = two existing language files; `single` = one file only                                                                                                                                                                                                           |
+| Diagrams   | `svg/png` = technical asset references under `docs/assets/diagrams/`; `mermaid` = actual Mermaid blocks; `none` = no technical diagram. README demo screenshots do not count                                                                                               |
+| Stale risk | `low` / `medium` / `high`; historical archives and incomplete AC21 capacity references retain `high`                                                                                                                                                                       |
 
 ## Root & docs hub
 
-| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-|------|-------|-----------|-----------|----------|-------------|------------|
-| [README.md](../README.md) | Project overview, quick start, doc map | index | paired | mermaid | — | medium |
-| [docs/README.md](README.md) | Documentation navigation hub | index | paired | none | — | low |
-| [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.md) | PR checklist, sync rules | governance | paired | none | `scripts/check-docs.sh` | low |
-| [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.md) | This inventory | governance | paired | none | — | low |
+| Path                                                          | Topic                                  | Authority  | Bilingual | Diagrams | Code anchor             | Stale risk |
+| ------------------------------------------------------------- | -------------------------------------- | ---------- | --------- | -------- | ----------------------- | ---------- |
+| [README.md](../README.md)                                     | Project overview, quick start, doc map | index      | paired    | svg/png  | —                       | medium     |
+| [docs/README.md](README.md)                                   | Documentation navigation hub           | index      | paired    | none     | —                       | low        |
+| [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.md)     | PR checklist, sync rules               | governance | paired    | none     | `scripts/check-docs.sh` | low        |
+| [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.md) | This inventory                         | governance | paired    | none     | `scripts/check-docs.sh` | low        |
 
 ## Architecture (`docs/architecture/`)
 
-| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-|------|-------|-----------|-----------|----------|-------------|------------|
-| [overview.md](architecture/overview.md) | System design, typed composition, API/kernel, sandbox | primary | paired | mermaid | `api/app/composition/`, `api/app/execution_kernel.py` | low |
-| [governance-plane.md](architecture/governance-plane.md) | Effect contracts, capability narrowing, approval, terminal latch, evidence | primary | paired | mermaid | `tool_policy.py`, `application/execution/`, `governance_profile_service.py`, `evidence_service.py` | medium |
-| [security-model.md](architecture/security-model.md) | Trust boundaries, auth, secrets | primary | paired | mermaid | `api/app/infrastructure/security/` | medium |
-| [execution-kernel.md](architecture/execution-kernel.md) | Commands, events, Activities, projections, SSE, recovery | primary | paired | mermaid | `domain/execution/`, `application/execution/`, `execution_kernel.py` | low |
-| [web-operator.md](architecture/web-operator.md) | Exact-host boundary, approval, evidence | primary | paired | mermaid | `application/execution/agent_tool_catalog.py`, `tools/browser.py` | low |
-| [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
-| [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | mermaid | `admin_routes.py`, `ui/src/app/admin/` | medium |
-| [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | mermaid | `a2a_routes.py`, `service_api_key_routes.py` | low |
-| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `application/execution/agent_tool_catalog.py` | low |
-| [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
-| [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `execution_kernel.py` | low |
-| [ops-patrol.md](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector boundary, evidence | primary | paired | mermaid | `patrol_routes.py`, `patrol_run_service.py` | low |
-| [config-source-governance.md](architecture/config-source-governance.md) | Deployment, policy, Integration authority boundaries | primary | paired | none | `core/config.py`, `runtime_policy_service.py` | medium |
-| [runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.md) | Runtime Policy revision, head, reader, consumer model | primary | paired | mermaid | `runtime_policy_service.py`, `runtime_policy_reader.py` | medium |
-| [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
-| [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md) | KB parse, OCR, GraphRAG, ingest failures | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
-| [architecture-evolution.md](architecture/architecture-evolution.md) | Compose → K8s evolution | primary | paired | mermaid | `deploy/helm/` | low |
-| [inference-control-plane.md](architecture/inference-control-plane.md) | Inference endpoint/model/binding control plane | primary | paired | mermaid | `inference_routes.py`, `inference-settings.tsx` | low |
-| [frontend-ui.md](architecture/frontend-ui.md) | Next.js UI architecture | primary | paired | mermaid | `ui/src/` | low |
-| [technical-decisions.md](architecture/technical-decisions.md) | Technology choices & alternatives | primary | paired | mermaid | — | low |
+| Path                                                                                                | Topic                                                                           | Authority | Bilingual | Diagrams | Code anchor                                                                                                                                                                 | Stale risk |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------- | --------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| [docs/architecture/overview.md](architecture/overview.md)                                           | System design, typed composition, API/kernel, sandbox                           | primary   | paired    | svg/png  | `api/app/composition/`, `api/app/execution_kernel_main.py`                                                                                                                  | low        |
+| [docs/architecture/governance-plane.md](architecture/governance-plane.md)                           | Effect contracts, capability narrowing, approval, terminal latch, evidence      | primary   | paired    | svg/png  | `api/app/domain/models/tool_policy.py`, `api/app/application/execution/`                                                                                                    | medium     |
+| [docs/architecture/security-model.md](architecture/security-model.md)                               | Trust boundaries, auth, secrets                                                 | primary   | paired    | svg/png  | `api/app/infrastructure/security/`, `api/core/config.py`                                                                                                                    | medium     |
+| [docs/architecture/execution-kernel.md](architecture/execution-kernel.md)                           | Commands, events, Activities, projections, SSE, recovery                        | primary   | paired    | svg/png  | `api/app/domain/execution/`, `api/app/application/execution/`, `api/app/execution_kernel.py`                                                                                | low        |
+| [docs/architecture/web-operator.md](architecture/web-operator.md)                                   | Exact-host boundary, approval, evidence                                         | primary   | paired    | none     | `api/app/application/execution/agent_tool_catalog.py`, `api/app/domain/services/tools/`                                                                                     | low        |
+| [docs/architecture/teams-and-workspaces.md](architecture/teams-and-workspaces.md)                   | Teams, `X-Workspace-Id`                                                         | primary   | paired    | svg/png  | `api/app/interfaces/endpoints/team_routes.py`                                                                                                                               | low        |
+| [docs/architecture/admin-auditor-compliance.md](architecture/admin-auditor-compliance.md)           | Admin, auditor, compliance                                                      | primary   | paired    | none     | `api/app/interfaces/endpoints/admin_routes.py`, `api/app/interfaces/endpoints/compliance_routes.py`, `ui/src/app/admin/`                                                    | medium     |
+| [docs/architecture/integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys                                                           | primary   | paired    | none     | `api/app/interfaces/endpoints/integration_routes.py`, `api/app/interfaces/endpoints/service_api_key_routes.py`                                                              | low        |
+| [docs/architecture/skills.md](architecture/skills.md)                                               | Skill templates, runtime                                                        | primary   | paired    | none     | `api/app/application/services/skill_service.py`, `api/app/application/execution/agent_tool_catalog.py`                                                                      | low        |
+| [docs/architecture/artifacts-sharing.md](architecture/artifacts-sharing.md)                         | Artifacts, public share                                                         | primary   | paired    | svg/png  | `api/app/interfaces/endpoints/artifact_routes.py`                                                                                                                           | low        |
+| [docs/architecture/automation-scheduler.md](architecture/automation-scheduler.md)                   | Cron, webhooks, leader election                                                 | primary   | paired    | svg/png  | `api/app/interfaces/endpoints/scheduling_routes.py`, `api/app/execution_kernel.py`                                                                                          | low        |
+| [docs/architecture/ops-patrol.md](architecture/ops-patrol.md)                                       | Pack/Run lifecycle, Collector boundary, evidence                                | primary   | paired    | svg/png  | `api/app/interfaces/endpoints/patrol_routes.py`, `api/app/application/services/patrol_run_service.py`                                                                       | low        |
+| [docs/architecture/config-source-governance.md](architecture/config-source-governance.md)           | Deployment, policy, Integration authority boundaries                            | primary   | paired    | none     | `api/core/config.py`, `api/app/application/services/runtime_policy_service.py`                                                                                              | medium     |
+| [docs/architecture/runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.md)   | Runtime Policy revision, head, reader, consumer model                           | primary   | paired    | svg/png  | `api/app/application/services/runtime_policy_service.py`, `api/app/application/services/runtime_policy_reader.py`                                                           | medium     |
+| [docs/architecture/model-resilience.md](architecture/model-resilience.md)                           | Circuit breaker, fallback                                                       | primary   | paired    | none     | `api/app/infrastructure/external/llm/resilient_llm.py`                                                                                                                      | low        |
+| [docs/architecture/knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md)           | KB parse, OCR, GraphRAG, ingest failures                                        | primary   | paired    | svg/png  | `api/app/application/services/knowledge_base_service.py`, `api/app/domain/services/knowledge_base/`                                                                         | medium     |
+| [docs/architecture/architecture-evolution.md](architecture/architecture-evolution.md)               | Compose → K8s evolution                                                         | primary   | paired    | none     | `docker-compose.yml`, `deploy/helm/`, `deploy/kustomize/`                                                                                                                   | low        |
+| [docs/architecture/inference-control-plane.md](architecture/inference-control-plane.md)             | Inference endpoint/model/binding control plane                                  | primary   | paired    | none     | `api/app/interfaces/endpoints/inference_routes.py`, `ui/src/components/settings/inference-settings.tsx`                                                                     | low        |
+| [docs/architecture/frontend-ui.md](architecture/frontend-ui.md)                                     | Next.js UI architecture                                                         | primary   | paired    | svg/png  | `ui/src/`                                                                                                                                                                   | low        |
+| [docs/architecture/execution-analysis.md](architecture/execution-analysis.md)                       | Observation cuts, analysis sources, comparisons, exports and current authority  | primary   | paired    | svg/png  | `api/app/application/services/execution_analysis_service.py`, `api/app/infrastructure/repositories/db_execution_comparison_repository.py`, `api/app/application/execution/` | low        |
+| [docs/architecture/evaluation-control-plane.md](architecture/evaluation-control-plane.md)           | Evaluation batches, Subject/Judge, environment leases and physical-call budgets | primary   | paired    | svg/png  | `api/app/composition/evaluation.py`, `api/app/application/evaluation/`, `api/app/infrastructure/execution/`                                                                 | low        |
+| [docs/architecture/technical-decisions.md](architecture/technical-decisions.md)                     | Technology choices & alternatives                                               | primary   | paired    | none     | `api/pyproject.toml`, `ui/package.json`, `docker-compose.yml`                                                                                                               | low        |
 
 ## Operations & tutorials
 
-| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-|------|-------|-----------|-----------|----------|-------------|------------|
-| [operations/deployment.md](operations/deployment.md) | Production deployment, probes, bounded drain | primary | paired | mermaid | `docker-compose.yml`, `deploy/helm/opencitadel/` | low |
-| [operations/ops-patrol.md](operations/ops-patrol.md) | Patrol enablement, deployment, evidence, recovery | primary | paired | mermaid | `ops-collector/`, `ops-actuator/`, `deploy/helm/` | low |
-| [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
-| [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | `scripts/quickstart.sh` | low |
-| [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
-| [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `integration_routes.py` | low |
-| [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
-| [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
-| [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md) | Read-only Kubernetes Patrol walkthrough | tutorial | paired | none | `ui/src/app/patrols/` | low |
-| [tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.md) | Approved Ops Patrol remediation walkthrough | tutorial | paired | none | `ops-actuator/` | low |
-| [tutorials/08-ten-minute-governance-demo.md](tutorials/08-ten-minute-governance-demo.md) | Compose-only end-to-end governance demo loop | tutorial | paired | none | `scripts/quickstart.sh`, `app/seed_demo.py` | low |
+| Path                                                                                                      | Topic                                             | Authority | Bilingual | Diagrams | Code anchor                                                                   | Stale risk |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------- | --------- | -------- | ----------------------------------------------------------------------------- | ---------- |
+| [docs/operations/deployment.md](operations/deployment.md)                                                 | Production deployment, probes, bounded drain      | primary   | paired    | none     | `docker-compose.yml`, `deploy/helm/opencitadel/`, `scripts/backup_tool.py`    | low        |
+| [docs/operations/ops-patrol.md](operations/ops-patrol.md)                                                 | Patrol enablement, deployment, evidence, recovery | primary   | paired    | none     | `ops-collector/`, `ops-actuator/`, `deploy/helm/`                             | low        |
+| [docs/operations/https-domain-setup.md](operations/https-domain-setup.md)                                 | HTTPS & domain                                    | primary   | paired    | none     | `nginx/nginx.conf`, `deploy/helm/opencitadel/`                                | low        |
+| [docs/tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md)                         | Quick BYO key onboarding                          | tutorial  | paired    | none     | `scripts/quickstart.sh`                                                       | low        |
+| [docs/tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md)                   | Knowledge base RAG                                | tutorial  | paired    | none     | `api/app/interfaces/endpoints/knowledge_base_routes.py`                       | low        |
+| [docs/tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md)                                 | MCP setup                                         | tutorial  | paired    | none     | `api/app/interfaces/endpoints/integration_routes.py`                          | low        |
+| [docs/tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md)                       | Web Operator runbook                              | tutorial  | paired    | none     | `scripts/quickstart.sh`, `api/app/domain/models/tool_policy.py`               | low        |
+| [docs/tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo                                   | tutorial  | paired    | none     | `demo/ops-console/`, `api/app/interfaces/endpoints/compliance_routes.py`      | low        |
+| [docs/tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md)                                             | Read-only Kubernetes Patrol walkthrough           | tutorial  | paired    | none     | `ui/src/app/patrols/`, `ops-collector/`                                       | low        |
+| [docs/tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.md)                         | Approved Ops Patrol remediation walkthrough       | tutorial  | paired    | none     | `api/app/application/services/patrol_remediation_service.py`, `ops-actuator/` | low        |
+| [docs/tutorials/08-ten-minute-governance-demo.md](tutorials/08-ten-minute-governance-demo.md)             | Compose-only end-to-end governance demo loop      | tutorial  | paired    | none     | `scripts/quickstart.sh`, `api/app/seed_demo.py`                               | low        |
 
 ## Module READMEs
 
-| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-|------|-------|-----------|-----------|----------|-------------|------------|
-| [api/README.md](../api/README.md) | Backend routes, SSE, dev | module | paired | none | `interfaces/endpoints/` | low |
-| [ui/README.md](../ui/README.md) | Frontend stack, routes | module | paired | none | `ui/src/app/` | low |
-| [sandbox/README.md](../sandbox/README.md) | Sandbox service | module | paired | none | `sandbox/` | low |
-| [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
-| [ops-collector/README.md](../ops-collector/README.md) | Fixed read-only probes and configuration | module | paired | none | `ops-collector/src/` | low |
-| [ops-actuator/README.md](../ops-actuator/README.md) | Fixed patch-only write probes and configuration | module | paired | none | `ops-actuator/src/` | low |
-| [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
-| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md) | Disposable Patrol fault lab | module | paired | none | `scripts/run-patrol-fixtures.sh` | low |
-| [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
-| [e2e/README.md](../e2e/README.md) | Deterministic full-stack acceptance, evidence, cleanup | module | paired | none | `e2e/*.spec.ts`, `contracts/acceptance-evidence.schema.json` | high |
-| [scripts/README.md](../scripts/README.md) | quickstart, documentation checks, acceptance runner | module | paired | none | `scripts/` | medium |
-| [deploy/scripts/README.md](../deploy/scripts/README.md) | Host tuning scripts | module | paired | none | `deploy/scripts/` | low |
+| Path                                                                      | Topic                                                  | Authority | Bilingual | Diagrams | Code anchor                                                                                             | Stale risk |
+| ------------------------------------------------------------------------- | ------------------------------------------------------ | --------- | --------- | -------- | ------------------------------------------------------------------------------------------------------- | ---------- |
+| [api/README.md](../api/README.md)                                         | Backend routes, SSE, dev                               | module    | paired    | svg/png  | `api/app/interfaces/endpoints/`, `api/app/composition/`                                                 | low        |
+| [ui/README.md](../ui/README.md)                                           | Frontend stack, routes                                 | module    | paired    | svg/png  | `ui/src/app/`                                                                                           | low        |
+| [sandbox/README.md](../sandbox/README.md)                                 | Sandbox service                                        | module    | paired    | none     | `sandbox/`                                                                                              | low        |
+| [nginx/README.md](../nginx/README.md)                                     | Gateway, SSE/WS, upload limits                         | module    | paired    | svg/png  | `nginx/nginx.conf`                                                                                      | low        |
+| [ops-collector/README.md](../ops-collector/README.md)                     | Fixed read-only probes and configuration               | module    | paired    | none     | `ops-collector/src/`                                                                                    | low        |
+| [ops-actuator/README.md](../ops-actuator/README.md)                       | Fixed patch-only write probes and configuration        | module    | paired    | svg/png  | `ops-actuator/src/`                                                                                     | low        |
+| [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install                                           | module    | paired    | none     | `deploy/helm/opencitadel/`                                                                              | low        |
+| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md)           | Disposable Patrol fault lab                            | module    | paired    | none     | `scripts/run-patrol-fixtures.sh`                                                                        | low        |
+| [demo/ops-console/README.md](../demo/ops-console/README.md)               | Web Operator demo backend                              | module    | paired    | none     | `demo/ops-console/`                                                                                     | low        |
+| [e2e/README.md](../e2e/README.md)                                         | Deterministic full-stack acceptance, evidence, cleanup | module    | paired    | none     | `e2e/playwright.config.ts`, `scripts/acceptance/runner.py`, `contracts/acceptance-evidence.schema.json` | high       |
+| [scripts/README.md](../scripts/README.md)                                 | quickstart, documentation checks, acceptance runner    | module    | paired    | none     | `scripts/`                                                                                              | medium     |
+| [deploy/scripts/README.md](../deploy/scripts/README.md)                   | Host tuning scripts                                    | module    | paired    | none     | `deploy/scripts/`                                                                                       | low        |
 
 ## Open-source governance (`.github/`)
 
-| Path | Topic | Authority | Bilingual | Diagrams | Stale risk |
-|------|-------|-----------|-----------|----------|------------|
-| [CONTRIBUTING.md](../.github/CONTRIBUTING.md) | Contribution guide | governance | paired | none | low |
-| [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting | governance | paired | none | low |
-| [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards | governance | paired | none | low |
-| [pull_request_template.md](../.github/pull_request_template.md) | PR template | governance | paired | none | low |
+| Path                                                                    | Topic                   | Authority  | Bilingual | Diagrams | Code anchor | Stale risk |
+| ----------------------------------------------------------------------- | ----------------------- | ---------- | --------- | -------- | ----------- | ---------- |
+| [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md)                   | Contribution guide      | governance | paired    | none     | —           | low        |
+| [.github/SECURITY.md](../.github/SECURITY.md)                           | Vulnerability reporting | governance | paired    | none     | —           | low        |
+| [.github/CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md)             | Community standards     | governance | paired    | none     | —           | low        |
+| [.github/pull_request_template.md](../.github/pull_request_template.md) | PR template             | governance | paired    | none     | —           | low        |
+
+## Evaluation, capacity, schema and fixture references
+
+| Path                                                                                              | Topic                                                                              | Authority | Bilingual | Diagrams | Code anchor                                                                                                                   | Stale risk |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------- | --------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| [docs/evaluation-environments.md](evaluation-environments.md)                                     | Controlled environment inventory, registration, leases, cleanup and repair         | primary   | single    | none     | `api/app/interfaces/endpoints/evaluation_environment_routes.py`, `api/app/infrastructure/evaluation/environment_inventory.py` | low        |
+| [deploy/evaluation/budget-inventory.md](../deploy/evaluation/budget-inventory.md)                 | Trusted native/fixture budget profiles and publication proof                       | internal  | single    | none     | `api/app/domain/evaluation/budget_capabilities.py`, `api/app/application/evaluation/scheduler.py`                             | low        |
+| [deploy/evaluation/environment-capacity.md](../deploy/evaluation/environment-capacity.md)         | Environment occupancy and immutable operator policy activation                     | internal  | single    | none     | `api/app/composition/environment_capacity.py`, `api/scripts/environment_capacity_policy.py`                                   | low        |
+| [deploy/evaluation/execution-policy.md](../deploy/evaluation/execution-policy.md)                 | Subject/Judge execution slots and policy activation                                | internal  | single    | none     | `api/app/composition/evaluation_execution.py`, `api/scripts/evaluation_execution_policy.py`                                   | low        |
+| [deploy/evaluation/physical-policy.md](../deploy/evaluation/physical-policy.md)                   | Durable provider occupancy, requester proofs and judge repair rounds               | internal  | single    | none     | `api/app/composition/physical_budget.py`, `api/scripts/physical_budget_policy.py`                                             | low        |
+| [scripts/execution_capacity/README.md](../scripts/execution_capacity/README.md)                   | Historical/probe/batch corpus tooling and incomplete AC21 gate                     | internal  | single    | none     | `scripts/seed_execution_visualization.py`, `scripts/execution_capacity/child.py`                                              | high       |
+| [scripts/execution_capacity/LIVE.md](../scripts/execution_capacity/LIVE.md)                       | Finite source load, progress identities and loaded-window contracts                | internal  | single    | none     | `scripts/execution_capacity/live.py`, `scripts/execution_capacity/live_main.py`                                               | high       |
+| [scripts/execution_capacity/REFERENCE.md](../scripts/execution_capacity/REFERENCE.md)             | Reference physical rounds, original replay and incomplete native/reuse integration | internal  | single    | none     | `scripts/execution_capacity/reference_round.py`, `scripts/execution_capacity/offline_context.py`                              | high       |
+| [api/app/domain/execution/EVOLUTION.md](../api/app/domain/execution/EVOLUTION.md)                 | Event/command evolution rules and snapshot serializer guard                        | internal  | single    | none     | `api/app/domain/execution/run.py`, `api/tests/app/domain/execution/test_schema_guards.py`                                     | low        |
+| [e2e/fixtures/knowledge/acceptance-handbook.md](../e2e/fixtures/knowledge/acceptance-handbook.md) | Canonical searchable fact and degradation assertion test input                     | fixture   | single    | none     | `e2e/resources.spec.ts`                                                                                                       | low        |
+
+## Historical archives (`specs/`; 13 files)
+
+These files preserve their original proposals, versions and results. They do not constrain current implementation or prove current acceptance. Use the maintained references and code anchors above for present contracts.
+
+| Path                                                                                              | Topic                                            | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------ | --------- | --------- | -------- | ----------- | ---------- |
+| [specs/2026-09-03-execution-report.md](../specs/2026-09-03-execution-report.md)                   | 2026-09-03 optimization execution report         | archive   | single    | none     | —           | high       |
+| [specs/2026-09-03-kernel-architecture-audit.md](../specs/2026-09-03-kernel-architecture-audit.md) | 2026-09-03 execution-kernel architecture audit   | archive   | single    | none     | —           | high       |
+| [specs/2026-09-03-kernel-overhaul-spec.md](../specs/2026-09-03-kernel-overhaul-spec.md)           | 2026-09-03 kernel overhaul proposal              | archive   | single    | none     | —           | high       |
+| [specs/2026-09-03-optimization-overview.md](../specs/2026-09-03-optimization-overview.md)         | Historical feature-closure optimization proposal | archive   | single    | none     | —           | high       |
+| [specs/2026-09-04-kernel-overhaul-report.md](../specs/2026-09-04-kernel-overhaul-report.md)       | 2026-09-04 kernel overhaul execution report      | archive   | single    | none     | —           | high       |
+| [specs/plan-a-p0-fixes.md](../specs/plan-a-p0-fixes.md)                                           | Plan A: historical P0 fixes                      | archive   | single    | none     | —           | high       |
+| [specs/plan-b-backend-closure.md](../specs/plan-b-backend-closure.md)                             | Plan B: historical backend closure               | archive   | single    | none     | —           | high       |
+| [specs/plan-c-frontend-closure.md](../specs/plan-c-frontend-closure.md)                           | Plan C: historical frontend closure              | archive   | single    | none     | —           | high       |
+| [specs/plan-d-deploy-observability.md](../specs/plan-d-deploy-observability.md)                   | Plan D: historical deployment/observability      | archive   | single    | none     | —           | high       |
+| [specs/plan-k1-domain-events.md](../specs/plan-k1-domain-events.md)                               | Plan K1: historical domain/events overhaul       | archive   | single    | none     | —           | high       |
+| [specs/plan-k2-runtime-loops.md](../specs/plan-k2-runtime-loops.md)                               | Plan K2: historical runtime loops                | archive   | single    | none     | —           | high       |
+| [specs/plan-k3-plugin-surface.md](../specs/plan-k3-plugin-surface.md)                             | Plan K3: historical extension surfaces           | archive   | single    | none     | —           | high       |
+| [specs/plan-k4-projection-observability.md](../specs/plan-k4-projection-observability.md)         | Plan K4: historical projection/observability     | archive   | single    | none     | —           | high       |
 
 ## Maintenance
 
-- Run `./scripts/check-docs.sh` before doc PRs.
-- When code changes routes, config, or UI flows, update the matching row’s doc and set stale risk back to `low` after review.
-- New architecture topics: add EN + zh-CN, link from [docs/README.md](README.md), update this inventory.
+- Run `./scripts/check-docs.sh` before documentation PRs.
+- Sync documents and code anchors when routes, configuration, UI or execution contracts change; refresh diagram fields from actual content.
+- Add EN + zh-CN for new architecture topics, link from [docs/README.md](README.md), and update this inventory. Internal single-language contracts can remain `single`.
+- Fixture text can be an asserted test input; inspect its tests before changing it. Historical specs retain their archive classification.

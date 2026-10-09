@@ -7,6 +7,8 @@ from pydantic_core import to_jsonable_python
 from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
 from app.application.execution.tool_catalog import ExecutionToolCatalog
+from app.application.ports.inference_dispatch import auxiliary_activity_context
+from app.domain.evaluation.errors import ReplayMismatch
 from app.domain.execution.activity import (
     ActivityContext,
     ActivityOutcome,
@@ -28,11 +30,22 @@ class ToolCallActivityHandler:
         *,
         objects: ActivityObjectStore,
         tools: ExecutionToolCatalog,
+        replay=None,
+        execution_usage=None,
     ) -> None:
+        self._execution_usage = execution_usage
+        self._replay = replay
         self._objects = objects
         self._tools = tools
 
-    async def execute(
+    async def recovery_safe(self, request, run):
+        return self._replay is not None and await self._replay.recovery_safe(request, run)
+
+    async def execute(self, request, context):
+        with auxiliary_activity_context(self._execution_usage, request, context):
+            return await self._execute(request, context)
+
+    async def _execute(
         self,
         request: ActivityRequest,
         context: ActivityContext,
@@ -69,14 +82,19 @@ class ToolCallActivityHandler:
         # outcome 喂回模型循环，模型可纠错重试；只有基础设施异常
         # （连接/超时/取消）才继续按 activity 失败击穿。
         try:
-            result = await self._tools.invoke(
-                payload,
-                context,
-                name=name,
-                arguments=arguments,
-                expected_fingerprint=expected_fingerprint,
-                approval_feedback=approval_feedback,
-            )
+            if self._replay is not None and await self._replay.active(context):
+                result = await self._replay.tool(request, context)
+            else:
+                result = await self._tools.invoke(
+                    payload,
+                    context,
+                    name=name,
+                    arguments=arguments,
+                    expected_fingerprint=expected_fingerprint,
+                    approval_feedback=approval_feedback,
+                )
+        except ReplayMismatch:
+            return ActivityOutcome.failed(failure_code=ReplayMismatch.code)
         except ToolInvocationError as exc:
             result = _failed_tool_result(str(exc), failure_kind=exc.kind)
         except CapabilityDeniedError as exc:

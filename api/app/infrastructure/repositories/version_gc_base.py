@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.infrastructure.models.resource_pin import ResourcePinORM
 from app.infrastructure.models.session_resource_binding import SessionResourceBindingORM
 
 
@@ -134,6 +135,7 @@ class VersionGarbageCollector(abc.ABC):
                     resource_model.active_version_id != ranked.c.version_id,
                 ),
                 ~bound,
+                ~self._pin_reference_exists(ranked_resource_id, ranked.c.version_id),
                 ranked.c.state != "building",
             )
             .order_by(
@@ -212,6 +214,16 @@ class VersionGarbageCollector(abc.ABC):
             .label("retention_rank"),
         ).cte(self._ranked_cte_name)
 
+    def _pin_reference_exists(self, resource_id, version_id):
+        return exists(
+            select(ResourcePinORM.id).where(
+                ResourcePinORM.resource_kind == self._resource_kind,
+                ResourcePinORM.resource_id == resource_id,
+                ResourcePinORM.resource_version == version_id,
+                ResourcePinORM.available.is_(True),
+            )
+        )
+
     def _binding_reference_exists(self, resource_id, version_id):
         return exists(
             select(SessionResourceBindingORM.id).where(
@@ -261,7 +273,13 @@ class VersionGarbageCollector(abc.ABC):
         retention = await self.db_session.execute(
             select(func.count()).select_from(ranked).where(ranked.c.retention_rank <= retain_count)
         )
+        pinned = await self.db_session.scalar(
+            select(func.count())
+            .select_from(version_model)
+            .where(self._pin_reference_exists(fk, version_model.id))
+        )
         return {
+            "pinned": int(pinned),
             "active": int(active.scalar_one()),
             "bound": int(bound.scalar_one()),
             "building": int(building.scalar_one()),
@@ -310,7 +328,10 @@ class VersionGarbageCollector(abc.ABC):
                 )
             )
         )
-        return not bool(bound_result.scalar_one())
+        pinned = await self.db_session.scalar(
+            select(self._pin_reference_exists(resource_id, version.id))
+        )
+        return not bool(bound_result.scalar_one()) and not bool(pinned)
 
     async def _delete_returning_count(self, statement) -> int:
         result = await self.db_session.execute(statement)

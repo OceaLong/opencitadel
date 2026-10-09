@@ -12,9 +12,12 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import OwnerScope
 from app.domain.models.session import Session
 from app.infrastructure.repositories.db_session_repository import DBSessionRepository
+from app.infrastructure.security.db_authorization import configure_session_authorization
+from core.config import load_deployment_settings
 from tests.app.execution_test_support import execution_admin_session
 
 
@@ -30,6 +33,15 @@ async def test_session_soft_delete_recycle_restore_purge_and_scope_isolation():
     scope_b = OwnerScope.personal(owner_b)
 
     async with execution_admin_session() as db:
+
+        async def commit_with_authorization():
+            await db.commit()
+            await configure_session_authorization(
+                db,
+                AuthorizationContext.system("execution-test-admin"),
+                signing_secret=load_deployment_settings().database_authorization_signing_secret,
+            )
+
         for owner in (owner_a, owner_b):
             await db.execute(
                 text("INSERT INTO users (id, email, username) VALUES (:id, :email, :username)"),
@@ -38,7 +50,7 @@ async def test_session_soft_delete_recycle_restore_purge_and_scope_isolation():
         repo = DBSessionRepository(db)
         await repo.save(Session(id=sid_a, title="A", owner_user_id=owner_a))
         await repo.save(Session(id=sid_b, title="B", owner_user_id=owner_b))
-        await db.commit()
+        await commit_with_authorization()
 
         try:
             # 1. Live sessions are visible on normal read paths.
@@ -49,7 +61,7 @@ async def test_session_soft_delete_recycle_restore_purge_and_scope_isolation():
             # 2. Soft delete A; a foreign scope cannot soft-delete B.
             assert await repo.soft_delete(sid_a, scope=scope_a) is True
             assert await repo.soft_delete(sid_b, scope=scope_a) is False
-            await db.commit()
+            await commit_with_authorization()
 
             # 3. A is hidden from normal reads but present in the recycle bin.
             assert await repo.get_by_id(sid_a, scope=scope_a) is None
@@ -59,20 +71,20 @@ async def test_session_soft_delete_recycle_restore_purge_and_scope_isolation():
             assert await repo.list_deleted(scope=scope_b) == []
             # scope isolation: a foreign scope cannot restore A.
             assert await repo.restore(sid_a, scope=scope_b) is False
-            await db.commit()
+            await commit_with_authorization()
 
             # 4. Restore A -> reappears on normal reads, leaves the recycle bin.
             assert await repo.restore(sid_a, scope=scope_a) is True
-            await db.commit()
+            await commit_with_authorization()
             assert await repo.get_by_id(sid_a, scope=scope_a) is not None
             assert await repo.list_deleted(scope=scope_a) == []
 
             # 5. Purge only targets recycle-bin rows; then removes A physically.
             assert await repo.purge(sid_a, scope=scope_a) is False  # A is live again
             assert await repo.soft_delete(sid_a, scope=scope_a) is True
-            await db.commit()
+            await commit_with_authorization()
             assert await repo.purge(sid_a, scope=scope_a) is True
-            await db.commit()
+            await commit_with_authorization()
             assert await repo.exists(sid_a) is False
             assert await repo.get_by_id(sid_b, scope=scope_b) is not None
         finally:

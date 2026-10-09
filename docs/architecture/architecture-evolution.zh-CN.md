@@ -15,6 +15,10 @@ OpenCitadel 从模块化部署起步：PostgreSQL、可丢失 Redis Wake-up、�
 - Redis 可为可用性做 Cluster，但其丢失不需要恢复执行正确性数据。
 - Ops Collector/Actuator 只在其窄化安全角色内扩展。
 
+当前 Kernel 还监督独立的评测调度、协调、评分与清理循环，以及比较交付物 Diff 和导出
+Worker。这些是 `KernelRuntime` 内部独立 Fencing 的 Consumer，不是独立服务，也不形成
+另一套 Run 权威。关键评测循环失败会撤销 Kernel Readiness，不会把已失效 Consumer 标为就绪。
+
 ## 演进不变量
 
 未来引入 Queue、Workflow Engine 或服务拆分都必须保留：
@@ -42,3 +46,10 @@ Idempotency、Approval、Unknown Outcome、Event Integrity 或 Tenant Isolation�
 Saturation、Object-Store Latency、Provider Quota 与 Sandbox Admission。持续增长的持久 Pending
 Age 是主要 Backpressure Signal。Autoscaling 必须有硬 Concurrency 与 Provider Rate Limit，
 避免放大故障。
+
+分析和导出另外限制 Source Capture、分页大小、捕获字节数与每个调用者的活跃 Job。
+评测 Admission 组合持久 Execution Slot、Environment Lease 与物理模型请求预算 Bucket。
+释放执行容量与结算计费义务是不同操作；未知外部效果保留 Hold，直到受支持的处理完成。
+
+代码中的容量上限不等于全规模验收通过。AC21 参考环境验收仍未完成：多轮来源清理/复用
+与原生客户端采集尚未完整接线。参见当前[参考协议与剩余工作](../../scripts/execution_capacity/REFERENCE.md)。

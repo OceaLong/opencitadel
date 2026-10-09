@@ -26,7 +26,7 @@ function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
 }
 
 function shouldMaintainEmptyStream(status?: SessionDetail["status"]): boolean {
-  return status === "running";
+  return status === "running" || status === "waiting";
 }
 
 type StreamDeps = {
@@ -74,6 +74,9 @@ export function useSessionStreams({
     [t],
   );
   const [streaming, setStreaming] = useState(false);
+  const activeRunRef = useRef<string | null>(null);
+  const [admissionPending, setAdmissionPending] = useState(false);
+  const [admissionRevision, setAdmissionRevision] = useState(0);
   const [streamStatus, setStreamStatus] = useState<SessionStreamStatus>("idle");
   const [streamError, setStreamError] = useState<Error | null>(null);
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
@@ -151,6 +154,24 @@ export function useSessionStreams({
     setStreamError(null);
     const accepted = appendLatestEvent(ev);
     if (!accepted) return;
+    if (ev.data.persist !== false && ev.data.run_id) {
+      setAdmissionPending(false);
+      if (
+        (ev.type === "session_status" && ev.data.status === "running") ||
+        (ev.type === "message" && ev.data.role === "user")
+      )
+        activeRunRef.current = ev.data.run_id;
+    }
+    // A persisted waiting fact can arrive without a second waiting status after
+    // retry. It ends generation, while the subscription and command gates stay live.
+    if (
+      ev.data.persist !== false &&
+      ev.data.run_id &&
+      ev.data.run_id === activeRunRef.current &&
+      (ev.type === "approval" || (ev.type === "ask" && ev.data.status === "pending"))
+    ) {
+      setStreaming(false);
+    }
 
     if (ev.type === "session_status") {
       const state = reduceSessionStatusState([ev], sessionStatusStateRef.current);
@@ -167,6 +188,7 @@ export function useSessionStreams({
         ) {
           setStreaming(false);
         }
+        if (status === "running") setStreaming(true);
         if (status === "cancelled") {
           setStreamError(new Error(latestMessages.taskCancelledNotice));
           setStreamStatus("error");
@@ -288,6 +310,8 @@ export function useSessionStreams({
         messageStreamCleanupRef.current = null;
       }
       isSendMessageRef.current = true;
+      setAdmissionPending(true);
+      setAdmissionRevision((value) => value + 1);
       setStreaming(true);
       setStreamStatus("connecting");
       setStreamError(null);
@@ -324,6 +348,7 @@ export function useSessionStreams({
         },
         onEvent,
         (err) => {
+          setAdmissionPending(false);
           if (err.name === "AbortError") {
             setStreaming(false);
             isSendMessageRef.current = false;
@@ -428,6 +453,7 @@ export function useSessionStreams({
   }, [clearEmptyStreamRetryTimer]);
 
   const resetStreams = useCallback(() => {
+    activeRunRef.current = null;
     sessionMissingRef.current = false;
     isSendMessageRef.current = false;
     emptyStreamRetryCountRef.current = 0;
@@ -437,11 +463,14 @@ export function useSessionStreams({
       messageStreamCleanupRef.current = null;
     }
     setStreaming(false);
+    setAdmissionPending(false);
     setStreamStatus("idle");
     setStreamError(null);
   }, [stopEmptyStream]);
 
   return {
+    admissionPending,
+    admissionRevision,
     streaming,
     streamStatus,
     streamError,

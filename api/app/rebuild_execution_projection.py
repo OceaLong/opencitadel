@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from sqlalchemy import delete
@@ -89,7 +90,9 @@ async def _clear_marker(session_factory, authorization, key) -> None:
         await session.commit()
 
 
-async def rebuild(raw_scope: str) -> int:
+async def rebuild(
+    raw_scope: str, *, view_only: bool = False, target_algorithm_version: int = 1
+) -> int:
     owner_scope, key = _parse_scope(raw_scope)
     settings = load_deployment_settings()
     authorization = AuthorizationContext.system(_ACTOR)
@@ -120,6 +123,35 @@ async def rebuild(raw_scope: str) -> int:
                         )
                     )
                     await session.commit()
+
+            if view_only:
+                await record_recovery(
+                    "execution_view_rebuild_requested",
+                    {"algorithm_version": target_algorithm_version},
+                )
+                result = await PostgresFormalProjector(
+                    session_factory=session_factory, authorization=authorization
+                ).rebuild_views(owner_scope, target_algorithm_version=target_algorithm_version)
+                await record_recovery(
+                    "execution_view_rebuild_completed",
+                    {
+                        "generation": result.generation,
+                        "algorithm_version": result.algorithm_version,
+                        "source_version": result.source_version,
+                        "captured_runs": result.captured_runs,
+                        "caught_up_runs": result.caught_up_runs,
+                        "activated": result.activated,
+                        "captured_head": asdict(result.captured_head),
+                        "caught_up_head": asdict(result.caught_up_head),
+                    },
+                )
+                print(
+                    f"scope {key}: view generation {result.generation} activated; "
+                    f"algorithm={result.algorithm_version} source={result.source_version} "
+                    f"captured_runs={result.captured_runs} caught_up_runs={result.caught_up_runs} "
+                    f"captured_head={asdict(result.captured_head)} caught_up_head={asdict(result.caught_up_head)}"
+                )
+                return 0
 
             await record_recovery("execution_recovery_requested", {"source": "cli"})
             await _mark_rebuilding(session_factory, authorization, key, owner_scope)
@@ -158,12 +190,27 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="owner scope to rebuild: user:<user_id> or team:<team_id>",
     )
+    parser.add_argument(
+        "--view-only",
+        action="store_true",
+        help="Build and atomically activate workbench views without operational teardown",
+    )
+    parser.add_argument(
+        "--algorithm-version",
+        type=int,
+        default=1,
+        help="Installed read algorithm version for --view-only",
+    )
     args = parser.parse_args(argv)
     try:
         _parse_scope(args.scope)
     except argparse.ArgumentTypeError as error:
         parser.error(str(error))
-    return asyncio.run(rebuild(args.scope))
+    return asyncio.run(
+        rebuild(
+            args.scope, view_only=args.view_only, target_algorithm_version=args.algorithm_version
+        )
+    )
 
 
 if __name__ == "__main__":

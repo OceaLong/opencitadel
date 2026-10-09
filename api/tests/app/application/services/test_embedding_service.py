@@ -118,7 +118,7 @@ async def test_cache_key_includes_model_id() -> None:
     first_adapter.embed_batch = AsyncMock(return_value=[[0.1] * 1536])
     second_adapter = Mock()
     second_adapter.embed_batch = AsyncMock(return_value=[[0.2] * 1536])
-    adapter_factory = Mock(side_effect=[first_adapter, first_adapter, second_adapter])
+    adapter_factory = Mock(side_effect=[first_adapter, second_adapter])
     service = EmbeddingService(bindings, embedding_factory=_embedding_factory(adapter_factory))
 
     first = await service.embed(["same"], scope=None)
@@ -144,3 +144,37 @@ async def test_response_cardinality_must_match_request() -> None:
 
     with pytest.raises(ServerRequestsError, match="数量"):
         await service.embed(["hello"], scope=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_embedding_closes_request_adapter_and_cache_creates_no_client(failure):
+    bindings = SimpleNamespace(resolve=AsyncMock(return_value=_resolved_embedding()))
+    adapter = SimpleNamespace(
+        embed_batch=AsyncMock(return_value=[[0.1] * 1536]),
+        aclose=AsyncMock(),
+    )
+    if failure:
+        adapter.embed_batch.side_effect = RuntimeError("transport failed")
+    factory = Mock(return_value=adapter)
+    service = EmbeddingService(bindings, embedding_factory=_embedding_factory(factory))
+    if failure:
+        with pytest.raises(RuntimeError, match="transport failed"):
+            await service.embed(["a"], scope=None)
+    else:
+        await service.embed(["a"], scope=None)
+        await service.embed(["a", " "], scope=None)
+        assert factory.call_count == 1
+    adapter.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_client_disposal_attempts_all_clients_when_one_close_fails():
+    from app.application.ports.inference_dispatch import close_inference_adapters
+
+    first = SimpleNamespace(aclose=AsyncMock(side_effect=RuntimeError("close failed")))
+    second = SimpleNamespace(aclose=AsyncMock())
+    with pytest.raises(RuntimeError, match="close failed"):
+        await close_inference_adapters([first, second, second])
+    first.aclose.assert_awaited_once()
+    second.aclose.assert_awaited_once()

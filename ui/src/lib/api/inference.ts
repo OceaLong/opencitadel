@@ -1,4 +1,4 @@
-import { del, get, post, put } from "./fetch";
+import { del, get, post, put, type RequestOptions } from "./fetch";
 import type { components, paths } from "./generated/schema";
 
 export type InferenceProvider = components["schemas"]["InferenceProvider"];
@@ -32,8 +32,10 @@ export const inferenceApi = {
     put(`/inference/endpoints/${id}`, input),
   deleteEndpoint: (id: string): Promise<void> => del(`/inference/endpoints/${id}`),
 
-  listModels: (): Promise<components["schemas"]["InferenceModelListResponse"]> =>
-    get("/inference/models"),
+  listModels: (
+    options?: RequestOptions,
+  ): Promise<components["schemas"]["InferenceModelListResponse"]> =>
+    get("/inference/models", undefined, options),
   getModel: (id: string): Promise<InferenceModel> => get(`/inference/models/${id}`),
   createModel: (input: InferenceModelInput): Promise<InferenceModel> =>
     post("/inference/models", input),

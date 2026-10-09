@@ -25,8 +25,7 @@ Raw URL 或 Raw PromQL 输入。所有返回字符串都视为不可信数据；
 Rollback 操作，且绝不暴露给模型。`remediation` Run 必须先持久化审批，
 `remediation.execute` Activity 才能调用 Actuator。
 
-两个容器均使用非 Root 用户、只读 Root Filesystem、丢弃全部 Linux Capability、
-`RuntimeDefault` Seccomp、受限 `/tmp` 与集群内部 Service。
+两种部署均使用非 Root、只读 Root Filesystem、Capability Drop、受限 `/tmp` 和内部监听；Kubernetes 清单显式设置 `RuntimeDefault` Seccomp 与 ClusterIP，Compose 设置 `no-new-privileges` 且不发布宿主端口。
 
 ## 部署 Collector 与 Actuator
 
@@ -36,6 +35,8 @@ Compose 可验证 Transport 与非 Kubernetes 探针：
 docker compose --profile patrol up -d --build opencitadel-ops-collector
 docker compose --profile actuator up -d --build opencitadel-ops-actuator
 ```
+
+先设置强且独立的 `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN`（至少 32 字符），并在集成加密 Headers 中配置对应 `Authorization: Bearer <token>`。Helm Values 使用 `opsCollector.token` / `opsActuator.token`；Kustomize Base 的 Secret 默认空，必须填充。Compose Actuator 未注入 Workload 白名单，只支持传输/认证检查。
 
 Compose 不挂载宿主 Kubernetes 凭证。真实集群检查必须通过 Helm 或 Kustomize 使用专用
 ServiceAccount。
@@ -66,8 +67,7 @@ kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 
 应用 Base 前必须 Patch 镜像 Tag、Target Ref、白名单、注册目标 Map、Namespace、资源
 限制与精确 Egress。Collector Ingress 只允许 API/执行内核访问 8090；Actuator Ingress
-只允许 API/执行内核访问 8091。Collector Egress 仅允许 DNS、Kubernetes 与注册探针
-端口；Actuator Egress 仅允许 DNS 与 Kubernetes。
+只允许 API/执行内核访问 8091。默认 Collector Egress 放行 DNS 以及任意目标的 443/5432/6379/9000/9090，Actuator 放行 DNS 以及任意目标的 443/6443；这些端口规则未限定 IP/Selector。应按真实 API Endpoint 和已注册探针收紧；Collector 默认未放行 8000/8090/8080 或 6443，内网 HTTP 探针和 DNAT 后的 API 端口可能需要调整。注册表与 RBAC 仍是应用/资源权限边界。
 
 ## 注册 MCP Server
 
@@ -111,8 +111,9 @@ Pack 变更会生成新版本，必须重新验证和激活。Scheduled Admissio
 ```bash
 make test-patrol
 make test-actuator
-helm lint deploy/helm/opencitadel
+helm lint deploy/helm/opencitadel --values values.production.yaml
 helm template opencitadel deploy/helm/opencitadel \
+  --namespace opencitadel --values values.production.yaml \
   --set opsCollector.enabled=true \
   --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
@@ -120,8 +121,7 @@ kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 docker compose --env-file .env.example config --quiet
 ```
 
-部署后确认 Collector 能读取 Pod，但不能创建 Pod 或读取 Secret；确认 Actuator 只能
-Patch 明确注册的 Workload，且不能读取 Secret。
+部署后确认 Collector 能读 Pod，但不能写 Pod 或读 Secret。Actuator 的 Namespaced Role 对 Namespace 内 Deployment/StatefulSet 授予 Patch，而精确 Workload 白名单由服务校验；分别验证 RBAC 跨 Namespace 拒绝、服务对未注册 Workload 的 `TARGET_DENIED`，以及无 Secret 权限。TCP 探针成功后还必须做认证能力发现与真实目标检查。
 
 破坏性 Fixture Suite 只能通过 `./scripts/run-patrol-fixtures.sh` 运行；脚本管理并删除
 自己的临时 kind 集群，除非显式要求保留。
@@ -146,18 +146,18 @@ Manifest 的 Key Id 验证
 
 ## 排障
 
-| 现象 | 检查 |
-| --- | --- |
-| 新 Run 被拒绝 | 全局 `patrol_policy.admission`、Pack 激活状态 |
-| Collector 不可用 | MCP URL、DNS、Service、NetworkPolicy、Readiness |
-| 能力不匹配 | 镜像/工具 Schema 是否变化；重新验证 Pack |
-| Target 被拒绝 | Target Ref 与 Namespace/Workload/Endpoint 白名单 |
-| 证据不完整 | 必需类型、SHA-256、过期时间、截断 |
-| Run 长期排队/运行 | 执行内核健康、PostgreSQL Claim、模型/Collector 可用性 |
-| Scheduled Run 缺失 | Pack 激活、Schedule、Timezone、Scheduler Leader |
-| Retention 停滞 | 执行内核 Scheduler、Leader Lease、保留限制 |
-| 修复被拒绝 | 审批结果、冻结参数 Hash、能力基线 |
-| Actuator 失败 | 8091 Policy、Readiness、精确 Workload 白名单 |
+| 现象               | 检查                                                  |
+| ------------------ | ----------------------------------------------------- |
+| 新 Run 被拒绝      | 全局 `patrol_policy.admission`、Pack 激活状态         |
+| Collector 不可用   | MCP URL、DNS、Service、NetworkPolicy、Readiness       |
+| 能力不匹配         | 镜像/工具 Schema 是否变化；重新验证 Pack              |
+| Target 被拒绝      | Target Ref 与 Namespace/Workload/Endpoint 白名单      |
+| 证据不完整         | 必需类型、SHA-256、过期时间、截断                     |
+| Run 长期排队/运行  | 执行内核健康、PostgreSQL Claim、模型/Collector 可用性 |
+| Scheduled Run 缺失 | Pack 激活、Schedule、Timezone、Scheduler Leader       |
+| Retention 停滞     | 执行内核 Scheduler、Leader Lease、保留限制            |
+| 修复被拒绝         | 审批结果、冻结参数 Hash、能力基线                     |
+| Actuator 失败      | 8091 Policy、Readiness、精确 Workload 白名单          |
 
 日志必须包含 Run、Pack、Session、Check、Request、Target 与 Error Code 标识，但不得包含
 凭证或原始 Authorization Header。

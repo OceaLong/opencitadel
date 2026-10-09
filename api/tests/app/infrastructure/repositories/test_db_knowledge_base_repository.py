@@ -28,6 +28,10 @@ class _RecordingSession:
             return self._results.pop(0)
         return None
 
+    async def scalar(self, stmt, params=None):
+        self.calls.append((str(stmt), params))
+        return False
+
     def add(self, obj):
         self.added.append(obj)
 
@@ -157,17 +161,20 @@ async def test_delete_kb_removes_index_and_restricted_revision_chain_first():
     await repo.delete_kb("kb1")
 
     statements = [sql for sql, _params in session.calls]
-    assert len(statements) == 7
-    assert "DELETE FROM knowledge_relations" in statements[0]
-    assert "DELETE FROM knowledge_entity_refs" in statements[1]
-    assert "DELETE FROM knowledge_entities" in statements[2]
-    assert "DELETE FROM knowledge_chunks" in statements[3]
-    assert "DELETE FROM knowledge_base_version_documents" in statements[4]
-    assert "knowledge_base_version_documents.knowledge_base_id" in statements[4]
-    assert "DELETE FROM knowledge_document_revisions" in statements[5]
-    assert "SELECT knowledge_documents.id" in statements[5]
-    assert "knowledge_documents.kb_id" in statements[5]
-    assert "DELETE FROM knowledge_bases" in statements[6]
+    assert "FOR UPDATE" in statements[0]
+    assert "resource_pins" in statements[1]
+    deletes = statements[2:]
+    assert len(deletes) == 7
+    assert "DELETE FROM knowledge_relations" in deletes[0]
+    assert "DELETE FROM knowledge_entity_refs" in deletes[1]
+    assert "DELETE FROM knowledge_entities" in deletes[2]
+    assert "DELETE FROM knowledge_chunks" in deletes[3]
+    assert "DELETE FROM knowledge_base_version_documents" in deletes[4]
+    assert "knowledge_base_version_documents.knowledge_base_id" in deletes[4]
+    assert "DELETE FROM knowledge_document_revisions" in deletes[5]
+    assert "SELECT knowledge_documents.id" in deletes[5]
+    assert "knowledge_documents.kb_id" in deletes[5]
+    assert "DELETE FROM knowledge_bases" in deletes[6]
 
 
 @pytest.mark.anyio

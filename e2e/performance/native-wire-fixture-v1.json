@@ -1,0 +1,66 @@
+{
+  "command": {
+    "wire_version": 1,
+    "command": "collect",
+    "mode": "cold",
+    "attempt_id": "attempt",
+    "protocol_id": "protocol",
+    "sample_id": "sample",
+    "action_id": "action",
+    "context_id": "context",
+    "page_id": "page",
+    "window_id": "window",
+    "clock_id": "host",
+    "intent": {
+      "operation": "first_screen",
+      "scope_id": "scope",
+      "session_id": "session",
+      "run_id": "run",
+      "step_id": null,
+      "batch_id": null,
+      "view": "task",
+      "history": null,
+      "filters": null,
+      "binding_rule": "first-authenticated-causal-response-v1"
+    },
+    "deadline_ns": "100",
+    "window_open_ns": "10",
+    "resource_offset_ns": "1",
+    "resource_duration_ns": "20",
+    "require_positive_scroll": false,
+    "max_captures": 121,
+    "viewport_width": 1440,
+    "viewport_height": 900,
+    "collector_feature": "CDPScreenshotNewSurface"
+  },
+  "records": [
+    {
+      "wire_version": 1,
+      "attempt_id": "attempt",
+      "protocol_id": "protocol",
+      "sample_id": "sample",
+      "action_id": "action",
+      "context_id": "context",
+      "page_id": "page",
+      "window_id": "window",
+      "clock_id": "host",
+      "sequence": 1,
+      "received_ns": "12",
+      "observation": {"kind": "action", "operation": "first_screen", "trigger_ns": "11"}
+    },
+    {
+      "wire_version": 1,
+      "attempt_id": "attempt",
+      "protocol_id": "protocol",
+      "sample_id": "sample",
+      "action_id": "action",
+      "context_id": "context",
+      "page_id": "page",
+      "window_id": "window",
+      "clock_id": "host",
+      "sequence": 2,
+      "received_ns": "13",
+      "observation": {"kind": "closed", "outcome": "observations-closed", "records": 2}
+    }
+  ]
+}

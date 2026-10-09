@@ -13,6 +13,7 @@ from app.infrastructure.external.llm.base_llm import (
     normalize_usage,
     openai_content_to_anthropic_parts,
 )
+from app.infrastructure.external.llm.dispatch import physical_send, physical_stream
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
     create_ssrf_safe_async_client,
@@ -183,25 +184,33 @@ class AnthropicLLM(LLM):
 
     @staticmethod
     def _usage_from_response(data: dict[str, Any]) -> dict[str, int]:
-        return normalize_usage(data.get("usage"))
+        return normalize_usage(data.get("usage"), provider="anthropic")
 
     async def _post_messages(
         self, payload: dict[str, Any], *, prompt_cache: bool = True
     ) -> httpx.Response:
-        response = await self._client.post(
-            f"{self._base_url}/v1/messages",
-            json=payload,
-            headers=self._headers(prompt_cache=prompt_cache),
+        response = await physical_send(
+            lambda: self._client.post(
+                f"{self._base_url}/v1/messages",
+                json=payload,
+                headers=self._headers(prompt_cache=prompt_cache),
+            ),
+            payload,
+            provider="anthropic",
         )
         if response.status_code >= 400 and prompt_cache:
             logger.warning(
                 "Anthropic prompt cache request failed, retry without cache headers/blocks"
             )
             fallback_payload = self._fallback_payload_without_prompt_cache(payload)
-            return await self._client.post(
-                f"{self._base_url}/v1/messages",
-                json=fallback_payload,
-                headers=self._headers(prompt_cache=False),
+            return await physical_send(
+                lambda: self._client.post(
+                    f"{self._base_url}/v1/messages",
+                    json=fallback_payload,
+                    headers=self._headers(prompt_cache=False),
+                ),
+                fallback_payload,
+                provider="anthropic",
             )
         return response
 
@@ -262,7 +271,11 @@ class AnthropicLLM(LLM):
         for block in content_blocks:
             if block.get("type") == "text":
                 text_parts.append(block.get("text", ""))
-            elif block.get("type") == "tool_use" and block.get("name") == _SYNTHETIC_RESULT_TOOL:
+            elif (
+                response_schema is not None
+                and block.get("type") == "tool_use"
+                and block.get("name") == _SYNTHETIC_RESULT_TOOL
+            ):
                 text_parts.append(json.dumps(block.get("input") or {}, ensure_ascii=False))
             elif block.get("type") == "tool_use":
                 tool_calls.append(
@@ -278,9 +291,9 @@ class AnthropicLLM(LLM):
         message = {"role": "assistant", "content": "".join(text_parts) or None}
         if tool_calls:
             message["tool_calls"] = tool_calls
+        message["_model_revision"] = data.get("model")
         usage = self._usage_from_response(data)
-        if usage.get("total_tokens"):
-            message["_usage"] = usage
+        message["_usage"] = usage
         return message
 
     async def stream_invoke(
@@ -306,25 +319,24 @@ class AnthropicLLM(LLM):
         if tool_choice and not response_schema:
             payload["tool_choice"] = tool_choice
 
-        prompt_tokens = 0
-        completion_tokens = 0
-        cache_read_tokens = 0
-        cache_creation_tokens = 0
+        raw_usage = {}
         tool_blocks: dict[int, dict[str, Any]] = {}
         synthetic_result_indexes: set[int] = set()
-        async with self._client.stream(
-            "POST",
+        async with physical_stream(
+            self._client,
             f"{self._base_url}/v1/messages",
-            json=payload,
+            payload=payload,
+            provider="anthropic",
             headers=self._headers(prompt_cache=True),
         ) as response:
             if response.status_code >= 400:
                 await response.aread()
                 fallback_payload = self._fallback_payload_without_prompt_cache(payload)
-                async with self._client.stream(
-                    "POST",
+                async with physical_stream(
+                    self._client,
                     f"{self._base_url}/v1/messages",
-                    json=fallback_payload,
+                    payload=fallback_payload,
+                    provider="anthropic",
                     headers=self._headers(prompt_cache=False),
                 ) as fallback_response:
                     if fallback_response.status_code >= 400:
@@ -353,9 +365,8 @@ class AnthropicLLM(LLM):
                 event_type = event.get("type")
                 if event_type == "message_start":
                     usage = event.get("message", {}).get("usage") or {}
-                    prompt_tokens = int(usage.get("input_tokens") or 0)
-                    cache_read_tokens = int(usage.get("cache_read_input_tokens") or 0)
-                    cache_creation_tokens = int(usage.get("cache_creation_input_tokens") or 0)
+                    raw_usage.update(usage)
+
                 elif event_type == "content_block_start":
                     idx = int(event.get("index") or 0)
                     block = event.get("content_block") or {}
@@ -412,25 +423,15 @@ class AnthropicLLM(LLM):
                         }
                 elif event_type == "message_delta":
                     usage = event.get("usage") or {}
-                    completion_tokens = int(usage.get("output_tokens") or completion_tokens)
+                    raw_usage.update(usage)
                     stop_reason = (event.get("delta") or {}).get("stop_reason")
                     if stop_reason:
                         yield {"finish_reason": stop_reason}
 
-        usage = normalize_usage(
-            {
-                "input_tokens": prompt_tokens,
-                "output_tokens": completion_tokens,
-                "cache_read_input_tokens": cache_read_tokens,
-                "cache_creation_input_tokens": cache_creation_tokens,
-            }
-        )
-        if usage.get("total_tokens"):
-            yield {"usage": usage}
+        yield {"usage": normalize_usage(raw_usage, provider="anthropic")}
 
     async def _iter_stream_lines(self, response: httpx.Response, synthetic_schema: bool):
-        prompt_tokens = 0
-        completion_tokens = 0
+        raw_usage = {}
         tool_blocks: dict[int, dict[str, Any]] = {}
         synthetic_result_indexes: set[int] = set()
         async for line in response.aiter_lines():
@@ -447,7 +448,7 @@ class AnthropicLLM(LLM):
             event_type = event.get("type")
             if event_type == "message_start":
                 usage = event.get("message", {}).get("usage") or {}
-                prompt_tokens = int(usage.get("input_tokens") or 0)
+                raw_usage.update(usage)
             elif event_type == "content_block_start":
                 idx = int(event.get("index") or 0)
                 block = event.get("content_block") or {}
@@ -496,10 +497,11 @@ class AnthropicLLM(LLM):
                     }
             elif event_type == "message_delta":
                 usage = event.get("usage") or {}
-                completion_tokens = int(usage.get("output_tokens") or completion_tokens)
+                raw_usage.update(usage)
                 stop_reason = (event.get("delta") or {}).get("stop_reason")
                 if stop_reason:
                     yield {"finish_reason": stop_reason}
-        usage = normalize_usage({"input_tokens": prompt_tokens, "output_tokens": completion_tokens})
-        if usage.get("total_tokens"):
-            yield {"usage": usage}
+        yield {"usage": normalize_usage(raw_usage, provider="anthropic")}
+
+    async def aclose(self):
+        await self._client.aclose()

@@ -39,7 +39,15 @@ ACCEPTANCE_PROJECT_REQUIREMENTS = {
         }
     ),
     "execution": frozenset(
-        {"RUN-AGENT", "RUN-ASK", "RUN-SSE", "RUN-APPROVE", "RUN-REJECT", "RUN-CANCEL"}
+        {
+            "RUN-AGENT",
+            "RUN-ASK",
+            "RUN-SSE",
+            "RUN-APPROVE",
+            "RUN-REJECT",
+            "RUN-CANCEL",
+            *(f"AC{index:02d}" for index in range(1, 23)),
+        }
     ),
     "patrol-admin": frozenset(
         {
@@ -66,6 +74,7 @@ ACCEPTANCE_REQUIREMENT_PROJECT = {
 PRODUCTION_IMAGE_NAMES = frozenset(
     {
         "api",
+        "sandbox-broker",
         "execution-kernel",
         "migrate",
         "ui",
@@ -429,7 +438,7 @@ def _validate_images(document: Mapping[str, object], errors: list[str]) -> None:
     if production is not None:
         names = frozenset(production)
         if names != PRODUCTION_IMAGE_NAMES:
-            errors.append("production image set must contain exactly the seven shipped images")
+            errors.append("production image set must contain exactly the shipped image set")
         if "acceptance-inference" in names:
             errors.append("acceptance provider leaked into production images")
         for name, digest in production.items():

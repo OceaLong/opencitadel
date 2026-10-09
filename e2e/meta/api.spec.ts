@@ -114,3 +114,52 @@ for (const explicitWorkspace of [undefined, "team-pinned"]) {
     }
   });
 }
+
+for (const status of [403, 404]) {
+  test(`preserves revocation HTTP ${status} without a retry or successful data`, async () => {
+    let calls = 0;
+    const page = {
+      evaluate: async () => {
+        calls++;
+        return {
+          status,
+          payload: {
+            code: status,
+            msg: "not available",
+            data: null,
+            error_key:
+              status === 403
+                ? "executionErrors.permission_denied"
+                : "executionErrors.not_found",
+          },
+        };
+      },
+    } as unknown as Page;
+    const result = await appApi(
+      page,
+      "/execution-comparisons/owned?revision=1",
+      { expectStatus: status },
+    );
+    expect(result.status).toBe(status);
+    expect(result.data).toBeNull();
+    expect(calls).toBe(1);
+  });
+}
+
+test("an unknown write outcome is surfaced once without blindly retrying", async () => {
+  let calls = 0;
+  const page = {
+    evaluate: async () => {
+      calls++;
+      throw new Error("connection lost after dispatch");
+    },
+  } as unknown as Page;
+  await expect(
+    appApi(page, "/evaluation/batches", {
+      method: "POST",
+      body: { request_id: "owned-request" },
+      expectStatus: 202,
+    }),
+  ).rejects.toThrow("connection lost after dispatch");
+  expect(calls).toBe(1);
+});

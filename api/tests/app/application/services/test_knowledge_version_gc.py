@@ -251,6 +251,7 @@ def test_gc_result_is_frozen_and_metrics_are_deterministic():
         "deleted_versions": 2,
         "protected_building_versions": 1,
         "protected_active_versions": 1,
+        "protected_pinned_versions": 0,
         "protected_age_versions": 0,
         "protected_bound_versions": 2,
         "protected_retention_versions": 0,

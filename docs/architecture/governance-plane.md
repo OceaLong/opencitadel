@@ -7,32 +7,7 @@ call, but cannot expose, approve, or execute a capability by itself.
 
 ## End-to-end path
 
-```mermaid
-sequenceDiagram
-  participant Model
-  participant Catalog as Admitted tool catalog
-  participant Run as Agent Run decision
-  participant Approval as Approval projection
-  participant Human
-  participant Activity as Tool Activity
-  participant Provider as Sandbox / MCP / A2A / Actuator
-  participant Evidence
-
-  Catalog->>Model: narrowed tool schemas + policy metadata
-  Model->>Run: tool intent
-  Run->>Run: validate name, arguments, policy result
-  alt approval required
-    Run->>Approval: ApprovalRequested event
-    Human->>Approval: dedicated approve/reject command
-    Approval->>Run: persisted decision
-  end
-  Run->>Activity: persist request and invocation identity
-  Activity->>Activity: persist claim + call-start
-  Activity->>Provider: invoke admitted tool
-  Provider-->>Activity: result or unknown outcome
-  Activity->>Run: completion/failure command
-  Run->>Evidence: formal events and projections
-```
+![governance sequence](../assets/diagrams/governance-sequence.png)
 
 ## Capability narrowing
 
@@ -65,14 +40,17 @@ decision for the wrong owner all fail without calling the provider.
 Approvals are a closed loop rather than an open-ended wait:
 
 - **Inbox.** `GET /api/approvals?status=pending` lists the caller's pending
-  approvals (with `approved`/`rejected`/`cancelled`/`expired` also selectable)
-  so a reviewer can find every request across Runs from one queue.
+  approvals in the active personal/team workspace (with
+  `approved`/`rejected`/`cancelled`/`expired` also selectable). Omitting `status`
+  returns all states; pagination uses `limit` (default 50, maximum 200) and
+  `offset`. `POST /api/approval-batches/{approval_id}/commands/decide` submits
+  the dedicated decision.
 - **Notification.** When a Run raises `ApprovalRequested`, the formal projector
   sends a durable notification so the reviewer is alerted instead of polling.
 - **Timeout.** Requesting an approval schedules a durable self-cancelling
   timeout command. When it fires the approval transitions to the terminal
   `expired` status (an `ApprovalExpired` event), the Run leaves the waiting
-  state, and the provider is never called. The window is the
+  state by cancelling the Run with `approval_expired`, and the provider is never called. The window is the
   `approval.ttl_minutes` Operations Policy field (default one day), not an
   environment variable.
 
@@ -82,6 +60,8 @@ Each tool request has a unique Activity/Invocation identity. Equal arguments in
 two intentional calls do not collapse into one invocation. Claim generation
 fences stale workers. Calls with uncertain external effects are not blindly
 repeated after a crash; they enter explicit unknown-outcome resolution.
+Physical-capacity holds for an uncertain outcome remain retained until
+reconciliation confirms settlement; a UI timeout cannot release them.
 
 Arguments and large results use object references and digests. Public events
 contain only bounded, sanitized summaries. Workspace writes occur inside the

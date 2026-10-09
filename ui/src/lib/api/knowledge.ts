@@ -1,4 +1,4 @@
-import { createIngestStream, del, get, post } from "./fetch";
+import { createIngestStream, del, get, post, type RequestOptions } from "./fetch";
 import { makeResourceClient } from "./resource-client";
 import type {
   AddKnowledgeDocumentsParams,
@@ -68,10 +68,12 @@ export const knowledgeApi = {
     versionId: string,
     docId: string,
     params?: { page?: number; cursor?: string; limit?: number },
+    options?: RequestOptions,
   ): Promise<ReadKnowledgeDocumentData> => {
     return get<ReadKnowledgeDocumentData>(
       `/knowledge-bases/${kbId}/versions/${versionId}/documents/${docId}/content`,
       params,
+      options,
     );
   },
 

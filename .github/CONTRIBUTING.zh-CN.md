@@ -16,15 +16,18 @@
 
 ```bash
 cd api
-uv sync
-uv run pytest
+uv sync --all-groups
+uv run pytest --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 ```
+
+API 集成测试需要已配置的 PostgreSQL；`make test-api-strict` 要求 PostgreSQL/Redis 实际可用，不能用跳过代替。数据库准备步骤见 [API README](../api/README.zh-CN.md)。
+API Job 与两个 Make API 入口只排除 `test_execution_visualization_closed_loop.py` 的六项当次验收消费者；[验收 Runner](../e2e/README.zh-CN.md)在原生 strict 报告与恢复回执校验后执行它们，要求零跳过。
 
 ### UI
 
 ```bash
 cd ui
-npm install
+npm ci
 npm run test
 npm run build
 ```

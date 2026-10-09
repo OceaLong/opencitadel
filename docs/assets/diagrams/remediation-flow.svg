@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="740" viewBox="0 0 1440 740" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Ops Patrol · Approved remediation</title>
+<desc id="desc">A proposal starts a linked remediation Run; human approval is persisted before the external mutation. Rejection, cancellation, failed verification and unknown external outcomes remain separate protocol states. A current remediation-key annotation supports duplicate detection; it is not a global exactly-once ledger.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="740" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Ops Patrol · Approved remediation</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">A proposal starts a linked remediation Run; human approval is persisted before the external mutation.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="proposal" data-target="run" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="run" data-target="approval" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="approval" data-target="activity" d="M 1110.0,280 L 1110.0,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="activity" data-target="actuator" d="M 900,500 L 780,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="actuator" data-target="verify" d="M 480,500 L 360,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="proposal" data-node-id="proposal" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="81" cy="203" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 71,203 V 216 Q 81,223 91,216 V 203" fill="none" stroke="#16a34a"/>
+<text x="104" y="213" font-size="20" font-weight="600">Frozen proposal</text>
+<text x="78" y="240" font-size="15" class="secondary">Registered action + target + args</text>
+<text x="78" y="262" font-size="14" class="secondary">Current owner and policy checks</text>
+</g>
+<g id="run" data-node-id="run" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Remediation child Run</text>
+<text x="498" y="240" font-size="15" class="secondary">Linked to source Patrol Run</text>
+<text x="498" y="262" font-size="14" class="secondary">Durable request and effect policy</text>
+</g>
+<g id="approval" data-node-id="approval" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Approval command</text>
+<text x="918" y="240" font-size="15" class="secondary">Dedicated human approve / reject</text>
+<text x="918" y="262" font-size="14" class="secondary">Only the frozen invocation is covered</text>
+</g>
+<g id="activity" data-node-id="activity" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">remediation.execute</text>
+<text x="918" y="510" font-size="15" class="secondary">Fenced claim; persist call-start</text>
+<text x="918" y="532" font-size="14" class="secondary">No write while approval is pending</text>
+</g>
+<g id="actuator" data-node-id="actuator" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Narrow Ops Actuator</text>
+<text x="498" y="510" font-size="15" class="secondary">Token + namespaced workload rules</text>
+<text x="498" y="532" font-size="14" class="secondary">Restart / scale / rollback only</text>
+</g>
+<g id="verify" data-node-id="verify" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Verification Patrol</text>
+<text x="78" y="510" font-size="15" class="secondary">Linked read-only recheck</text>
+<text x="78" y="532" font-size="14" class="secondary">Formal status and fresh evidence</text>
+</g>
+<text x="420.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">admit</text>
+<text x="840.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">request approval</text>
+<text x="1184.9" y="370.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">approved decision</text>
+<text x="840.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">invoke</text>
+<text x="420.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">recheck</text>
+<g data-graph-role="legend">
+<line x1="60" y1="612" x2="96" y2="612" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="617" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="612" x2="536" y2="612" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="617" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="612" x2="976" y2="612" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="617" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="660" font-size="15" class="secondary" data-graph-role="label">Rejection, cancellation, failed verification and unknown external outcomes remain separate protocol states.</text>
+<text x="60" y="684" font-size="15" class="secondary" data-graph-role="label">A current remediation-key annotation supports duplicate detection; it is not a global exactly-once ledger.</text>
+</svg>

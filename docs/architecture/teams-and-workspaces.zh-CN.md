@@ -14,10 +14,10 @@
 
 OpenCitadel 有两类邀请：
 
-| 类型 | 发起方 | 链接 | 用途 |
-|------|--------|------|------|
+| 类型     | 发起方                          | 链接                         | 用途           |
+| -------- | ------------------------------- | ---------------------------- | -------------- |
 | 平台邀请 | 平台管理员 `/admin/invitations` | `/register?invite_token=...` | 仅开通平台账号 |
-| 团队邀请 | 团队 Owner/Admin `/teams/[id]` | `/invitations/{token}` | 加入团队 |
+| 团队邀请 | 团队 Owner/Admin `/teams/[id]`  | `/invitations/{token}`       | 加入团队       |
 
 团队邀请支持可选**受邀邮箱**（混合安全模型）：
 
@@ -26,21 +26,7 @@ OpenCitadel 有两类邀请：
 
 登录页支持 `?redirect=` 安全回跳；OAuth 登录同样携带 `redirect` 与 `team_invite_token`。
 
-```mermaid
-sequenceDiagram
-  participant Admin as 团队管理员
-  participant User as 被邀请人
-  participant Page as /invitations/token
-
-  Admin->>Page: 生成邀请（可选邮箱）
-  alt 新用户且邀请含邮箱
-    User->>Page: 注册并设密码
-    Page->>User: 创建账号并入队
-  else 已有账号
-    User->>Page: 登录（带 redirect）
-    Page->>User: 接受邀请并入队
-  end
-```
+![team invitation](../assets/diagrams/team-invitation.png)
 
 ## 工作区作用域
 
@@ -52,65 +38,52 @@ X-Workspace-Id: <team_id>
 
 未携带该 Header 时，服务端使用**个人作用域**（`OwnerScope.personal(user_id)`）。
 
-| 作用域 | Header | 资源归属 |
-|--------|--------|----------|
-| 个人 | （无） | `owner_user_id = 当前用户` |
-| 团队 | `X-Workspace-Id` | `team_id = 工作区` |
+| 作用域 | Header           | 资源归属                   |
+| ------ | ---------------- | -------------------------- |
+| 个人   | （无）           | `owner_user_id = 当前用户` |
+| 团队   | `X-Workspace-Id` | `team_id = 工作区`         |
 
 服务端会校验 `principal.team_roles` 成员关系。
 
-```mermaid
-sequenceDiagram
-  participant User as 用户
-  participant Switcher as WorkspaceSwitcher
-  participant LS as localStorage
-  participant API as fetch.ts
+![workspace switch](../assets/diagrams/workspace-switch.png)
 
-  User->>Switcher: 选择团队工作区
-  Switcher->>LS: 写入 ACTIVE_WORKSPACE_KEY
-  Switcher->>User: window.location.reload()
-  User->>API: 后续请求
-  API->>API: 附加 X-Workspace-Id 头
-```
+`WorkspaceSwitcher`（`ui/src/components/workspace-switcher.tsx`）调用 Client Data Provider，将团队 id
+存入按用户隔离的 localStorage Key，并镜像到 API Header 使用的 `ACTIVE_WORKSPACE_KEY`，
+发布新 Data Scope 后执行**整页 reload**。Scoped Cache 与进行中的读取按认证用户/工作区隔离；
+用户不再属于已选团队时，Switcher 清空该选择。
 
-`WorkspaceSwitcher`（`ui/src/components/workspace-switcher.tsx`）将当前团队 id 写入 localStorage 并执行**整页 reload**，使所有 Provider 与缓存列表在新 scope 下重新拉取。
-
-```mermaid
-flowchart LR
-  User["Authenticated user"] --> UI["UI workspace switch"]
-  UI -->|"X-Workspace-Id: team_id"| API["FastAPI"]
-  UI -->|"no header"| Personal["Personal scope"]
-  API --> Validate["Validate team_roles"]
-  Validate --> Query["Filter resources by owner_user_id or team_id"]
-```
+![team owner scope](../assets/diagrams/team-owner-scope.png)
 
 ## 团队角色
 
-| 角色 | 能力 |
-|------|------|
-| `OWNER` | 团队全权管理；创建邀请；调整成员角色；唯一 OWNER 时不可退出 |
-| `ADMIN` | 创建邀请；管理成员（`TeamService._require_team_admin`） |
-| `MEMBER` | 访问团队作用域资源；无成员管理权限 |
+| 角色     | 能力                                                        |
+| -------- | ----------------------------------------------------------- |
+| `OWNER`  | 团队全权管理；创建邀请；调整成员角色；唯一 OWNER 时不可退出 |
+| `ADMIN`  | 创建邀请、移除成员；修改角色与解散团队需 `OWNER`            |
+| `MEMBER` | 访问团队作用域资源；无成员管理权限                          |
 
 创建团队的用户默认为 `OWNER`。平台管理员可在 `/admin/teams` 管理团队。
 
 ## API 路由
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/teams` | 创建团队 |
-| GET | `/api/teams` | 我的团队列表 |
-| GET | `/api/teams/{id}` | 团队详情 |
-| GET | `/api/teams/{id}/members` | 成员列表 |
-| POST | `/api/teams/{id}/invitations` | 创建邀请链接（可选 `email`） |
-| POST | `/api/teams/{id}/leave` | 退出团队 |
-| PATCH | `/api/teams/{id}/members/{user_id}` | 更新成员角色（OWNER） |
-| DELETE | `/api/teams/{id}/members/{user_id}` | 移除成员 |
-| GET | `/api/invitations/{token}` | 预览邀请（公开） |
-| POST | `/api/invitations/{token}/register` | 注册并入队（公开，需邮箱绑定邀请） |
-| POST | `/api/invitations/{token}/accept` | 接受邀请（需登录） |
+| 方法   | 路径                                | 说明                                                      |
+| ------ | ----------------------------------- | --------------------------------------------------------- |
+| POST   | `/api/teams`                        | 创建团队                                                  |
+| GET    | `/api/teams`                        | 我的团队列表                                              |
+| GET    | `/api/teams/{id}`                   | 团队详情                                                  |
+| GET    | `/api/teams/{id}/members`           | 成员列表                                                  |
+| POST   | `/api/teams/{id}/invitations`       | 创建邀请链接（可选 `email`）                              |
+| POST   | `/api/teams/{id}/leave`             | 退出团队                                                  |
+| DELETE | `/api/teams/{id}`                   | 解散团队（OWNER）；默认 `transfer_to_owner`，或 `cascade` |
+| PATCH  | `/api/teams/{id}/members/{user_id}` | 更新成员角色（OWNER）                                     |
+| DELETE | `/api/teams/{id}/members/{user_id}` | 移除成员                                                  |
+| GET    | `/api/invitations/{token}`          | 预览邀请（公开）                                          |
+| POST   | `/api/invitations/{token}/register` | 注册并入队（公开，需邮箱绑定邀请）                        |
+| POST   | `/api/invitations/{token}/accept`   | 接受邀请（需登录）                                        |
 
-会话、知识库、文件、调度、记忆等写路由需通过 `require_non_auditor`，并遵守 `WorkspaceContext`。
+认证业务路由继承 `enforce_auditor_read_only`：Auditor 可使用 GET/HEAD/OPTIONS，不能提交
+Mutation。部分写路由另有 `require_non_auditor`；Owner Scope 资源使用 `WorkspaceContext`。
+解散团队会转移或处置资源，并在 Audit 中记录所选 Strategy。
 
 ## 相关文档
 

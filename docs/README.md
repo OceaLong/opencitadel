@@ -19,62 +19,64 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 
 ### Operations & deployment
 
-| Document | Scope |
-|----------|-------|
-| [README.md](../README.md) | Project overview and doc map |
-| [Production deployment](operations/deployment.md) | Docker Compose production deployment, cloud/local modes, backup, tuning |
-| [Ops Patrol operations](operations/ops-patrol.md) | Collector security boundary, deployment, recovery, evidence, troubleshooting |
-| [HTTPS & domain setup](operations/https-domain-setup.md) | Domain binding and HTTPS |
-| [Helm Chart](../deploy/helm/opencitadel/README.md) | Kubernetes / Helm install and values |
+| Document                                                 | Scope                                                                        |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [README.md](../README.md)                                | Project overview and doc map                                                 |
+| [Production deployment](operations/deployment.md)        | Docker Compose production deployment, cloud/local modes, backup, tuning      |
+| [Ops Patrol operations](operations/ops-patrol.md)        | Collector security boundary, deployment, recovery, evidence, troubleshooting |
+| [HTTPS & domain setup](operations/https-domain-setup.md) | Domain binding and HTTPS                                                     |
+| [Helm Chart](../deploy/helm/opencitadel/README.md)       | Kubernetes / Helm install and values                                         |
 
 ### Architecture & design
 
-| Document | Scope |
-|----------|-------|
-| [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
-| [Governance plane](architecture/governance-plane.md) | Effect contracts, capability narrowing, batch approval, terminal latch, evidence |
-| [Ops Patrol](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector trust boundary, evidence, tenant isolation |
-| [Technical decisions](architecture/technical-decisions.md) | Technology choices and alternatives |
-| [Inference control plane](architecture/inference-control-plane.md) | Endpoint/model/binding ownership, capabilities, encryption, UI flow |
-| [Frontend UI](architecture/frontend-ui.md) | Next.js shell, public SSE projection, approval surfaces |
-| [Execution kernel](architecture/execution-kernel.md) | Commands, Event Store, Activities, recovery, projections, SSE, and privilege boundaries |
-| [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
-| [Web Operator](architecture/web-operator.md) | Exact-host boundary, per-invocation approval, evidence |
-| [Teams & workspaces](architecture/teams-and-workspaces.md) | Team roles, `X-Workspace-Id`, invitations |
-| [Admin, auditor & compliance](architecture/admin-auditor-compliance.md) | Platform admin, evidence chain, compliance reports |
-| [A2A & service API keys](architecture/integrations-a2a-service-keys.md) | Inbound/outbound A2A, `X-Api-Key` |
-| [Skills](architecture/skills.md) | Skill templates, runtime overrides, MCP/A2A filtering |
-| [Artifacts & sharing](architecture/artifacts-sharing.md) | Session artifacts, public share links |
-| [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
-| [Config source governance](architecture/config-source-governance.md) | Deployment Settings, Runtime Policy, Integration boundaries |
-| [Runtime Policy control plane](architecture/runtime-policy-control-plane.md) | Immutable revisions, atomic head, CAS, fail-closed consumers |
-| [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
-| [Knowledge base ingestion](architecture/knowledge-base-ingestion.md) | Parse, OCR, GraphRAG, ingest failures |
-| [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
+| Document                                                                           | Scope                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [Architecture overview](architecture/overview.md)                                  | System design, process roles, sandbox lifecycle, deployment modes                        |
+| [Governance plane](architecture/governance-plane.md)                               | Effect contracts, capability narrowing, batch approval, terminal latch, evidence         |
+| [Ops Patrol](architecture/ops-patrol.md)                                           | Pack/Run lifecycle, Collector trust boundary, evidence, tenant isolation                 |
+| [Technical decisions](architecture/technical-decisions.md)                         | Technology choices and alternatives                                                      |
+| [Inference control plane](architecture/inference-control-plane.md)                 | Endpoint/model/binding ownership, capabilities, encryption, UI flow                      |
+| [Frontend UI](architecture/frontend-ui.md)                                         | Next.js shell, public SSE projection, approval surfaces                                  |
+| [Execution analysis, comparisons, and exports](architecture/execution-analysis.md) | Pinned observations, analysis sources, comparison members, exports and current authority |
+| [Evaluation control plane](architecture/evaluation-control-plane.md)               | Dataset/suite/batch, Subject/Judge, isolated environments and physical budgets           |
+| [Execution kernel](architecture/execution-kernel.md)                               | Commands, Event Store, Activities, recovery, projections, SSE, and privilege boundaries  |
+| [Security model](architecture/security-model.md)                                   | Trust boundaries, sandbox isolation, auth                                                |
+| [Web Operator](architecture/web-operator.md)                                       | Exact-host boundary, per-invocation approval, evidence                                   |
+| [Teams & workspaces](architecture/teams-and-workspaces.md)                         | Team roles, `X-Workspace-Id`, invitations                                                |
+| [Admin, auditor & compliance](architecture/admin-auditor-compliance.md)            | Platform admin, evidence chain, compliance reports                                       |
+| [A2A & service API keys](architecture/integrations-a2a-service-keys.md)            | Inbound/outbound A2A, `X-Api-Key`                                                        |
+| [Skills](architecture/skills.md)                                                   | Skill templates, runtime overrides, MCP/A2A filtering                                    |
+| [Artifacts & sharing](architecture/artifacts-sharing.md)                           | Session artifacts, public share links                                                    |
+| [Automation & scheduler](architecture/automation-scheduler.md)                     | Cron/webhook jobs, leader election, notifications                                        |
+| [Config source governance](architecture/config-source-governance.md)               | Deployment Settings, Runtime Policy, Integration boundaries                              |
+| [Runtime Policy control plane](architecture/runtime-policy-control-plane.md)       | Immutable revisions, atomic head, CAS, fail-closed consumers                             |
+| [Model resilience](architecture/model-resilience.md)                               | Circuit breaking, fallback, SLO runbooks                                                 |
+| [Knowledge base ingestion](architecture/knowledge-base-ingestion.md)               | Parse, OCR, GraphRAG, ingest failures                                                    |
+| [Architecture evolution](architecture/architecture-evolution.md)                   | Compose → K8s / external sandbox                                                         |
 
 ### Module guides
 
-| Document | Scope |
-|----------|-------|
-| [API](../api/README.md) | Backend routes, SSE, local dev |
-| [UI](../ui/README.md) | Frontend stack and routes |
-| [Sandbox](../sandbox/README.md) | Isolated runtime |
-| [Nginx gateway](../nginx/README.md) | Edge proxy, SSE/WS, upload limits |
-| [Ops Collector](../ops-collector/README.md) | Fixed read-only MCP probes, configuration and deployment |
-| [Ops Actuator](../ops-actuator/README.md) | Fixed patch-only write MCP probes, configuration and deployment |
-| [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
-| [E2E acceptance](../e2e/README.md) | Deterministic isolated full-stack gate, evidence, and cleanup |
-| [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh`, acceptance runner |
-| [Deploy scripts](../deploy/scripts/README.md) | Production host tuning utilities |
-| [Ops Patrol fault lab](../deploy/patrol-demo/README.md) | Disposable kind cluster with reproducible Patrol fixtures |
+| Document                                                | Scope                                                           |
+| ------------------------------------------------------- | --------------------------------------------------------------- |
+| [API](../api/README.md)                                 | Backend routes, SSE, local dev                                  |
+| [UI](../ui/README.md)                                   | Frontend stack and routes                                       |
+| [Sandbox](../sandbox/README.md)                         | Isolated runtime                                                |
+| [Nginx gateway](../nginx/README.md)                     | Edge proxy, SSE/WS, upload limits                               |
+| [Ops Collector](../ops-collector/README.md)             | Fixed read-only MCP probes, configuration and deployment        |
+| [Ops Actuator](../ops-actuator/README.md)               | Fixed patch-only write MCP probes, configuration and deployment |
+| [OpsConsole demo](../demo/ops-console/README.md)        | Web Operator ticket backend demo                                |
+| [E2E acceptance](../e2e/README.md)                      | Deterministic isolated full-stack gate, evidence, and cleanup   |
+| [Repository scripts](../scripts/README.md)              | `quickstart.sh`, `check-docs.sh`, acceptance runner             |
+| [Deploy scripts](../deploy/scripts/README.md)           | Production host tuning utilities                                |
+| [Ops Patrol fault lab](../deploy/patrol-demo/README.md) | Disposable kind cluster with reproducible Patrol fixtures       |
 
 ### Open-source governance
 
-| Document | Scope |
-|----------|-------|
-| [CONTRIBUTING.md](../.github/CONTRIBUTING.md) | Contribution guide |
-| [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting |
-| [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards |
+| Document                                                     | Scope                                     |
+| ------------------------------------------------------------ | ----------------------------------------- |
+| [CONTRIBUTING.md](../.github/CONTRIBUTING.md)                | Contribution guide                        |
+| [SECURITY.md](../.github/SECURITY.md)                        | Vulnerability reporting                   |
+| [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md)          | Community standards                       |
 | [Pull request template](../.github/pull_request_template.md) | PR checklist including bilingual doc sync |
 
 ## Maintenance rules

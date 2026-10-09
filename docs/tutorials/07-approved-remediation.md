@@ -37,13 +37,18 @@ opsActuator:
         max_replicas: 10
 ```
 
-Register `http://opencitadel-ops-actuator:8091/mcp` under the exact name
-`ops-actuator`. The backend Activity calls it directly; do not expose it in an
+Provision a strong `OPS_ACTUATOR_TOKEN` (at least 32 characters; Helm uses
+`opsActuator.token`) distinct from the Collector token. Register
+`http://opencitadel-ops-actuator:8091/mcp` under the exact name `ops-actuator`,
+with matching encrypted `Authorization: Bearer <token>` headers and the exact
+internal host permitted by deployment outbound policy. The backend Activity calls it directly; do not expose it in an
 Agent Skill or model tool policy.
 
 ## Propose
 
-1. Open an actionable Finding under **Ops Patrol → Runs**.
+1. Open an actionable Kubernetes Finding bound to a registered Deployment or
+   StatefulSet under **Ops Patrol → Runs**. HTTP, Prometheus, certificate,
+   backup and dependency Findings have no Actuator action in this implementation.
 2. Select **Propose remediation**.
 3. Choose restart, scale, or rollback. Scale requires a positive replica count;
    rollback always targets the immediately previous revision.

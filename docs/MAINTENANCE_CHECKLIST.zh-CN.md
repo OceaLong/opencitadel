@@ -6,13 +6,14 @@
 
 **相关治理文档**
 
-| 文档 | 职责 |
-|------|------|
+| 文档                                         | 职责                                   |
+| -------------------------------------------- | -------------------------------------- |
 | [文档清单](DOCUMENTATION_INVENTORY.zh-CN.md) | 全部文档的权威列表、权威级别、过期风险 |
-| 本清单 | 贡献者可执行的 PR 步骤 |
+| 本清单                                       | 贡献者可执行的 PR 步骤                 |
 
 ## 何时更新文档
 
+- [ ] 架构图变更 → 同步维护 `docs/assets/diagrams/` 的共享 SVG/PNG、中英文引用和清单，使用 `fireworks-tech-graph` skill 检查几何、渲染与导出图片。
 - [ ] 新增或变更 API 路由 → `api/README.md` + `api/README.zh-CN.md`，相关 `docs/architecture/*.md`
 - [ ] 新增或变更推理 Endpoint/Model/Binding 行为 → `inference-control-plane.md`（+ 英文）、`deployment.md`（+ 中文）、`ui/README.md`（+ 中文）
 - [ ] 新增或变更 UI 路由或审批组件 → `ui/README.md` + `ui/README.zh-CN.md`、`frontend-ui.md`（+ 中文）、`docs/README.md` 模块指南表（+ 中文）
@@ -34,21 +35,21 @@
 
 ## 准确性核对（人工）
 
-| 领域 | 对照代码 |
-|------|----------|
-| UI 路由 | `ui/src/app/**/page.tsx` |
-| API 路由 | `api/app/interfaces/endpoints/routes.py` 及各路由模块 |
-| 推理控制面 | `inference_routes.py`、`inference-settings.tsx`、设置中的 Endpoint/Model/Binding 流程 |
-| Run 恢复 | `application/execution/`、`execution-kernel.md`（+ 中文） |
-| Compose 镜像 | `docker-compose.yml`、`.github/workflows/release.yml` |
-| 沙箱边界 | Chromium 在沙箱；执行内核通过 CDP 连接 |
-| 集成 UI | 设置弹窗 → 集成 Tab（非 `/settings/integrations`） |
-| 对象存储 | `.env.example` 默认；quickstart 首次运行设置 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` |
-| 上传限制 | `nginx/nginx.conf`、Execution Policy `knowledge_base.document.max_bytes` |
-| KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`application/execution/activities/resource_build.py`、`knowledge-base-ingestion.md`（+ 中文） |
-| 服务 API Key | `X-Api-Key`；入站仅 `/api/a2a` |
-| 分享链接 | 默认 TTL 168h；UI 路由 `/share/artifact/[token]` |
-| Ops Patrol | `patrol_routes.py`、Pack/Run Service、内置 Template、`ops-collector/src/opencitadel_ops_collector/config.py`、Helm/Kustomize Manifest |
+| 领域          | 对照代码                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| UI 路由       | `ui/src/app/**/page.tsx`                                                                                                              |
+| API 路由      | `api/app/interfaces/endpoints/routes.py` 及各路由模块                                                                                 |
+| 推理控制面    | `inference_routes.py`、`inference-settings.tsx`、设置中的 Endpoint/Model/Binding 流程                                                 |
+| Run 恢复      | `application/execution/`、`execution-kernel.md`（+ 中文）                                                                             |
+| Compose 镜像  | `docker-compose.yml`、`.github/workflows/release.yml`                                                                                 |
+| 沙箱边界      | Chromium 在沙箱；执行内核通过 CDP 连接                                                                                                |
+| 集成 UI       | 设置弹窗 → 集成 Tab（非 `/settings/integrations`）                                                                                    |
+| 对象存储      | `.env.example` 默认；quickstart 首次运行设置 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio`                                      |
+| 上传限制      | `nginx/nginx.conf`、Execution Policy `knowledge_base.document.max_bytes`                                                              |
+| KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`application/execution/activities/resource_build.py`、`knowledge-base-ingestion.md`（+ 中文）   |
+| 服务 API Key  | `X-Api-Key`；入站仅 `/api/a2a`                                                                                                        |
+| 分享链接      | 默认 TTL 168h；UI 路由 `/share/artifact/[token]`                                                                                      |
+| Ops Patrol    | `patrol_routes.py`、Pack/Run Service、内置 Template、`ops-collector/src/opencitadel_ops_collector/config.py`、Helm/Kustomize Manifest |
 
 ## 自动检查
 

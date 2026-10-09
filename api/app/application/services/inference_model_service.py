@@ -1,10 +1,15 @@
 from collections.abc import Callable
+from contextlib import nullcontext
 
 from app.application.ports.inference import (
     EmbeddingFactoryPort,
     InferenceProviderCatalog,
     ModelClientFactoryPort,
     UnsupportedInferenceCombination,
+)
+from app.application.ports.inference_dispatch import (
+    close_inference_adapter,
+    physical_request_context,
 )
 from app.domain.errors import (
     AppException,
@@ -35,8 +40,11 @@ class InferenceModelService:
         provider_catalog: InferenceProviderCatalog,
         model_client_factory: ModelClientFactoryPort,
         embedding_factory: EmbeddingFactoryPort,
+        *,
+        physical_dispatch=None,
     ) -> None:
         self._uow_factory = uow_factory
+        self._physical_dispatch = physical_dispatch
         self._provider_catalog = provider_catalog
         self._model_client_factory = model_client_factory
         self._embedding_factory = embedding_factory
@@ -178,8 +186,9 @@ class InferenceModelService:
         model_id: str,
         *,
         scope: OwnerScope | None,
+        uow: IUnitOfWork | None = None,
     ) -> ResolvedInferenceModel:
-        async with self._uow_factory() as uow:
+        async with nullcontext(uow) if uow is not None else self._uow_factory() as uow:
             model = await uow.inference_model.get_by_id(model_id, scope=scope)
             if model is None:
                 raise NotFoundError(
@@ -200,16 +209,17 @@ class InferenceModelService:
         model_id: str | None = None,
         *,
         scope: OwnerScope | None,
+        uow: IUnitOfWork | None = None,
     ) -> ResolvedInferenceModel:
         if model_id:
-            resolved = await self.resolve_model(model_id, scope=scope)
+            resolved = await self.resolve_model(model_id, scope=scope, uow=uow)
             if resolved.model.kind != InferenceModelKind.CHAT:
                 raise BadRequestError(
                     "Chat 调用只能选择 Chat 模型",
                     error_key="inference.errors.bindingKindMismatch",
                 )
             return resolved
-        async with self._uow_factory() as uow:
+        async with nullcontext(uow) if uow is not None else self._uow_factory() as uow:
             binding = await uow.inference_binding.get_effective_binding(
                 InferencePurpose.CHAT,
                 scope,
@@ -266,28 +276,32 @@ class InferenceModelService:
         scope: OwnerScope | None,
     ) -> InferenceProbeResult:
         resolved = await self.resolve_model(model_id, scope=scope)
+        adapter = None
         try:
-            if resolved.model.kind is InferenceModelKind.CHAT:
-                adapter = self._model_client_factory.create_model_client(
-                    resolved,
-                    thinking_enabled=False,
-                )
-                result = await adapter.invoke([{"role": "user", "content": "Reply with OK."}])
-                if not result.get("content") and not result.get("tool_calls"):
-                    return InferenceProbeResult(
-                        status=InferenceProbeStatus.ERROR,
-                        message="Chat 推理探测返回空响应",
-                        error_key="inference.errors.emptyProbeResponse",
+            with physical_request_context(
+                self._physical_dispatch, scope, "inference.probe", resolved
+            ):
+                if resolved.model.kind is InferenceModelKind.CHAT:
+                    adapter = self._model_client_factory.create_model_client(
+                        resolved,
+                        thinking_enabled=False,
                     )
-            else:
-                adapter = self._embedding_factory.create_embedding(resolved)
-                vectors = await adapter.embed_batch(["OpenCitadel inference probe"])
-                if len(vectors) != 1 or len(vectors[0]) != PLATFORM_EMBEDDING_DIMENSIONS:
-                    return InferenceProbeResult(
-                        status=InferenceProbeStatus.ERROR,
-                        message="Embedding 推理探测返回了无效向量维度",
-                        error_key="inference.errors.embeddingDimensionMismatch",
-                    )
+                    result = await adapter.invoke([{"role": "user", "content": "Reply with OK."}])
+                    if not result.get("content") and not result.get("tool_calls"):
+                        return InferenceProbeResult(
+                            status=InferenceProbeStatus.ERROR,
+                            message="Chat 推理探测返回空响应",
+                            error_key="inference.errors.emptyProbeResponse",
+                        )
+                else:
+                    adapter = self._embedding_factory.create_embedding(resolved)
+                    vectors = await adapter.embed_batch(["OpenCitadel inference probe"])
+                    if len(vectors) != 1 or len(vectors[0]) != PLATFORM_EMBEDDING_DIMENSIONS:
+                        return InferenceProbeResult(
+                            status=InferenceProbeStatus.ERROR,
+                            message="Embedding 推理探测返回了无效向量维度",
+                            error_key="inference.errors.embeddingDimensionMismatch",
+                        )
         except AppException as exc:
             return InferenceProbeResult(
                 status=InferenceProbeStatus.ERROR,
@@ -300,6 +314,9 @@ class InferenceModelService:
                 message=str(exc),
                 error_key="inference.errors.probeFailed",
             )
+        finally:
+            if adapter is not None:
+                await close_inference_adapter(adapter)
         return InferenceProbeResult(
             status=InferenceProbeStatus.OK,
             message="推理模型探测成功",

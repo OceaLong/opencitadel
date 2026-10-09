@@ -5,7 +5,9 @@
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:list": "playwright test --list",
-    "test:meta": "playwright test --config meta/playwright.config.ts"
+    "test:meta": "playwright test --config meta/playwright.config.ts",
+    "test:artifact-preview": "playwright test --config artifact-preview.config.ts",
+    "test:analysis-native": "playwright test --config analysis-native.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0"

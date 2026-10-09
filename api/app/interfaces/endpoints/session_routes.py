@@ -256,11 +256,12 @@ async def restore_session(
 )
 async def purge_session(
     session_id: str,
+    force: bool = False,
     ctx: WorkspaceContext = Depends(get_workspace_context),
     session_service: SessionService = Depends(get_session_service),
 ) -> Response[dict | None]:
     """根据传递的会话id彻底清除回收站中的任务会话"""
-    await session_service.purge_session(session_id, scope=ctx.scope)
+    await session_service.purge_session(session_id, scope=ctx.scope, force=force)
     return Response.success()
 
 
@@ -302,7 +303,7 @@ async def chat(
             yield ServerSentEvent(
                 id=event.cursor,
                 event=event.event_type,
-                data=json.dumps(event.payload, ensure_ascii=False),
+                data=json.dumps({**event.payload, "run_id": str(event.run_id)}, ensure_ascii=False),
             )
 
     return EventSourceResponse(event_generator())

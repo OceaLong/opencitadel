@@ -6,29 +6,19 @@ Ops Patrol separates read-only collection, deterministic assertion, and
 approval-gated remediation. Patrol and remediation use the universal execution
 kernel; neither has a private task lifecycle.
 
-```mermaid
-flowchart LR
-  Pack[Versioned Patrol Pack] --> Admit[Patrol Run admission]
-  Admit --> Run[Patrol Run]
-  Run --> Activity[patrol.execute Activity]
-  Activity --> Collector[Read-only Collector]
-  Collector --> Validate[Manifest + schema validation]
-  Validate --> Assert[Deterministic assertions]
-  Assert --> Finding[Findings + signed evidence]
-  Finding --> Proposal[Remediation proposal]
-  Proposal --> Child[Remediation child Run]
-  Child --> Approval[Persisted approval]
-  Approval --> Remediation[remediation.execute Activity]
-  Remediation --> Actuator[Narrow Ops Actuator]
-  Actuator --> Verify[Verification Patrol Run]
-```
+![patrol read flow](../assets/diagrams/patrol-read-flow.png)
+
+![remediation flow](../assets/diagrams/remediation-flow.png)
 
 ## Patrol Packs and collection
 
-A Pack is immutable once published and snapshots its assertions, target,
-collector server id, capability manifest/hash, timeout, and retention policy.
-Admission freezes that snapshot into the Patrol product Run and formal Run
-input. Collector output must match the registered closed-world schema and the
+A Pack has a mutable versioned definition. An edit requires `expected_version`,
+increments its version, returns it to `draft`, and clears validation. A formal
+Patrol validation Run must complete for that version before activation.
+Execution admission copies assertions, target, collector server ID, capability
+hash, and enabled tools into an immutable product Run snapshot; the formal Run
+input links that snapshot by Patrol Run/Pack identity. Retention is live
+Operations Policy, rather than part of the Pack snapshot. Collector output must match the registered closed-world schema and the
 frozen capability hash.
 
 The Collector owns read-only Kubernetes/HTTP/Prometheus/certificate/backup/
@@ -38,16 +28,24 @@ LLM output cannot decide pass/warn/fail.
 
 `PatrolExecutionActivityHandler` is idempotent: finalization uses the Run's
 submission key and creates one report/finding set. Evidence references and
-digests are stored before the Activity reports success.
+digests are stored before the Activity reports success. Signed evidence is
+assembled by the separate evidence-export endpoint; assertion success itself
+does not create a signed archive.
 
 ## Remediation
 
-A Finding may produce a remediation proposal from a fixed action policy. The
+A Finding may produce a remediation proposal from a fixed action policy.
+Currently only `k8s_*` probe findings have remediation actions; HTTP, certificate,
+backup, dependency, and Prometheus probes have none. Restart and rollback accept
+no action parameters; scale accepts a positive integer `replicas`, and rollback
+targets the immediately previous workload revision. The
 proposal becomes a linked `remediation` Run whose single
 `remediation.execute` Activity always requires formal approval. The approval
 freezes subject and risk information; only a dedicated approval command can
 advance it.
 
+Remediation defaults to `disabled`; `propose_only` permits proposal review
+without execution, and `enabled` admits execution subject to approval.
 The Actuator exposes registered restart, scale, and rollback-style operations
 within explicit namespace/workload allowlists. It has separate ServiceAccount,
 NetworkPolicy, non-root/read-only container hardening, and idempotency keys.

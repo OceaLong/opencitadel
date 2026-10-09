@@ -34,6 +34,20 @@ from scripts.acceptance.runner import (  # noqa: E402
 )
 
 
+@pytest.fixture
+def passed_capacity(monkeypatch):
+    """Keep legacy orchestration tests focused on their fake successful dependencies.
+
+    Actual capacity validation and missing-report failure have separate tests.
+    This fixture does not change port probing or claim any benchmark execution.
+    """
+    monkeypatch.setattr(
+        "scripts.acceptance.runner.prepare_capacity_evidence", lambda **kwargs: {"errors": []}
+    )
+    monkeypatch.setattr(AcceptanceRunner, "_prepare_strict_binding", lambda *args: None)
+    monkeypatch.setattr(AcceptanceRunner, "_validate_strict_receipt", lambda *args: None)
+
+
 class FakeCommandRunner:
     def __init__(
         self,
@@ -49,6 +63,8 @@ class FakeCommandRunner:
         sandbox_drained_before_cleanup: bool = False,
         late_sandbox_after_first_down: bool = False,
         up_failure: bool = False,
+        strict_pytest_xml: str | None = None,
+        strict_pytest_exit: int = 0,
     ) -> None:
         self.evidence_dir = evidence_dir
         self.collision = collision
@@ -61,6 +77,10 @@ class FakeCommandRunner:
         self.sandbox_drained_before_cleanup = sandbox_drained_before_cleanup
         self.late_sandbox_after_first_down = late_sandbox_after_first_down
         self.up_failure = up_failure
+        self.strict_pytest_xml = strict_pytest_xml
+        self.strict_pytest_exit = strict_pytest_exit
+        self.strict_pytest_environment = None
+        self.strict_pytest_cwd = None
         self.late_network_present = False
         self.down_calls = 0
         self.started = False
@@ -124,9 +144,28 @@ class FakeCommandRunner:
         junit.write_text("<testsuites/>\n", encoding="utf-8")
 
     def run(self, args, *, cwd, env=None, timeout=None) -> CommandResult:
-        del cwd, timeout
+        del timeout
         args = tuple(str(item) for item in args)
         self.calls.append(args)
+
+        if args[:3] == (sys.executable, "-m", "pytest"):
+            self.strict_pytest_environment = dict(env)
+            self.strict_pytest_cwd = cwd
+            output = Path(
+                next(item.split("=", 1)[1] for item in args if item.startswith("--junitxml="))
+            )
+            output.write_text(
+                self.strict_pytest_xml
+                if self.strict_pytest_xml is not None
+                else "<testsuites><testsuite>"
+                + "".join(f'<testcase name="consumer-{index}"/>' for index in range(6))
+                + "</testsuite></testsuites>",
+                encoding="utf-8",
+            )
+            return self._result(args, returncode=self.strict_pytest_exit)
+
+        if any("label=opencitadel.e04." in item for item in args):
+            return self._result(args)
 
         if args[:3] == ("docker", "ps", "-aq"):
             if "opencitadel.io/sandbox=true" in " ".join(args):
@@ -142,6 +181,29 @@ class FakeCommandRunner:
                 return self._result(args, stdout="retained-postgres\nretained-redis\n")
             return self._result(args)
         if args[:3] == ("docker", "inspect", "--format"):
+            if args[-1] == "kernel-id":
+                import hashlib
+
+                return self._result(
+                    args,
+                    stdout=json.dumps(
+                        {
+                            "Id": "kernel-id",
+                            "Image": "sha256:"
+                            + hashlib.sha256(b"opencitadel-execution-kernel").hexdigest(),
+                            "Config": {
+                                "Labels": {
+                                    "com.docker.compose.project": "opencitadel-acceptance-run-a",
+                                    "com.docker.compose.service": "opencitadel-execution-kernel",
+                                    "com.opencitadel.acceptance.project": "opencitadel-acceptance-run-a",
+                                    "com.opencitadel.acceptance.run": "run-a",
+                                }
+                            },
+                            "State": {"Running": True},
+                        }
+                    )
+                    + "\n",
+                )
             labels = {
                 "opencitadel.io/sandbox": "true",
                 "com.docker.compose.project": "opencitadel-acceptance-run-a",
@@ -165,6 +227,8 @@ class FakeCommandRunner:
             self.dynamic_present = False
             return self._result(args, stdout="sandbox-id\n")
         if args[:3] == ("docker", "image", "inspect"):
+            if args[3].startswith("sha256:"):
+                return self._result(args, stdout=args[3] + "\n")
             seed = args[3].encode()
             import hashlib
 
@@ -210,6 +274,8 @@ class FakeCommandRunner:
                     ),
                 )
             if "ps" in args:
+                if "-q" in args and "opencitadel-execution-kernel" in args:
+                    return self._result(args, stdout="kernel-id\n")
                 services = [
                     {
                         "Service": name,
@@ -390,6 +456,7 @@ def test_owned_resources_rejects_a_dynamic_sandbox_with_mismatched_run_identity(
 
 def test_runner_success_writes_valid_evidence_and_removes_disposable_resources(
     tmp_path: Path,
+    passed_capacity,
 ) -> None:
     config = _config(tmp_path)
     commands = FakeCommandRunner(config.evidence_dir)
@@ -407,6 +474,7 @@ def test_runner_success_writes_valid_evidence_and_removes_disposable_resources(
     build_call = next(call for call in commands.calls if "build" in call)
     assert set(build_call[build_call.index("build") + 1 :]) == {
         "opencitadel-sandbox",
+        "opencitadel-sandbox-broker",
         "opencitadel-migrate",
         "opencitadel-api",
         "opencitadel-execution-kernel",
@@ -421,8 +489,116 @@ def test_runner_success_writes_valid_evidence_and_removes_disposable_resources(
     assert "externally-visible-secret" not in logs
 
 
+def test_execution_consumers_run_after_current_strict_receipt_and_before_capacity_failure(
+    tmp_path, monkeypatch
+):
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(config.evidence_dir)
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    monkeypatch.setattr("scripts.acceptance.runner.assert_ports_available", lambda _ports: None)
+
+    def prepare(*_args):
+        runner._environment["ACCEPTANCE_STRICT_INVOCATION_ID"] = "current-unit-invocation"
+
+    monkeypatch.setattr(runner, "_prepare_strict_binding", prepare)
+    monkeypatch.setattr(
+        runner,
+        "_validate_strict_receipt",
+        lambda: commands.calls.append(("strict-receipt-validated",)),
+    )
+    assert runner.execute() == 1
+    pytest_call = next(
+        call for call in commands.calls if call[:3] == (sys.executable, "-m", "pytest")
+    )
+    assert pytest_call[3:5] == (
+        "-q",
+        "tests/app/integration/test_execution_visualization_closed_loop.py",
+    )
+    assert commands.strict_pytest_cwd == REPOSITORY_ROOT / "api"
+    environment = commands.strict_pytest_environment
+    assert environment["ACCEPTANCE_EVIDENCE_DIR"] == str(config.evidence_dir)
+    assert environment["ACCEPTANCE_STRICT_INVOCATION_ID"] == "current-unit-invocation"
+    assert environment["ACCEPTANCE_RUN_ID"] == "run-a"
+    assert environment["ACCEPTANCE_PROJECT_ID"] == "opencitadel-acceptance-run-a"
+    assert commands.calls.index(("strict-receipt-validated",)) < commands.calls.index(pytest_call)
+    playwright = next(call for call in commands.calls if call[:2] == ("npx", "playwright"))
+    assert commands.calls.index(playwright) < commands.calls.index(("strict-receipt-validated",))
+    manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
+    assert "AC21 capacity" in manifest["result"]["failure_reason"]
+    assert manifest["residue"]["containers"] == 0
+
+
+@pytest.mark.parametrize(
+    ("xml", "status"),
+    [
+        ("<testsuites/>", 0),
+        (
+            "<testsuites><testsuite>"
+            + "<testcase><skipped/></testcase>" * 6
+            + "</testsuite></testsuites>",
+            0,
+        ),
+        (
+            "<testsuites><testsuite>"
+            + "<testcase><failure/></testcase>" * 6
+            + "</testsuite></testsuites>",
+            0,
+        ),
+        (
+            "<testsuites><testsuite>"
+            + "<testcase><error/></testcase>" * 6
+            + "</testsuite></testsuites>",
+            0,
+        ),
+        ("<testsuites><testsuite>" + "<testcase/>" * 5 + "</testsuite></testsuites>", 0),
+        ("not xml", 0),
+        ("<testsuites><testsuite>" + "<testcase/>" * 6 + "</testsuite></testsuites>", 1),
+    ],
+)
+def test_execution_consumers_require_all_six_passes_without_skips(
+    tmp_path, passed_capacity, monkeypatch, xml, status
+):
+    monkeypatch.setattr("scripts.acceptance.runner.assert_ports_available", lambda _ports: None)
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(
+        config.evidence_dir, strict_pytest_xml=xml, strict_pytest_exit=status
+    )
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    assert runner.execute() == 1
+    manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
+    assert "strict execution consumers" in manifest["result"]["failure_reason"]
+    assert any("down" in call for call in commands.calls)
+
+
+def test_execution_consumers_refuse_existing_pytest_evidence(tmp_path):
+    config = _config(tmp_path)
+    config.evidence_dir.mkdir()
+    (config.evidence_dir / "strict-pytest.xml").write_text("<testsuites/>")
+    commands = FakeCommandRunner(config.evidence_dir)
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    with pytest.raises(RuntimeError, match="current invocation pytest evidence already exists"):
+        runner._run_strict_consumers()
+    assert commands.calls == []
+
+
 def test_runner_counts_sandbox_drained_before_final_snapshot_from_lifecycle_events(
     tmp_path: Path,
+    passed_capacity,
 ) -> None:
     config = _config(tmp_path)
     commands = FakeCommandRunner(
@@ -449,7 +625,9 @@ def test_runner_counts_sandbox_drained_before_final_snapshot_from_lifecycle_even
         assert "label=com.opencitadel.acceptance.run=run-a" in rendered
 
 
-def test_runner_preserves_and_reports_local_volumes_by_default(tmp_path: Path) -> None:
+def test_runner_preserves_and_reports_local_volumes_by_default(
+    tmp_path: Path, passed_capacity
+) -> None:
     config = _config(tmp_path, disposable=False)
     commands = FakeCommandRunner(config.evidence_dir, retain_volumes=True)
     runner = AcceptanceRunner(
@@ -590,6 +768,7 @@ def test_runner_project_filter_writes_successful_non_release_partial_scope(
         ACCEPTANCE_PROJECT_REQUIREMENTS["identity"]
     )
     assert validate_manifest(manifest, config.evidence_dir) == []
+    assert not any(call[:3] == (sys.executable, "-m", "pytest") for call in commands.calls)
 
 
 def test_runner_readiness_fault_and_cancellation_both_execute_cleanup(tmp_path: Path) -> None:
@@ -717,3 +896,176 @@ def test_cleanup_failure_overrides_a_successful_test_result(tmp_path: Path) -> N
     manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
     assert manifest["result"]["status"] == "failed"
     assert "cleanup" in manifest["result"]["failure_reason"]
+
+
+def test_acceptance_runner_uses_scoped_loopback_compose_override(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runner = AcceptanceRunner(
+        config,
+        commands=FakeCommandRunner(config.evidence_dir),
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    args = runner._compose
+    assert args[args.index("-f") + 1] == "docker-compose.yml"
+    assert "scripts/acceptance/compose.loopback.yml" in args
+    override = (REPOSITORY_ROOT / "scripts/acceptance/compose.loopback.yml").read_text()
+    assert override.count("!override") == 2
+    assert "127.0.0.1:${NGINX_PORT:-8088}:80" in override
+    assert "127.0.0.1:${NGINX_HTTPS_PORT:-443}:443" in override
+    assert "127.0.0.1:${OPS_CONSOLE_PORT:-9099}:9099" in override
+
+
+@pytest.mark.parametrize("mismatch", ["project", "run", "namespace", "id"])
+def test_e04_inventory_rejects_partial_ownership(tmp_path, mismatch):
+    from scripts.acceptance.runner import _evaluation_identity
+
+    class Commands:
+        def run(self, args, **kwargs):
+            labels = {
+                "opencitadel.e04.acceptance.project": "opencitadel-acceptance-run-a",
+                "opencitadel.e04.acceptance.run": "run-a",
+                "opencitadel.e04.namespace": "e04-" + "a" * 40,
+                "opencitadel.e04.lease": "f1d98682-a332-4539-9989-a187443d5843",
+                "opencitadel.e04.generation": "1",
+                "opencitadel.e04.role": "case",
+            }
+            if mismatch in {"project", "run"}:
+                labels["opencitadel.e04.acceptance." + mismatch] = "foreign"
+            elif mismatch == "namespace":
+                labels["opencitadel.e04.namespace"] = "unowned"
+            return CommandResult(
+                tuple(args),
+                0,
+                json.dumps(
+                    {"Id": "foreign" if mismatch == "id" else "owned", "Config": {"Labels": labels}}
+                ),
+                "",
+            )
+
+    with pytest.raises(OwnershipError):
+        _evaluation_identity(Commands(), _config(tmp_path), tmp_path, "container", "owned")
+
+
+def test_acceptance_inventory_uses_captured_sandbox_and_fixed_fixture(tmp_path):
+    from scripts.acceptance.manifest import ImageEvidence
+
+    commands = FakeCommandRunner(tmp_path / "evidence")
+    runner = AcceptanceRunner(
+        _config(tmp_path),
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda url: True,
+    )
+    runner.config.evidence_dir.mkdir()
+    sandbox_id = "sha256:" + "a" * 64
+    runner._write_evaluation_inventory(
+        ImageEvidence(production={"sandbox": sandbox_id}, acceptance_provider="sha256:" + "b" * 64)
+    )
+    environment = json.loads(
+        (runner.config.evidence_dir / "evaluation-environment.json").read_text()
+    )
+    budget = json.loads((runner.config.evidence_dir / "evaluation-budget.json").read_text())
+    assert environment["images"] == [sandbox_id]
+    assert environment["fixture_image"] == sandbox_id
+    assert len(environment["targets"]) == 1
+    assert budget == {"revision": "acceptance-fixture-v1", "acceptance_fixture": True}
+    assert runner._environment["EVALUATION_ACCEPTANCE_OWNER"] == runner.config.project_name
+
+
+@pytest.mark.parametrize(("disposable", "fails"), [(True, False), (True, True), (False, False)])
+def test_e04_teardown_is_exact_ordered_and_reports_failures(tmp_path, disposable, fails):
+    class EvaluationCommands(FakeCommandRunner):
+        def __init__(self, directory):
+            super().__init__(directory)
+            self.evaluation = {"container": True, "network": True}
+
+        def run(self, args, **kwargs):
+            args = tuple(args)
+            if args[:3] in (("docker", "container", "ls"), ("docker", "network", "ls")) and any(
+                "label=opencitadel.e04." in item for item in args
+            ):
+                self.calls.append(args)
+                return self._result(
+                    args, stdout=args[1] + "-owned\n" if self.evaluation[args[1]] else ""
+                )
+            if args[:3] in (("docker", "container", "inspect"), ("docker", "network", "inspect")):
+                self.calls.append(args)
+                labels = {
+                    "opencitadel.e04.acceptance.project": "opencitadel-acceptance-run-a",
+                    "opencitadel.e04.acceptance.run": "run-a",
+                    "opencitadel.e04.namespace": "e04-" + "a" * 40,
+                    "opencitadel.e04.lease": "f1d98682-a332-4539-9989-a187443d5843",
+                    "opencitadel.e04.generation": "1",
+                    "opencitadel.e04.role": "case",
+                }
+                body = (
+                    {"Id": args[-1], "Config": {"Labels": labels}}
+                    if args[1] == "container"
+                    else {"Id": args[-1], "Labels": labels}
+                )
+                return self._result(args, stdout=json.dumps(body))
+            if args[:3] in (("docker", "container", "rm"), ("docker", "network", "rm")):
+                self.calls.append(args)
+                if fails:
+                    return self._result(args, returncode=1, stderr="physical removal failed")
+                if args[1] == "network":
+                    assert not self.evaluation["container"]
+                self.evaluation[args[1]] = False
+                return self._result(args)
+            return super().run(args, **kwargs)
+
+    config = _config(tmp_path, disposable=disposable)
+    config.evidence_dir.mkdir()
+    commands = EvaluationCommands(config.evidence_dir)
+    runner = AcceptanceRunner(
+        config, commands=commands, repository_root=REPOSITORY_ROOT, readiness_probe=lambda url: True
+    )
+    residue, errors = runner._cleanup()
+    removals = [
+        call
+        for call in commands.calls
+        if call[:3] in (("docker", "container", "rm"), ("docker", "network", "rm"))
+    ]
+    if disposable and not fails:
+        assert residue.empty
+        assert not errors
+        assert [call[1] for call in removals] == ["container", "network"]
+    else:
+        assert residue.evaluation_containers == ("container-owned",)
+        assert residue.evaluation_networks == ("network-owned",)
+        assert errors
+        if not disposable:
+            assert not removals
+    evidence = json.loads((config.evidence_dir / "evaluation-teardown-after.json").read_text())
+    assert evidence["authoritative_lease_state_changed"] is False
+    assert bool(evidence["errors"]) == bool(errors)
+
+
+def test_missing_capacity_fails_even_if_browser_claims_pass_and_still_cleans(tmp_path, monkeypatch):
+    import scripts.acceptance.runner as module
+
+    # This unit checks orchestration only. No socket, subprocess or service runs.
+    monkeypatch.setattr(module, "assert_ports_available", lambda _ports: None)
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(config.evidence_dir)
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    monkeypatch.setattr(runner, "_prepare_strict_binding", lambda *args: None)
+    monkeypatch.setattr(runner, "_validate_strict_receipt", lambda: None)
+    runner._environment.pop("ACCEPTANCE_CAPACITY_REPORT", None)
+    runner._environment.pop("ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST", None)
+    assert runner.execute() == 1
+    receipt = json.loads((config.evidence_dir / "capacity-validation.json").read_text())
+    assert receipt["run_id"] == config.run_id
+    assert receipt["project"] == config.project_name
+    assert receipt["errors"]
+    manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
+    assert "AC21 capacity" in manifest["result"]["failure_reason"]
+    assert any("down" in call for call in commands.calls)
+    assert any(call[:2] == ("npx", "playwright") for call in commands.calls)
+    assert manifest["residue"]["containers"] == 0

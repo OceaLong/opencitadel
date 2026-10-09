@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.file_repository import FileRepository
+from app.infrastructure.execution.original_evidence import retain_read
 from app.infrastructure.models.file import FileModel
 
 
@@ -42,7 +43,22 @@ class DBFileRepository(FileRepository):
         # 1.根据id查询记录是否存在
         stmt = self._apply_scope(select(FileModel).where(FileModel.id == file_id), scope)
         result = await self.db_session.execute(stmt)
-        record = result.scalar_one_or_none()
+        try:
+            record = result.scalar_one_or_none()
+            retain_read(
+                self.db_session,
+                "resource-source",
+                "db_file_repository.py",
+                {"scope": scope, "id": file_id},
+                record,
+                source_result=result,
+            )
+        finally:
+            result.close()
+            synchronous = getattr(self.db_session, "sync_session", self.db_session)
+            forget_result = getattr(synchronous, "forget_result", None)
+            if callable(forget_result):
+                forget_result(result)
 
         # 2.判断文件记录是否存在返回不同的值
         return record.to_domain() if record is not None else None
@@ -56,6 +72,22 @@ class DBFileRepository(FileRepository):
         records = {record.id: record.to_domain() for record in result.scalars().all()}
         return [records[file_id] for file_id in file_ids if file_id in records]
 
+    async def prepare_delete(
+        self, file_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> File | None:
+        from .db_resource_pin_repository import DBResourcePinRepository
+
+        stmt = self._apply_scope(
+            select(FileModel).where(FileModel.id == file_id), scope
+        ).with_for_update()
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        await DBResourcePinRepository(self.db_session).guard_delete("file", file_id, force=force)
+        row.content_available = False
+        await self.db_session.flush()
+        return row.to_domain()
+
     async def delete(self, file_id: str, scope: OwnerScope | None = None) -> bool:
         """根据传递的文件id删除文件记录，返回是否删除成功。"""
         stmt = self._apply_scope(select(FileModel).where(FileModel.id == file_id), scope)
@@ -63,5 +95,8 @@ class DBFileRepository(FileRepository):
         record = result.scalar_one_or_none()
         if record is None:
             return False
+        from .db_resource_pin_repository import DBResourcePinRepository
+
+        await DBResourcePinRepository(self.db_session).guard_delete("file", file_id)
         await self.db_session.delete(record)
         return True

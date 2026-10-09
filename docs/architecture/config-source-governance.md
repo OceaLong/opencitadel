@@ -4,12 +4,13 @@
 
 Every value has exactly one authority.
 
-| Kind | Authority | Examples |
-| --- | --- | --- |
-| Deployment topology and secrets | Environment or secret manager | database identities, signing/encryption keys (`API_KEY_SECRET`, `AUDIT_SIGNING_KEY`, `JWT_SECRET`/`JWT_PREVIOUS_SECRETS`, `DATABASE_AUTHORIZATION_SIGNING_SECRET`, `SANDBOX_TOKEN_SEED`, `OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN`), OAuth, storage, sandbox driver/image/network |
-| Live runtime behavior | PostgreSQL Runtime Policy head | admission, timeouts, retries, scheduler, sandbox limits, retention |
-| Integrations | Owner-scoped PostgreSQL resources | inference endpoints/models/bindings, MCP, A2A, Skills |
-| Product data | Domain tables | sessions, jobs, Packs, resources, versions |
+| Kind                                  | Authority                         | Examples                                                                                                                                                                                                                                                                           |
+| ------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deployment topology and secrets       | Environment or secret manager     | database identities, signing/encryption keys (`API_KEY_SECRET`, `AUDIT_SIGNING_KEY`, `JWT_SECRET`/`JWT_PREVIOUS_SECRETS`, `DATABASE_AUTHORIZATION_SIGNING_SECRET`, `SANDBOX_TOKEN_SEED`, `OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN`), OAuth, storage, sandbox driver/image/network |
+| Live domain behavior                  | PostgreSQL Runtime Policy head    | agent limits, timeouts, retries, scheduler, sandbox limits, knowledge/Patrol retention                                                                                                                                                                                             |
+| Integrations                          | Owner-scoped PostgreSQL resources | inference endpoints/models/bindings, MCP, A2A, Skills                                                                                                                                                                                                                              |
+| Product data                          | Domain tables                     | sessions, jobs, Packs, resources, versions                                                                                                                                                                                                                                         |
+| Process safety and maintenance limits | Deployment Settings               | execution capacity/backpressure, poison-claim ceilings, queue and recycle-bin retention, evaluation environment capacity                                                                                                                                                           |
 
 There is no runtime YAML overlay, per-user behavior override, or environment
 fallback for policy fields. Migration creates a typed Execution Policy revision,
@@ -22,16 +23,18 @@ Later changes are immutable revisions created through the admin API/UI.
   original revision and policy snapshot.
 - Operations Policy controls live admission, traffic, scheduling, sandbox
   creation, patrol posture, source access, garbage collection, and retention.
-- Every read verifies the head/revision pair, schema version, digest, and
-  staleness. Integrity, unavailable, or stale state fails closed.
+- Repository refresh verifies the head/revision pair, schema version, and digest;
+  fresh consumers enforce verified-cache age. Integrity/persistent policy failure
+  and stale state fail closed. Transient storage failure may use the last
+  verified pair within the maximum staleness window, while readiness is unavailable.
 - Updates use head-version compare-and-swap. A conflict preserves the admin's
   draft and requires an explicit reload or retry.
 - Restore creates a new revision; history is never mutated.
 
 ## Deployment and Integration boundaries
 
-Deployment Settings describe where and how processes run. They never carry
-behavioral limits. Sandbox topology is deployment-owned, while each authenticated
+Deployment Settings describe process topology and operational safety/maintenance
+limits. Domain policy fields are not duplicated there. Sandbox topology is deployment-owned, while each authenticated
 create request carries the active Operations Policy revision and resource limits.
 
 Inference, MCP, and A2A are first-class owner-scoped resources. Credentials are
@@ -48,7 +51,11 @@ tokens, and `OPS_ACTUATOR_TOKEN`/`OPS_COLLECTOR_TOKEN` gate the Ops MCP servers.
 Advanced execution-kernel tuning (`EXECUTION_ACTIVITY_MAX_CONCURRENCY`,
 `EXECUTION_ACTIVITY_BATCH_SIZE`, `EXECUTION_IDLE_POLL_SECONDS`) is deployment
 topology, not runtime behavior, so it stays in the environment rather than
-Runtime Policy.
+Runtime Policy. The same Settings model currently owns
+`EXECUTION_MAX_ACTIVE_RUNS_PER_SCOPE` (default 200), claim-attempt ceilings,
+execution queue retention and purge batches, and `RECYCLE_BIN_RETENTION_DAYS`
+(default 30). These are explicit operational limits; knowledge version GC
+and Patrol retention remain Operations Policy.
 
 ## Change rules
 

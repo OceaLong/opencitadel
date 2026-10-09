@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pydantic_core import to_jsonable_python
 
 from app.application.execution.tool_catalog import CatalogSnapshot, ToolDefinition
+from app.application.ports.inference_dispatch import close_inference_adapters
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.integration_server_service import (
@@ -35,6 +36,7 @@ from app.domain.external.image_generation import ImageGenerator
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox, SandboxFactoryPort
 from app.domain.external.search import SearchEngine
+from app.domain.models.artifact_provenance import ArtifactProducer
 from app.domain.models.inference import ResolvedInferenceModel
 from app.domain.models.resource_bindings import ResourceKind
 from app.domain.models.scope import OwnerScope
@@ -44,7 +46,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.ask_user import AskUserTool
-from app.domain.services.tools.base import BaseTool
+from app.domain.services.tools.base import BaseTool, PolicyBoundTool
 from app.domain.services.tools.browser import BrowserTool
 from app.domain.services.tools.capability_policy import CapabilityPolicy
 from app.domain.services.tools.errors import ToolInvocationError
@@ -62,6 +64,13 @@ from app.domain.services.tools.vision_grounding import VisionGroundingTool
 from app.domain.vector_port import EmbeddingPort
 
 logger = logging.getLogger(__name__)
+
+
+def _is_knowledge_base_tool(pack: BaseTool) -> bool:
+    """Check the trusted tool behind its per-run capability-policy wrapper."""
+    return isinstance(pack, KnowledgeBaseTool) or (
+        isinstance(pack, PolicyBoundTool) and isinstance(pack._wrapped, KnowledgeBaseTool)
+    )
 
 
 @dataclass
@@ -97,6 +106,7 @@ class _BuiltCatalog:
     # (kind, pack, retrieval tool name) triples selected by ToolSpec.retrieval_tool.
     retrieval: list[tuple[str, BaseTool, str]] = field(default_factory=list)
     fingerprint: str = ""
+    clients: list = field(default_factory=list)
 
 
 async def _assemble_mcp(catalog: AgentToolCatalog, site: _AssemblySite) -> Sequence[BaseTool]:
@@ -177,7 +187,11 @@ async def _assemble_memory(catalog: AgentToolCatalog, site: _AssemblySite) -> Se
 
 
 async def _assemble_artifact(catalog: AgentToolCatalog, site: _AssemblySite) -> Sequence[BaseTool]:
-    return [catalog._artifact_tool(session_id=site.session_id, sandbox=site.sandbox)]
+    return [
+        catalog._artifact_tool(
+            session_id=site.session_id, sandbox=site.sandbox, context=site.context
+        )
+    ]
 
 
 async def _assemble_knowledge_base(
@@ -245,9 +259,15 @@ class AgentToolCatalog:
         image_generator: ImageGenerator,
         artifacts: ArtifactService,
         memories: MemoryService,
+        replay=None,
+        isolated=None,
+        contract_capture=None,
         embeddings: EmbeddingPort | None = None,
         llm_factory: Callable[..., LLM] | None = None,
     ) -> None:
+        self._replay = replay
+        self._isolated = isolated
+        self._contract_capture = contract_capture
         self._uow_factory = uow_factory
         self._sandbox_factory = sandbox_factory
         self._search_engine = search_engine
@@ -268,8 +288,17 @@ class AgentToolCatalog:
         payload: dict[str, JsonValue],
         context: ActivityContext,
     ) -> CatalogSnapshot:
+        if getattr(self, "_replay", None) is not None and await self._replay.active(context):
+            return await self._replay.definitions(context)
+        isolated = getattr(self, "_isolated", None)
+        if isolated is not None and await isolated.active(context):
+            return await isolated.definitions(context)
+        if getattr(context.run, "source_entity_type", None) == "evaluation_isolated_case":
+            raise ValueError("environment_binding_missing")
         built = await self._build(payload, context)
         try:
+            if getattr(self, "_contract_capture", None) is not None:
+                await self._contract_capture.capture(context, built)
             return CatalogSnapshot(
                 definitions=tuple(
                     ToolDefinition(
@@ -287,7 +316,11 @@ class AgentToolCatalog:
                 fingerprint=built.fingerprint,
             )
         finally:
-            await _cleanup(built.packs)
+            await _cleanup(built)
+
+    async def capture_disabled(self, context: ActivityContext) -> None:
+        if self._contract_capture is not None:
+            await self._contract_capture.capture_disabled(context)
 
     async def invoke(
         self,
@@ -299,6 +332,21 @@ class AgentToolCatalog:
         expected_fingerprint: str | None = None,
         approval_feedback: str | None = None,
     ) -> dict[str, JsonValue]:
+        if getattr(self, "_replay", None) is not None and await self._replay.active(context):
+            from app.domain.evaluation.errors import ReplayMismatch
+
+            raise ReplayMismatch("direct_real_tool_forbidden")
+        isolated = getattr(self, "_isolated", None)
+        if isolated is not None and await isolated.active(context):
+            return await isolated.invoke(
+                context,
+                name=name,
+                arguments=arguments,
+                expected_fingerprint=expected_fingerprint,
+                approval_feedback=approval_feedback,
+            )
+        if getattr(context.run, "source_entity_type", None) == "evaluation_isolated_case":
+            raise ValueError("environment_binding_missing")
         built = await self._build(payload, context)
         try:
             if expected_fingerprint and expected_fingerprint != built.fingerprint:
@@ -336,12 +384,14 @@ class AgentToolCatalog:
                 except (AttributeError, OSError, RuntimeError, ValueError):
                     logger.warning("tool on_cancel hook failed for %s", name)
                 raise
+            if _is_knowledge_base_tool(matches[0]) and context.record_citations:
+                await context.record_citations(result.citations)
             encoded = to_jsonable_python(result)
             if not isinstance(encoded, dict):
                 raise TypeError("tool result must serialize to an object")
             return encoded
         finally:
-            await _cleanup(built.packs)
+            await _cleanup(built)
 
     async def retrieve(
         self,
@@ -350,11 +400,22 @@ class AgentToolCatalog:
         *,
         query: str,
     ) -> dict[str, JsonValue]:
+        if getattr(self, "_replay", None) is not None and await self._replay.active(context):
+            from app.domain.evaluation.errors import ReplayMismatch
+
+            raise ReplayMismatch("direct_real_tool_forbidden")
+        isolated = getattr(self, "_isolated", None)
+        if isolated is not None and await isolated.active(context):
+            return await isolated.retrieval(context, query)
+        if getattr(context.run, "source_entity_type", None) == "evaluation_isolated_case":
+            raise ValueError("environment_binding_missing")
         built = await self._build(payload, context)
         try:
             sources: list[JsonValue] = []
             for kind, pack, retrieval_tool in built.retrieval:
                 result = await pack.invoke(retrieval_tool, query=query)
+                if _is_knowledge_base_tool(pack) and context.record_citations:
+                    await context.record_citations(result.citations)
                 sources.append(
                     {
                         "kind": kind,
@@ -363,12 +424,23 @@ class AgentToolCatalog:
                 )
             return {"query": query, "sources": sources}
         finally:
-            await _cleanup(built.packs)
+            await _cleanup(built)
 
-    async def _build(
+    async def _build(self, payload, context):
+        clients = []
+        try:
+            built = await self._assemble(payload, context, clients)
+            built.clients = clients
+            return built
+        except BaseException:
+            await close_inference_adapters(clients)
+            raise
+
+    async def _assemble(
         self,
         payload: dict[str, JsonValue],
         context: ActivityContext,
+        clients: list,
     ) -> _BuiltCatalog:
         mode = SessionMode(str(payload.get("mode") or SessionMode.AGENT.value))
         family_policy = context.run.policy_snapshot.family_policy
@@ -441,12 +513,16 @@ class AgentToolCatalog:
                     inference_model_service=self._models,
                     scope=scope,
                 )
+        if vision_llm is not None:
+            clients.append(vision_llm)
         rerank_llm = await self._rerank_llm(
             payload,
             context=context,
             scope=scope,
             bindings=bindings,
         )
+        if rerank_llm is not None:
+            clients.append(rerank_llm)
         site = _AssemblySite(
             payload=payload,
             context=context,
@@ -560,7 +636,19 @@ class AgentToolCatalog:
 
         return MemoryTool(save_fn=save_memory, session_id=session_id)
 
-    def _artifact_tool(self, *, session_id: str, sandbox: Sandbox) -> BaseTool:
+    def _artifact_tool(
+        self, *, session_id: str, sandbox: Sandbox, context: ActivityContext
+    ) -> BaseTool:
+        producer = None
+        if context.activity_id is not None and context.generation is not None:
+            producer = ArtifactProducer(
+                scope=context.run.owner_scope,
+                run_id=context.run.run_id,
+                activity_id=context.activity_id,
+                generation=context.generation,
+                claim_generation=context.claim_generation,
+            )
+
         async def write_artifact(**kwargs):
             content = kwargs.get("content") or ""
             source_path = kwargs.get("source_path")
@@ -583,6 +671,7 @@ class AgentToolCatalog:
                 kind=kwargs["kind"],
                 title=kwargs["title"],
                 content=content,
+                producer=producer,
             )
             return artifact.model_dump(mode="json")
 
@@ -684,11 +773,14 @@ def _attachments(payload: dict[str, JsonValue]) -> list[dict[str, str]]:
     return attachments
 
 
-async def _cleanup(packs: list[BaseTool]) -> None:
-    for pack in packs:
-        cleanup = getattr(pack, "cleanup", None)
-        if cleanup is not None:
-            await cleanup()
+async def _cleanup(built: _BuiltCatalog) -> None:
+    try:
+        for pack in built.packs:
+            cleanup = getattr(pack, "cleanup", None)
+            if cleanup is not None:
+                await cleanup()
+    finally:
+        await close_inference_adapters(built.clients)
 
 
 class _SessionSandbox:

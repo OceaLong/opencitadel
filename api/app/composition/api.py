@@ -6,6 +6,20 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from app.application.services.runtime_policy_service import RuntimePolicyService
+from app.composition.evaluation import (
+    build_dataset_service,
+    build_environment_service,
+    build_recording_service,
+    build_suite_service,
+)
+from app.composition.execution_analysis import build_analysis_factory, build_analysis_preferences
+from app.composition.execution_comparison import build_comparison_service
+from app.composition.execution_content import (
+    build_execution_content_service,
+    build_execution_event_service,
+    build_execution_view_service,
+)
+from app.composition.execution_export import build_export_service
 from app.composition.resources import (
     DEFAULT_RESOURCE_FACTORIES,
     ResourceFactories,
@@ -44,6 +58,7 @@ async def open_api_runtime(
         _default_runtime_policy_repository
     ),
     on_critical_failure: Callable[[TaskFailure], None] | None = None,
+    shutdown_observer=None,
 ) -> AsyncIterator[ApiRuntime]:
     """Open the complete API graph without constructing kernel workers."""
 
@@ -64,6 +79,11 @@ async def open_api_runtime(
                 runtime_policy_repository_factory=runtime_policy_repository_factory,
             )
             await shared.runtime_policy_reader.initialize()
+            from app.composition.physical_budget import verify_physical_policy
+
+            await verify_physical_policy(
+                settings=settings, session_factory=resources.postgres.session_factory
+            )
 
             runtime_policy_service = RuntimePolicyService(
                 repository=shared.runtime_policy_repository,
@@ -155,6 +175,62 @@ async def open_api_runtime(
                 compliance_service=shared.compliance_service,
                 governance_profile_service=shared.governance_profile_service,
                 governance_overview_service=shared.governance_overview_service,
+                comparison_factory=lambda scope, principal: build_comparison_service(
+                    settings=settings,
+                    resources=resources,
+                    scope=scope,
+                    principal=principal,
+                    shared=shared,
+                ),
+                export_factory=lambda scope, principal: build_export_service(
+                    settings=settings,
+                    resources=resources,
+                    shared=shared,
+                    scope=scope,
+                    principal=principal,
+                ),
+                analysis_factory=build_analysis_factory(settings=settings, resources=resources),
+                analysis_preferences_factory=lambda: build_analysis_preferences(
+                    settings=settings, resources=resources
+                ),
+                execution_view_factory=lambda authorization: build_execution_view_service(
+                    settings=settings, resources=resources, authorization=authorization
+                ),
+                execution_event_factory=lambda authorization: build_execution_event_service(
+                    settings=settings, resources=resources, authorization=authorization
+                ),
+                environment_factory=lambda authorization: build_environment_service(
+                    settings=settings,
+                    resources=resources,
+                    shared=shared,
+                    authorization=authorization,
+                ),
+                recording_factory=lambda authorization: build_recording_service(
+                    settings=settings,
+                    resources=resources,
+                    shared=shared,
+                    authorization=authorization,
+                ),
+                suite_factory=lambda authorization: build_suite_service(
+                    settings=settings,
+                    resources=resources,
+                    shared=shared,
+                    authorization=authorization,
+                ),
+                dataset_factory=lambda authorization: build_dataset_service(
+                    settings=settings,
+                    resources=resources,
+                    shared=shared,
+                    authorization=authorization,
+                ),
+                execution_content_factory=lambda authorization: build_execution_content_service(
+                    settings=settings,
+                    resources=resources,
+                    uow_factory=shared.uow_factory,
+                    artifacts=shared.artifact_service,
+                    files=shared.file_service,
+                    authorization=authorization,
+                ),
                 execution_projection_status=PostgresProjectionStatusQuery(
                     session_factory=resources.postgres.session_factory,
                     # None: the per-request identity (admin) drives RLS.
@@ -165,7 +241,9 @@ async def open_api_runtime(
             yield runtime
         finally:
             readiness.mark_not_ready()
-            await supervisor.stop()
+            reports = await supervisor.stop()
+            if shutdown_observer is not None:
+                shutdown_observer(reports)
 
 
 __all__ = ["open_api_runtime"]

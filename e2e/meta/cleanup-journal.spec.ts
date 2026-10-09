@@ -11,6 +11,47 @@ import {
   registerCleanupAction,
 } from "../support/cleanup-journal";
 
+test("expected unknown retention only journals an explicitly flagged evaluation batch", () => {
+  const root = mkdtempSync(join(tmpdir(), "protected-retention-journal-"));
+  const environment = {
+    ACCEPTANCE_EVIDENCE_DIR: root,
+    ACCEPTANCE_RUN_ID: "owned",
+  };
+  try {
+    for (const value of [
+      {
+        action: "delete-resource",
+        resource: "team",
+        resource_id: "team",
+        expected_unknown_retention: true,
+      },
+      {
+        action: "delete-resource",
+        resource: "evaluation-batch",
+        resource_id: "batch",
+        expected_unknown_retention: false,
+      },
+    ])
+      expect(() => registerCleanupAction(value as any, environment)).toThrow(
+        /unknown retention/,
+      );
+    registerCleanupAction(
+      {
+        action: "delete-resource",
+        resource: "evaluation-batch",
+        resource_id: "batch",
+        expected_unknown_retention: true,
+      } as any,
+      environment,
+    );
+    expect(readCleanupActions(environment)[0].value).toMatchObject({
+      expected_unknown_retention: true,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("journals allowlisted cleanup actions and completes them durably", () => {
   const root = mkdtempSync(join(tmpdir(), "opencitadel-cleanup-journal-"));
   const environment = {
@@ -143,6 +184,64 @@ test("failed workspace override cleanup removes its binding before its team", ()
         resource_id: "team-binding",
       },
     ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("new retained resources require exact create identity and completion is replayable", () => {
+  const root = mkdtempSync(join(tmpdir(), "a05-cleanup-"));
+  const environment = {
+    ACCEPTANCE_EVIDENCE_DIR: root,
+    ACCEPTANCE_RUN_ID: "owned",
+  };
+  try {
+    expect(() =>
+      registerCleanupAction(
+        {
+          action: "delete-resource",
+          resource: "execution-comparison",
+          resource_id: "comparison",
+        },
+        environment,
+      ),
+    ).toThrow("revision");
+    expect(() =>
+      registerCleanupAction(
+        {
+          action: "delete-resource",
+          resource: "execution-export",
+          resource_id: "export",
+        },
+        environment,
+      ),
+    ).toThrow("created_at");
+    const comparison = registerCleanupAction(
+      {
+        action: "delete-resource",
+        resource: "execution-comparison",
+        resource_id: "comparison",
+        retained_revision: 1,
+      },
+      environment,
+    );
+    const exp = registerCleanupAction(
+      {
+        action: "delete-resource",
+        resource: "execution-export",
+        resource_id: "export",
+        created_at: "2026-09-17T01:00:00Z",
+      },
+      environment,
+    );
+    expect(readCleanupActions(environment).map((value) => value.value)).toEqual(
+      [exp.value, comparison.value],
+    );
+    completeCleanupAction(exp);
+    completeCleanupAction(exp);
+    expect(readCleanupActions(environment).map((value) => value.value)).toEqual(
+      [comparison.value],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

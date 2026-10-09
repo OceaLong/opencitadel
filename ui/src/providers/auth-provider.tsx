@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       clearAuthenticatedData();
       setUser(null);
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Logout must discard the authenticated document and its client state.
       window.location.href = "/";
     }
   }, [clearAuthenticatedData]);

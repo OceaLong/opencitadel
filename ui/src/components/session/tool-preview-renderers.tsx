@@ -335,3 +335,28 @@ export function ToolPreviewContent({
 
   return <div className="h-full min-h-0">{preview}</div>;
 }
+
+/** Only public execution reader pages. Partial JSON and HTML remain escaped text. */
+export function PublicContentPreview({
+  content,
+  contentType,
+  truncated,
+}: {
+  content: string;
+  contentType: string;
+  truncated: boolean;
+}) {
+  let text = content;
+  if (!truncated && contentType.includes("json")) {
+    try {
+      text = JSON.stringify(JSON.parse(content), null, 2);
+    } catch {
+      /* incomplete/invalid JSON is text */
+    }
+  }
+  return (
+    <pre className="bg-muted/40 max-h-96 overflow-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap">
+      {text}
+    </pre>
+  );
+}

@@ -13,6 +13,7 @@ from app.application.ports.inference import (
     InferenceProviderCatalog,
     ModelClientFactoryPort,
 )
+from app.application.ports.inference_dispatch import dispatch_candidate
 from app.application.ports.observability import ModelMetricsPort
 from app.application.services.inference_model_service import InferenceModelService
 from app.domain.errors import ServerRequestsError
@@ -190,13 +191,14 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    result = await client.invoke(
-                        messages,
-                        tools,
-                        response_format,
-                        tool_choice,
-                        response_schema=response_schema,
-                    )
+                    with dispatch_candidate(candidate):
+                        result = await client.invoke(
+                            messages,
+                            tools,
+                            response_format,
+                            tool_choice,
+                            response_schema=response_schema,
+                        )
                     await self._breaker.record_success(candidate.id, cfg)
                     self._active_model = candidate
                     if candidate.id != self._model.id:
@@ -266,16 +268,22 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    async for chunk in client.stream_invoke(
-                        request_messages,
-                        tools,
-                        response_format,
-                        tool_choice,
-                        response_schema=response_schema,
-                    ):
-                        self._streaming_started = True
-                        self._active_model = candidate
-                        yield chunk
+                    with dispatch_candidate(candidate):
+                        from app.application.ports.inference_dispatch import owned_inference_adapter
+
+                        async with owned_inference_adapter(
+                            client.stream_invoke(
+                                request_messages,
+                                tools,
+                                response_format,
+                                tool_choice,
+                                response_schema=response_schema,
+                            )
+                        ) as stream:
+                            async for chunk in stream:
+                                self._streaming_started = True
+                                self._active_model = candidate
+                                yield chunk
                     await self._breaker.record_success(candidate.id, cfg)
                     if candidate.id != self._model.id:
                         self._metrics.record_resilience_event(
@@ -352,6 +360,17 @@ class ResilientLLMClient:
         *,
         require_vision: bool,
     ) -> list[ResolvedInferenceModel]:
+        from app.application.ports.inference_dispatch import current_candidate_authority
+
+        authority = current_candidate_authority.get()
+        if authority is not None:
+            return await authority.resolve(
+                self._inference_model_service,
+                self._scope,
+                self._model,
+                require_vision=require_vision,
+                thinking_enabled=self._thinking_enabled,
+            )
         cfg = self._policy
         cache_key = (
             require_vision,
@@ -379,38 +398,18 @@ class ResilientLLMClient:
             self._candidate_cache[cache_key] = chain
             return chain
 
-        allow_cross = (cfg.fallback_enabled and cfg.allow_cross_provider_fallback) or (
-            cfg.fallback_on_quota_exceeded and cfg.allow_cross_provider_fallback_on_quota
+        from app.domain.models.inference_candidates import ordered_candidates
+
+        chain = ordered_candidates(
+            self._model,
+            all_models,
+            cfg,
+            eligible=lambda candidate: self._is_valid_fallback_candidate(
+                candidate, require_vision=require_vision
+            ),
+            thinking=lambda candidate: self._thinking_enabled_for(candidate, True),
+            thinking_enabled=self._thinking_enabled,
         )
-        seen = {self._model.id}
-        same_provider: list[ResolvedInferenceModel] = []
-
-        for candidate in all_models:
-            if candidate.id in seen:
-                continue
-            if candidate.provider != self._model.provider:
-                continue
-            if not self._is_valid_fallback_candidate(candidate, require_vision=require_vision):
-                continue
-            same_provider.append(candidate)
-            seen.add(candidate.id)
-
-        if self._thinking_enabled:
-            same_provider.sort(
-                key=lambda model: 0 if self._thinking_enabled_for(model, True) else 1,
-            )
-        chain.extend(same_provider)
-
-        if allow_cross:
-            for candidate in all_models:
-                if candidate.id in seen:
-                    continue
-                if candidate.provider == self._model.provider:
-                    continue
-                if not self._is_valid_fallback_candidate(candidate, require_vision=require_vision):
-                    continue
-                chain.append(candidate)
-                seen.add(candidate.id)
 
         self._candidate_cache[cache_key] = chain
         return chain
@@ -452,6 +451,11 @@ class ResilientLLMClient:
                     if isinstance(part, dict) and part.get("type") == "image_url":
                         return True
         return False
+
+    async def aclose(self):
+        from app.application.ports.inference_dispatch import close_inference_adapters
+
+        await close_inference_adapters([self._inner, *self._fallback_clients.values()])
 
 
 def create_resilient_llm(

@@ -215,14 +215,12 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
-      target: api
+      target: sandbox-broker
       args:
         <<: *pip-build-args
-        # 与 opencitadel-api 共享同一 image:opencitadel-api 标签,build args 必须保持一致,
-        # 否则镜像内容取决于哪个服务先触发构建;broker 只 import docker、driver 硬编码为
-        # "docker"(app/infrastructure/external/sandbox/broker.py),任何场景都不需要 kubernetes SDK
+        # Dedicated socket-owning broker stage; kernel and API remain CLI-free.
         WITH_K8S: "0"
-    image: opencitadel-api
+    image: opencitadel-sandbox-broker
     restart: unless-stopped
     command: ["python", "-m", "app.infrastructure.external.sandbox.broker"]
     mem_limit: 256m

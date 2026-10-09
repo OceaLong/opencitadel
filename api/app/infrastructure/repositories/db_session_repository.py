@@ -331,8 +331,15 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(stmt)
         return result.rowcount > 0
 
-    async def purge(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+    async def purge(
+        self, session_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> bool:
         """清除：物理删除回收站中的会话（``deleted_at`` 非空）。"""
+        from .db_resource_pin_repository import DBResourcePinRepository
+
+        await DBResourcePinRepository(self.db_session).guard_session_purge(
+            session_id, scope, force=force
+        )
         stmt = self._apply_scope(
             delete(SessionModel).where(
                 SessionModel.id == session_id,

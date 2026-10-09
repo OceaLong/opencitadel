@@ -2,6 +2,7 @@
 
 import inspect
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -132,3 +133,35 @@ def test_public_projection_exposes_product_events_not_kernel_protocol() -> None:
     assert completed is not None
     assert completed[0] == "message"
     assert completed[1]["message"] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_historical_unknown_generation_projects_at_baseline_zero() -> None:
+    class _Session:
+        statement = None
+
+        async def get(self, _model, _identity):
+            return None
+
+        async def execute(self, statement):
+            self.statement = statement
+
+    session = _Session()
+    event = _event(
+        "ActivityRequested",
+        {
+            "activity_id": "94000000-0000-0000-0000-000000000001",
+            "activity_type": "tool.call",
+            "generation": None,
+        },
+    )
+    await FormalProjector._project_activity(
+        FormalProjector.__new__(FormalProjector),
+        session,
+        event,
+        SimpleNamespace(run_id=UUID(event.stream_id)),
+    )
+
+    values = session.statement.compile().params
+    assert values["generation"] == 0
+    assert values["state"]["generation"] == 0

@@ -1,4 +1,4 @@
-import { del, get, post } from "./fetch";
+import { del, get, post, type RequestOptions } from "./fetch";
 
 /**
  * 通用资源 CRUD/build 客户端工厂。
@@ -20,16 +20,16 @@ export function makeResourceClient<
       return post<TResource>(basePath, params);
     },
 
-    list: (limit = 100, offset = 0): Promise<TResourceList> => {
-      return get<TResourceList>(basePath, { limit, offset });
+    list: (limit = 100, offset = 0, options?: RequestOptions): Promise<TResourceList> => {
+      return get<TResourceList>(basePath, { limit, offset }, options);
     },
 
     get: (id: string): Promise<TResource> => {
       return get<TResource>(`${basePath}/${id}`);
     },
 
-    listVersions: (id: string): Promise<TVersionList> => {
-      return get<TVersionList>(`${basePath}/${id}/versions`);
+    listVersions: (id: string, options?: RequestOptions): Promise<TVersionList> => {
+      return get<TVersionList>(`${basePath}/${id}/versions`, undefined, options);
     },
 
     getVersion: (id: string, versionId: string): Promise<TVersion> => {

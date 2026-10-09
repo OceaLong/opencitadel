@@ -3,28 +3,13 @@
 [简体中文](overview.zh-CN.md)
 
 OpenCitadel is built around one event-sourced execution kernel. Agent, Ask,
-resource ingestion, automation, patrol, and remediation all use the same
+resource ingestion, automation, patrol, remediation, and evaluation Subject/Judge Runs all use the same
 PostgreSQL command, event, Activity, timer, approval, and projection protocol.
 There is no second task lifecycle and no transport-owned workflow state.
 
 ## Runtime topology
 
-```mermaid
-flowchart LR
-  Client[Web / API clients] --> API[Stateless API]
-  API --> Inbox[(Command inbox)]
-  Scheduler[Scheduler / webhooks] --> Inbox
-  Inbox --> Kernel[Execution kernel]
-  Kernel --> Events[(Execution events)]
-  Events --> Activities[(Activity tasks)]
-  Activities --> Kernel
-  Kernel --> Providers[LLM / sandbox / MCP / storage]
-  Events --> Views[(Formal projections)]
-  Views --> API
-  Events --> Public[(Public event projection)]
-  Public --> SSE[SSE replay and live delivery]
-  Kernel -. disposable wake-up .-> Redis[(Redis)]
-```
+![Runtime topology](../assets/diagrams/runtime-topology.png)
 
 PostgreSQL is the lifecycle authority. Redis may reduce wake-up and notification
 latency, but a lost notification cannot lose accepted work: the kernel polls
@@ -32,14 +17,14 @@ pending database rows and resumes from verified events.
 
 ## Processes and trust boundaries
 
-| Process | Responsibility | Database role |
-| --- | --- | --- |
-| API | Authenticate, authorize, submit idempotent commands, read projections, serve SSE | API role |
-| Execution kernel | Decide Runs, append events, claim Activities and timers, project formal views | Execution role |
-| Migrate | Apply Alembic schema and seed configuration | Migration role |
-| UI | Render API projections and public events; never infer authoritative state | None |
-| Sandbox broker | Create isolated execution sandboxes without exposing the container socket to API/kernel | None |
-| Ops collector / actuator | Fixed read probes and approval-gated narrow mutations | Service-specific |
+| Process                  | Responsibility                                                                          | Database role    |
+| ------------------------ | --------------------------------------------------------------------------------------- | ---------------- |
+| API                      | Authenticate, authorize, submit idempotent commands, read projections, serve SSE        | API role         |
+| Execution kernel         | Decide Runs, append events, claim Activities and timers, project formal views           | Execution role   |
+| Migrate                  | Apply Alembic schema and seed configuration                                             | Migration role   |
+| UI                       | Render API projections and public events; never infer authoritative state               | None             |
+| Sandbox broker           | Create isolated execution sandboxes without exposing the container socket to API/kernel | None             |
+| Ops collector / actuator | Fixed read probes and approval-gated narrow mutations                                   | Service-specific |
 
 Schema ownership is separated from runtime DML. Owner-scoped execution tables
 use forced row-level security, and the event store checks that every append
@@ -112,11 +97,40 @@ bindings fail closed.
 
 ## API and streaming contract
 
-Mutation endpoints submit typed commands. Approval decisions use dedicated
-endpoints and cannot be synthesized from chat text. Read endpoints return
-formal projections. SSE live delivery and replay read the same sanitized
-`execution_public_events` projection and use the formal event position as the
-cursor; private Activity inputs and provider payloads are never exposed.
+Execution mutation endpoints submit typed commands; product mutations such as
+evaluation configuration, analysis preferences, and captures use their own
+authorized transactions. Approval decisions use dedicated endpoints and cannot
+be synthesized from chat text. Read endpoints return formal projections or a
+selected observation cut. SSE live and replay read the same sanitized
+`execution_public_events` feed, using its `seq` as an integrity-protected opaque
+cursor. The feed includes formal and off-stream progress entries; its cursor is
+neither a formal event position nor a historical playback `at`. Private Activity
+inputs and provider payloads are never exposed.
+
+## Execution workbench, analysis, and evaluation
+
+The observation journal keeps formal facts and Activity progress separate.
+`PlaybackBoundary` pins the Run, OwnerScope, formal/progress positions, observed
+order, projector version, and revision. The workbench reads bounded Run, Step,
+Timeline, and Body pages; missing history has explicit completeness information.
+A browser notification cannot decide success.
+
+Analysis, comparisons, and exports freeze source captures and member revisions.
+Reads and worker I/O recheck current authority. A capture grants no permanent
+access and cannot silently turn into a latest live query.
+
+The evaluation control plane stores datasets, suites, configurations, batches,
+results, scores, reviews, environments, and physical-call budget ledgers.
+Subjects reuse the `agent`/`ask` families; Judges are restricted `ask` child Runs.
+`purpose` distinguishes their role without adding a Run family. Four supervised
+critical evaluation lanes belong to `KernelRuntime`. Environment lease cleanup
+and unknown-call budget obligations remain separate: releasing a sandbox or
+closing admission does not establish a provider settlement.
+
+Implementation documentation is separate from complete capacity acceptance.
+AC21 still lacks the full reference-environment, multi-round collection, and
+cleanup/reuse closure; component tests and a running local workbench cannot
+establish that gate. See [Architecture evolution](architecture-evolution.md).
 
 ## Failure and recovery rules
 
@@ -132,17 +146,20 @@ cursor; private Activity inputs and provider payloads are never exposed.
 
 ## Code map
 
-| Boundary | Location |
-| --- | --- |
-| Commands, events, aggregates, decisions | `api/app/domain/execution/` |
-| Orchestration and Activities | `api/app/application/execution/` |
-| PostgreSQL stores and formal projectors | `api/app/infrastructure/execution/` |
-| API/kernel typed composition | `api/app/composition/api.py`, `api/app/composition/kernel.py` |
-| Task ownership and bounded drain | `api/app/composition/tasks.py` |
-| Kernel process | `api/app/execution_kernel_main.py` |
-| Resource binding model | `api/app/domain/models/resource_bindings.py` |
-| HTTP ingress and projection routes | `api/app/interfaces/endpoints/` |
-| Scoped browser resources | `ui/src/providers/client-data-provider.tsx` |
+| Boundary                                     | Location                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Commands, events, aggregates, decisions      | `api/app/domain/execution/`                                                                                                |
+| Orchestration and Activities                 | `api/app/application/execution/`                                                                                           |
+| PostgreSQL stores and formal projectors      | `api/app/infrastructure/execution/`                                                                                        |
+| API/kernel typed composition                 | `api/app/composition/api.py`, `api/app/composition/kernel.py`                                                              |
+| Task ownership and bounded drain             | `api/app/composition/tasks.py`                                                                                             |
+| Kernel process                               | `api/app/execution_kernel_main.py`                                                                                         |
+| Resource binding model                       | `api/app/domain/models/resource_bindings.py`                                                                               |
+| HTTP ingress and projection routes           | `api/app/interfaces/endpoints/`                                                                                            |
+| Scoped browser resources                     | `ui/src/providers/client-data-provider.tsx`                                                                                |
+| Execution read model and observation journal | `api/app/application/services/execution_view_service.py`, `api/app/infrastructure/execution/postgres_view_observations.py` |
+| Analysis, comparisons, and exports           | `api/app/composition/execution_analysis.py`, `api/app/interfaces/endpoints/execution_*_routes.py`                          |
+| Evaluation and physical-call budgets         | `api/app/composition/evaluation.py`, `api/app/application/evaluation/`                                                     |
 
 ## Related documentation
 
@@ -150,3 +167,6 @@ cursor; private Activity inputs and provider payloads are never exposed.
 - [Security model](security-model.md)
 - [Knowledge-base ingestion](knowledge-base-ingestion.md)
 - [Automation and scheduler](automation-scheduler.md)
+- [Execution analysis, comparisons, and exports](execution-analysis.md)
+- [Evaluation control plane](evaluation-control-plane.md)
+- [Frontend UI](frontend-ui.md)

@@ -81,8 +81,7 @@ def main() -> None:
             cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
             cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-            # Migration 0001 needs pg_trgm; the migration role lacks database-level
-            # CREATE, so the extension must be pre-created by the superuser here.
+            # Install extensions before the non-superuser migration role runs.
             cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
             _ensure_group(cursor, "opencitadel_execution_api")
             _ensure_group(cursor, "opencitadel_execution_kernel")
@@ -102,6 +101,12 @@ def main() -> None:
             cursor.execute(
                 sql.SQL("GRANT USAGE ON SCHEMA public TO {} WITH GRANT OPTION").format(
                     sql.Identifier(migration_user)
+                )
+            )
+            # Fixed-DDL shape checks require a private scratch schema in this database.
+            cursor.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(database), sql.Identifier(migration_user)
                 )
             )
             cursor.execute(

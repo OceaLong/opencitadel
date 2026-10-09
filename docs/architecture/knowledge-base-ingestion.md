@@ -12,19 +12,21 @@ read or write path.
 
 ## Identity and storage model
 
-| Concept | Identity and role |
-| --- | --- |
-| Knowledge base | Stable owner-scoped resource and pointer to the active published version |
+| Concept                | Identity and role                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Knowledge base         | Stable owner-scoped resource and pointer to the active published version                                                           |
 | Knowledge-base version | Immutable candidate or published snapshot; records parent, build, capabilities, degradation reasons, metrics, and publication time |
-| Logical document | Stable document metadata within a knowledge base |
-| Document revision | Immutable source digest and processing state for one document payload |
-| Version manifest | Ordered mapping from a version to exact `(document_id, document_revision_id)` pairs |
-| Chunk and graph rows | Derived data carrying both `kb_id` and `version_id`; never shared by inference across versions |
-| Source Run | Sole lifecycle/progress authority for the candidate; exposed through the formal resource-build projection |
-| Session binding | Immutable record pinning an Ask or Agent session to one concrete published version |
+| Logical document       | Stable document metadata within a knowledge base                                                                                   |
+| Document revision      | Immutable source digest and processing state for one document payload                                                              |
+| Version manifest       | Ordered mapping from a version to exact `(document_id, document_revision_id)` pairs                                                |
+| Chunk and graph rows   | Derived data carrying both `kb_id` and `version_id`; never shared by inference across versions                                     |
+| Source Run             | Sole execution lifecycle authority; formal resource-build status may attach fenced off-stream Activity progress                    |
+| Session binding        | Immutable record pinning an Ask or Agent session to one concrete published version                                                 |
 
 A version is a readable closure only when every manifest entry resolves to its
-exact revision and mandatory derived rows. Parent/child chunks, keyword rows,
+exact revision. Indexed revisions require mandatory derived rows; failed
+parse revisions may remain as explicit failed entries in a partially published
+closure, with `DOCUMENT_PARTIAL`. Parent/child chunks, keyword rows,
 vector rows, entities, relations, and evidence references are always filtered
 by the bound version.
 
@@ -32,11 +34,7 @@ by the bound version.
 
 Document revisions move through:
 
-```text
-uploaded -> parsing -> parsed -> indexing -> indexed
-                    \              \-> failed
-                     \-> failed
-```
+![knowledge document states](../assets/diagrams/knowledge-document-states.png)
 
 `parsed` means that source extraction succeeded. It does **not** mean that the
 document can be retrieved or used to create a session. Only an indexed
@@ -44,16 +42,12 @@ revision inside a published closure is readable by production Q&A.
 
 Knowledge-base versions move through:
 
-```text
-building -> ready
-         -> degraded
-         -> failed
-```
+![knowledge version states](../assets/diagrams/knowledge-version-states.png)
 
 `ready` and `degraded` are published terminal states. `degraded` is truthful:
-mandatory keyword retrieval and source reading work, while one or more optional
-capabilities are disabled and the reason is exposed by the version and formal Run status
-surface.
+mandatory keyword retrieval and source reading work for indexed documents.
+Some documents may be failed (`DOCUMENT_PARTIAL`), and optional capabilities
+may be disabled; the version and formal Run status surface expose the reasons.
 
 The source Run uses `new`, `queued`, `running`, `waiting`, `completed`, `failed`,
 or `cancelled`. Candidate `ready`/`degraded` is product capability state, not a
@@ -85,18 +79,21 @@ admission idempotent; the database enforces at most one building candidate.
 
 ## Failure semantics
 
-| Failure point | Candidate / Run result | Active version |
-| --- | --- | --- |
-| Parse | Failed | Unchanged and readable |
-| Chunking | Failed | Unchanged and readable |
-| Keyword indexing | Failed | Unchanged and readable |
-| Closure validation | Failed | Unchanged and readable |
-| Publication CAS or commit | Failed | Unchanged and readable |
-| Vector indexing | Published `degraded`; `vector_search=false` | Atomically advances |
-| Graph extraction, budget, or deadline | Published `degraded`; `graph_search=false` | Atomically advances |
+| Failure point                                          | Candidate / Run result                      | Active version         |
+| ------------------------------------------------------ | ------------------------------------------- | ---------------------- |
+| All candidate documents fail parsing                   | Failed                                      | Unchanged and readable |
+| Some documents fail parsing, others index successfully | Published `degraded`; `DOCUMENT_PARTIAL`    | Atomically advances    |
+| Chunking                                               | Failed                                      | Unchanged and readable |
+| Keyword indexing                                       | Failed                                      | Unchanged and readable |
+| Closure validation                                     | Failed                                      | Unchanged and readable |
+| Publication CAS or commit                              | Failed                                      | Unchanged and readable |
+| Vector indexing                                        | Published `degraded`; `vector_search=false` | Atomically advances    |
+| Graph extraction, budget, or deadline                  | Published `degraded`; `graph_search=false`  | Atomically advances    |
 
-Mandatory failures never clear active chunks and never create a retrieval
-blackout. Optional failures never pretend that a capability exists. Graph rows
+Whole-build mandatory failures never clear active chunks and never create a
+retrieval blackout. Individual parse failures may publish a degraded closure
+when at least one document and its keyword chunks index successfully; failed
+revision entries do not become retrievable documents. Optional failures never pretend that a capability exists. Graph rows
 from an incomplete attempt are not exposed as a half-finished graph.
 
 The current reason codes include `DOCUMENT_PARTIAL`,
@@ -171,14 +168,13 @@ GET  /knowledge-bases/{kb_id}/versions/{version_id}
 POST /knowledge-bases/{kb_id}/builds
 POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
 POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
-POST /knowledge-bases/{kb_id}/reindex
 ```
 
 Only one active candidate may mutate a knowledge base at a time. Exact duplicate
 commands are idempotent. Retry creates a new candidate from the failed
 candidate's immutable manifest; it does not revive or overwrite that version.
-Reindex builds a new candidate from the active manifest and never calls an
-in-place `clear_index_data`.
+Reindex uses `POST /api/knowledge-bases/{kb_id}/builds`, which builds a new
+candidate from the active manifest and never calls an in-place `clear_index_data`.
 
 Removing a document edits the next candidate manifest. It does not synchronously
 delete the logical document, revision, chunks, graph evidence, or older
@@ -186,20 +182,24 @@ versions. The active pointer changes only when the removal candidate publishes.
 
 The execution kernel reclaims expired Activity claims and pending commands from
 PostgreSQL. Knowledge graph budget/cursor metrics are candidate progress markers;
-Run progress remains in the formal projection. Recovery either resumes the
+Run lifecycle remains in the formal projection. Live Activity progress is an
+off-stream, fenced observation attached to status/read models; its counters or
+SSE cursor never become execution history or replay order. Recovery either resumes the
 same invocation safely or terminalizes the candidate without changing the
 active version.
 
 ## Retention and garbage collection
 
-Version GC is opt-in:
+Version GC is opt-in through Operations Policy (this is a policy payload, not
+a runtime YAML configuration file):
 
 ```yaml
-knowledge_base:
-  version_gc_enabled: false
-  version_retention_count: 10
-  version_retention_min_days: 30
-  version_gc_batch_size: 50
+resource_gc:
+  knowledge_base:
+    enabled: false
+    retention_count: 10
+    retention_min_days: 30
+    batch_size: 50
 ```
 
 The scheduler runs bounded GC under a leader lease. Active versions, candidates

@@ -9,20 +9,7 @@ database isolation, sandbox boundaries, and verifiable evidence.
 
 ## Trust boundaries
 
-```mermaid
-flowchart LR
-  User[Browser / API client] --> Proxy[Reverse proxy]
-  Proxy --> API[Stateless API]
-  API --> PG[(PostgreSQL)]
-  Kernel[Execution kernel] --> PG
-  Kernel -. wake-up .-> Redis[(Redis)]
-  Kernel --> Broker[Sandbox broker]
-  Broker --> Sandbox[Isolated sandbox]
-  Sandbox --> Egress[Filtered egress proxy]
-  Kernel --> Providers[LLM / MCP / A2A / object storage]
-  Kernel --> Collector[Ops Collector: read only]
-  Kernel --> Actuator[Ops Actuator: narrow writes]
-```
+![security boundaries](../assets/diagrams/security-boundaries.png)
 
 - Only the reverse proxy is public. API, kernel metrics, PostgreSQL, Redis,
   object storage, broker, sandboxes, Collector, and Actuator stay private.
@@ -84,6 +71,15 @@ Formal projections are rebuildable and cannot append facts. SSE uses a
 sanitized public projection; private inputs, raw provider bodies, secrets, and
 internal event metadata never enter the browser stream.
 
+Execution analysis, comparison captures, and exports do not turn historical
+access into a permanent capability. Their database authority checks bind the
+actual principal and transaction scope to a short-lived signed operation;
+current membership and resource access are revalidated at read and worker I/O
+boundaries. Captured source revisions remain fixed while revoked authority
+fails closed. Evaluation tables and captured analysis/export facts also use
+forced RLS. Unknown model-call effects retain budget holds even after sandbox
+cleanup or admission closure; cleanup cannot assert a provider outcome.
+
 ## Tool and approval policy
 
 Tool exposure is the intersection of:
@@ -125,7 +121,7 @@ re-attaching to a running sandbox authenticates without shared token state; the
 seed itself is never injected into the untrusted sandbox container. The sandbox
 side compares tokens in constant time and refuses to start without the seed.
 Egress is confined to a Squid forward proxy (Compose service and the Helm
-`egress-proxy` Deployment) that denies by default and allowlists hosts; the
+`egress-proxy` Deployment) that rejects private/metadata destinations and unsafe ports before permitting other destinations; `egressProxy.allowedDomains` is reserved and does not render an allowlist. The
 Kubernetes NetworkPolicy restricts sandbox egress to that proxy only.
 
 Outbound HTTP applies scheme, hostname, DNS/IP, private-network, and port
@@ -173,22 +169,23 @@ only through role grants.
 
 ## Network exposure
 
-| Surface | Required exposure |
-| --- | --- |
-| Reverse proxy | Public HTTP/HTTPS |
-| API/UI | Internal behind proxy |
-| PostgreSQL/Redis/object storage | Internal only |
-| Execution-kernel metrics | Internal scrape only |
-| Sandbox broker and sandboxes | API/kernel private networks only |
-| Ops Collector/Actuator | API/kernel only; Actuator disabled by default |
-| Remote LLM/MCP/A2A | Explicit outbound policy and TLS |
+| Surface                         | Required exposure                             |
+| ------------------------------- | --------------------------------------------- |
+| Reverse proxy                   | Public HTTP/HTTPS                             |
+| API/UI                          | Internal behind proxy                         |
+| PostgreSQL/Redis/object storage | Internal only                                 |
+| Execution-kernel metrics        | Internal scrape only                          |
+| Sandbox broker and sandboxes    | API/kernel private networks only              |
+| Ops Collector/Actuator          | API/kernel only; Actuator disabled by default |
+| Remote LLM/MCP/A2A              | Explicit outbound policy and TLS              |
 
 The reverse proxy sets hardening response headers on every response
 (`Strict-Transport-Security` on HTTPS, `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, and a `Content-Security-Policy`
 with `frame-ancestors 'none'` and `object-src 'none'`) and runs with
-`server_tokens off`. Shared artifact HTML is served from a separate sandboxed
-origin under that CSP.
+`server_tokens off`. Shared artifact HTML is rebuilt as a static `srcDoc`
+document inside an empty-sandbox iframe with an opaque origin and its own
+`default-src 'none'` CSP.
 
 Production must enable NetworkPolicy, strong Redis authentication, secure
 cookies, narrow trusted-proxy CIDRs, and separate database credentials. In

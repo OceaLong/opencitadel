@@ -86,3 +86,16 @@ def test_runtime_containers_mask_migration_credentials() -> None:
 
     assert "POSTGRES_KERNEL_USER" in kernel_section
     assert "app.execution_kernel_main" in kernel_section
+
+
+def test_only_migration_login_gets_application_database_schema_creation():
+    shell = (ROOT / "deploy/helm/opencitadel/files/postgres/init-app-role.sh").read_text()
+    ci = (ROOT / "api/scripts/prepare_ci_database.py").read_text()
+    assert "'GRANT CREATE ON DATABASE %I TO %I', current_database(), :'migration_user'" in shell
+    assert (
+        'sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(\n                    sql.Identifier(database), sql.Identifier(migration_user)'
+        in ci
+    )
+    for source in (shell, ci):
+        assert "GRANT CREATE ON DATABASE" in source
+        assert "GRANT CREATE ON DATABASE %I TO %I WITH GRANT OPTION" not in source

@@ -85,6 +85,8 @@ class ActivityClaim(BaseModel):
 class ActivityContext(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
+    activity_id: UUID | None = None
+    generation: int | None = Field(default=None, ge=0)
     worker_id: str
     claim_generation: int = Field(ge=1)
     idempotency_key: str
@@ -95,6 +97,7 @@ class ActivityContext(BaseModel):
         default=None,
         exclude=True,
     )
+    record_citations: Callable[[list], Awaitable[None]] | None = Field(default=None, exclude=True)
     report_progress: Callable[[dict[str, JsonValue]], Awaitable[bool]] | None = Field(
         default=None, exclude=True
     )

@@ -31,8 +31,8 @@ class PostgresPublicProjection:
     async def list_events(
         self,
         *,
-        source_entity_type: str,
-        source_entity_id: str,
+        source_entity_type: str | None = None,
+        source_entity_id: str | None = None,
         owner_scope: OwnerScope,
         run_id: UUID | None = None,
         after: str | None = None,
@@ -47,11 +47,17 @@ class PostgresPublicProjection:
         after_position = self._cursor.decode(after) if after else None
         before_position = self._cursor.decode(before) if before else None
         scope_filter = self._scope_filter(owner_scope)
-        statement = select(ExecutionPublicEventORM).where(
-            ExecutionPublicEventORM.source_entity_type == source_entity_type,
-            ExecutionPublicEventORM.source_entity_id == source_entity_id,
-            scope_filter,
+        if source_entity_type is None and run_id is None:
+            raise ValueError("source or run target required")
+        target = (
+            (
+                ExecutionPublicEventORM.source_entity_type == source_entity_type,
+                ExecutionPublicEventORM.source_entity_id == source_entity_id,
+            )
+            if source_entity_type is not None
+            else ()
         )
+        statement = select(ExecutionPublicEventORM).where(scope_filter, *target)
         if run_id is not None:
             statement = statement.where(ExecutionPublicEventORM.run_id == run_id)
         reverse = latest or before_position is not None
@@ -71,8 +77,7 @@ class PostgresPublicProjection:
                     await session.scalar(
                         select(ExecutionPublicEventORM.seq)
                         .where(
-                            ExecutionPublicEventORM.source_entity_type == source_entity_type,
-                            ExecutionPublicEventORM.source_entity_id == source_entity_id,
+                            *target,
                             scope_filter,
                             *(
                                 (ExecutionPublicEventORM.run_id == run_id,)

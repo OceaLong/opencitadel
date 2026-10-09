@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Next.js 16 / React 19 frontend for event-sourced Agent sessions, immutable
-knowledge versions, automation, patrol, governance, and platform
+knowledge versions, automation, patrol, execution workbenches, analysis/comparisons/exports, evaluation, governance, and platform
 administration.
 
 ## Contract boundary
@@ -22,35 +22,27 @@ infers workflow completion from connection state or local timers.
 
 ## Source map
 
-```text
-src/
-├── app/                 App Router pages
-├── components/
-│   ├── session/         timeline, approvals, errors, VNC, artifacts
-│   ├── resource/        candidate build and version status
-│   ├── knowledge/       knowledge library and document reader
-│   ├── patrol/          patrol and remediation views
-│   ├── admin/           governance, usage, compliance
-│   ├── settings/        general, Agent, inference, Skills, memory, integrations, runtime
-│   └── ui/              shared Radix primitives
-├── hooks/               state and streaming orchestration
-├── lib/api/             typed HTTP/SSE clients
-├── lib/session-events.ts
-├── providers/
-└── i18n/
-messages/                authoritative English and Chinese catalogs
-scripts/                 strict i18n consistency checks
-```
+![Frontend module map](../docs/assets/diagrams/frontend-module-map.png)
 
 Important routes include `/sessions/[id]`, `/knowledge`, `/automation`,
 `/patrols`, `/patrol-runs/[id]`, `/teams`, and `/admin/*`.
 Settings contains General, Agent, Inference, Skills, Memory, Integrations, and an
 administrator-only Runtime section.
 
+## Execution and evaluation surfaces
+
+- `/runs/[id]`: Live/Playback workbench and bounded bodies; historical views cannot dispatch current actions.
+- `/analysis`, `/analysis/comparisons/[id]`: captured analysis, comparison revisions, diff jobs and exports.
+- `/evaluations`: dataset, configuration, rubric, suite, recording, environment, batch and review pages.
+- The provider caches `inference`/`skills` resources and supplies scope; execution, analysis and body responses belong to their domain hooks. Identity/workspace changes invalidate prior generations, preventing late cross-scope responses.
+- SSE triggers formal view refresh. Feed cursors, page cursors and historical `at` are not interchangeable. Generated OpenAPI types live in `src/lib/api/generated/schema.d.ts`; `npm run api:check` verifies synchronization.
+
 ## Development
 
 ```bash
-npm install
+npm ci
+npm run format:check
+npm run api:check
 npm run i18n:check
 npm run typecheck
 npm run lint
@@ -66,9 +58,12 @@ Use `src/lib/api/fetch.ts` for API access, preserve strict TypeScript, keep
 domain components in their domain directory, and avoid hard-coded API routes
 outside `src/lib/api/`.
 
-The development server runs on `http://localhost:3000`; the default API base
-is `http://localhost:8088/api`. Production uses `/api` through the reverse
-proxy.
+The development server runs on `http://localhost:3000`. The browser API base
+is `/api` by default. Next.js rewrites proxy it to `NEXT_PUBLIC_API_PROXY_TARGET`
+(default `http://localhost:8088`). `NEXT_PUBLIC_API_BASE_URL` explicitly overrides
+the browser base URL. Nginx handles production traffic through the same `/api` path.
 
 See [frontend architecture](../docs/architecture/frontend-ui.md) and
 [execution kernel](../docs/architecture/execution-kernel.md).
+
+[Execution analysis](../docs/architecture/execution-analysis.md) · [Evaluation control plane](../docs/architecture/evaluation-control-plane.md)

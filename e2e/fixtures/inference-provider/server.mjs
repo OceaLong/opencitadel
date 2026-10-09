@@ -7,7 +7,9 @@ import {
   ProviderScenarioSignal,
   completeChat,
   streamChat,
+  CAPACITY_SUCCESS_DELAY_MS,
 } from "./lib/chat.mjs";
+import { writePacedStream } from "./lib/paced.mjs";
 import { embeddingsFor } from "./lib/embedding.mjs";
 
 const BODY_LIMIT_BYTES = 1024 * 1024;
@@ -16,12 +18,15 @@ const MODEL_IDS = [
   "acceptance-chat",
   "acceptance-embedding-1536",
   "acceptance-failure",
+  "acceptance-capacity",
+  "acceptance-live",
 ];
 const CHAT_PARAMETERS = new Set([
   "model",
   "messages",
   "temperature",
   "max_tokens",
+  "max_completion_tokens",
   "tools",
   "tool_choice",
   "parallel_tool_calls",
@@ -58,12 +63,13 @@ function errorEnvelope(error) {
   };
 }
 
-function writeJson(response, status, payload) {
+function writeJson(response, status, payload, headers = {}) {
   const encoded = JSON.stringify(payload);
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(encoded),
     "Cache-Control": "no-store",
+    ...headers,
   });
   response.end(encoded);
 }
@@ -123,12 +129,13 @@ function rejectUnsupportedParameters(body, allowed) {
   }
 }
 
-function writeStream(response, chunks) {
+function writeStream(response, chunks, headers = {}) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
+    ...headers,
   });
   for (const chunk of chunks) {
     response.write(`data: ${typeof chunk === "string" ? chunk : JSON.stringify(chunk)}\n\n`);
@@ -148,15 +155,40 @@ function modelsPayload() {
   };
 }
 
-async function handleChat(request, response, timeoutDelayMs) {
+async function handleChat(request, response, timeoutDelayMs, retryScenarios) {
   const body = await readJson(request);
   rejectUnsupportedParameters(body, CHAT_PARAMETERS);
+  const userText = [...(body.messages ?? [])].reverse().find((message) => message.role === "user")?.content;
+  const retry = typeof userText === "string" && /\[acceptance:workbench:retry:([a-zA-Z0-9-]{1,96})\]/.exec(userText);
+  const firstRetry = retry && !retryScenarios.has(retry[1]);
+  if (firstRetry) {
+    if (retryScenarios.size >= 1000) throw new HttpRequestError(422, "scenario_limit", "retry scenario capacity reached");
+  }
   try {
+    // Validate/build before waiting: only successful capacity responses are delayed.
+    // No request parameter can vary or bypass this profile's fixed delay.
+    const output = body.stream === true ? streamChat(body) : completeChat(body);
+    if (firstRetry) {
+      const calls = output.choices?.[0]?.message?.tool_calls;
+      if (body.stream === true || !Array.isArray(calls) || calls.length !== 1)
+        throw new HttpRequestError(422, "retry_fixture_invalid", "workbench retry requires one tool decision");
+      // A well-formed provider response with an undeclared tool fails the
+      // deterministic decision check, so the Run records a retryable attempt.
+      // A transport error after a non-idempotent model send is rightly unknown.
+      calls[0].function.name = "acceptance_undeclared_tool";
+      retryScenarios.add(retry[1]);
+    }
+    const headers = {};
+    if (body.model === "acceptance-capacity") {
+      await new Promise((resolve) => setTimeout(resolve, CAPACITY_SUCCESS_DELAY_MS));
+      headers["X-Acceptance-Delay-Ms"] = String(CAPACITY_SUCCESS_DELAY_MS);
+    }
     if (body.stream === true) {
-      writeStream(response, streamChat(body));
+      if (body.model === "acceptance-live") await writePacedStream(response, output);
+      else writeStream(response, output, headers);
       return;
     }
-    writeJson(response, 200, completeChat(body));
+    writeJson(response, 200, output, headers);
   } catch (error) {
     if (error instanceof ProviderScenarioSignal && error.scenario === "timeout") {
       await new Promise((resolve) => setTimeout(resolve, timeoutDelayMs));
@@ -206,7 +238,7 @@ async function handleEmbeddings(request, response) {
   });
 }
 
-async function route(request, response, token, timeoutDelayMs) {
+async function route(request, response, token, timeoutDelayMs, retryScenarios) {
   const url = new URL(request.url ?? "/", "http://acceptance-inference");
   if (request.method === "GET" && url.pathname === "/healthz") {
     writeJson(response, 200, { status: "ok" });
@@ -219,7 +251,7 @@ async function route(request, response, token, timeoutDelayMs) {
     return;
   }
   if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
-    await handleChat(request, response, timeoutDelayMs);
+    await handleChat(request, response, timeoutDelayMs, retryScenarios);
     return;
   }
   if (request.method === "POST" && url.pathname === "/v1/embeddings") {
@@ -239,9 +271,10 @@ export function createServer({
   if (!Number.isInteger(timeoutDelayMs) || timeoutDelayMs < 0) {
     throw new TypeError("timeoutDelayMs must be a non-negative integer");
   }
+  const retryScenarios = new Set();
   return http.createServer(async (request, response) => {
     try {
-      await route(request, response, token, timeoutDelayMs);
+      await route(request, response, token, timeoutDelayMs, retryScenarios);
     } catch (error) {
       if (response.headersSent) {
         response.destroy(error);

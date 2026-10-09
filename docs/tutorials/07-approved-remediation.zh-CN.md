@@ -35,12 +35,17 @@ opsActuator:
         max_replicas: 10
 ```
 
-以精确名称 `ops-actuator` 注册 `http://opencitadel-ops-actuator:8091/mcp`。
+预置至少 32 字符、与 Collector Token 不同的强 `OPS_ACTUATOR_TOKEN`（Helm 使用
+`opsActuator.token`）。以精确名称 `ops-actuator` 注册
+`http://opencitadel-ops-actuator:8091/mcp`，配置匹配的加密
+`Authorization: Bearer <token>` Header，并通过部署出站策略允许精确内部 Host。
 后端 Activity 直接调用它；不得把 Actuator 加入 Agent Skill 或模型 Tool Policy。
 
 ## 发起提案
 
-1. 在 **Ops Patrol → Runs** 中打开可处理 Finding。
+1. 在 **Ops Patrol → Runs** 中打开绑定已注册 Deployment 或 StatefulSet 的可处理
+   Kubernetes Finding。当前 HTTP、Prometheus、证书、备份与依赖 Finding 没有
+   Actuator Action。
 2. 选择 **发起修复**。
 3. 选择 Restart、Scale 或 Rollback。Scale 要求正整数副本数；Rollback 固定回到上一
    Revision。

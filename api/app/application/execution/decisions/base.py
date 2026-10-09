@@ -140,6 +140,7 @@ def request_activity(
     input_digest: str,
     input_payload: dict[str, JsonValue],
     public_data: dict[str, JsonValue] | None = None,
+    parent_activity_id: UUID | None = None,
 ) -> RegisteredCommand:
     return command(
         state,
@@ -152,6 +153,8 @@ def request_activity(
             "input_digest": input_digest,
             "input_payload": input_payload,
             "public_data": public_data or {},
+            "parent_activity_id": str(parent_activity_id) if parent_activity_id else None,
+            "invocation_id": None,
         },
     )
 
@@ -213,7 +216,14 @@ def fail_for_activity(
                 activity_failure_code(state, activity_id) if activity_id is not None else None
             )
             or f"ACTIVITY_{status.upper()}",
-            "retryable": status == "failed" and state.retry_generation < max_retries,
+            "retryable": (
+                status == "failed"
+                and state.retry_generation < max_retries
+                and (
+                    activity_id is None
+                    or activity_failure_code(state, activity_id) != "REPLAY_MISMATCH"
+                )
+            ),
         },
     )
 
@@ -303,6 +313,7 @@ def command(
             f"opencitadel:{state.run_id}:{state.stream_version}:{command_type}",
         ),
         command_type=command_type,
+        command_schema_version=2 if command_type == "RequestActivity" else 1,
         run_id=state.run_id,
         expected_stream_version=state.stream_version,
         payload=payload,

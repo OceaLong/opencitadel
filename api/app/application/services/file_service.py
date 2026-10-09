@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import Callable
 from typing import BinaryIO
 
@@ -6,6 +7,7 @@ from fastapi import UploadFile
 from app.domain.errors import NotFoundError
 from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.models.file import File
+from app.domain.models.resource_pin import ResourceUnavailable
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.uow import IUnitOfWork
 
@@ -39,7 +41,7 @@ class FileService:
         """根据传递的文件id获取文件信息"""
         async with self._uow_factory() as uow:
             file = await uow.file.get_by_id(file_id, scope=scope)
-        if not file:
+        if not file or not file.content_available:
             raise NotFoundError(f"该文件[{file_id}]不存在")
         return file
 
@@ -49,8 +51,36 @@ class FileService:
         file_data, _ = await self.file_storage.download_file(file_id)
         return file_data, file
 
-    async def delete_file(self, file_id: str, scope: OwnerScope) -> None:
+    async def delete_file(self, file_id: str, scope: OwnerScope, *, force: bool = False) -> None:
         """根据传递的文件id删除文件（先校验归属，再删除对象与记录）"""
         # get_file_info 使用 scope 校验归属，非本人/本团队文件会抛 NotFoundError
-        await self.get_file_info(file_id, scope=scope)
-        await self.file_storage.delete_file(file_id)
+        async with self._uow_factory() as uow:
+            file = await uow.file.get_by_id(file_id, scope=scope)
+        if file is None:
+            raise NotFoundError(f"该文件[{file_id}]不存在")
+        # Tombstones remain addressable here for authorized cleanup retry.
+        # Storage adapter repeats scoped row authorization in its tombstone transaction.
+        await self.file_storage.delete_file(file_id, scope=scope, force=force)
+
+    async def read_fixed(
+        self, file_id: str, content_digest: str, object_identity: str, scope: OwnerScope
+    ) -> bytes:
+        file = await self.get_file_info(file_id, scope)
+        if (
+            not file.content_digest
+            or file.content_digest != content_digest
+            or file.object_identity != object_identity
+        ):
+            raise ResourceUnavailable("fixed file identity unavailable")
+        stream, _ = await self.file_storage.download_file(file_id)
+        try:
+            data = stream.read()
+        finally:
+            stream.close()
+        if hashlib.sha256(data).hexdigest() != content_digest:
+            raise ResourceUnavailable("immutable file content changed")
+        # Recheck tombstone after storage I/O; residual cache never confers authority.
+        current = await self.get_file_info(file_id, scope)
+        if current.object_identity != object_identity:
+            raise ResourceUnavailable("fixed file identity changed")
+        return data

@@ -1,252 +1,29 @@
 import { randomUUID } from "node:crypto";
 
-import type { Page } from "@playwright/test";
-
 import { appApi, expect, test } from "./fixtures/acceptance.fixture";
 import { registerCleanupAction } from "./support/cleanup-journal";
 import { acceptanceId } from "./support/ids";
 import { pollProjection } from "./support/poll";
 
-type SessionResponse = {
-  session_id: string;
-  status: "pending" | "running" | "waiting" | "completed" | "cancelled" | "failed";
-  events?: ExecutionEvent[];
-};
-
-type ExecutionEvent = {
-  cursor: string;
-  event_id: string;
-  event_type: string;
-  run_id: string | null;
-  stream_id: string;
-  stream_version: number;
-  payload: Record<string, unknown>;
-};
-
-type ExecutionEventPage = {
-  events: ExecutionEvent[];
-  next_cursor: string | null;
-  prev_cursor: string | null;
-  has_earlier: boolean;
-};
-
-type StreamEvent = {
-  cursor: string;
-  type: string;
-  data: Record<string, unknown>;
-};
-
-type GovernanceProfile = {
-  session: { id: string; status: string };
-  chain: { verified: boolean; checked_runs: number; checked_entries: number };
-  runs: Array<{
-    run_id: string;
-    family: string;
-    status: string;
-    terminal_at: string | null;
-  }>;
-  approvals: Array<{
-    approval_id: string;
-    run_id: string;
-    subject_activity_id: string;
-    subject_label: string;
-    status: string;
-    decision: string | null;
-  }>;
-  activities: Array<{
-    activity_id: string;
-    run_id: string;
-    activity_type: string;
-    status: string;
-    attempt: number;
-    failure_code: string | null;
-    terminal_at: string | null;
-  }>;
-};
-
+import {
+  cover,
+  createSession,
+  readChatStream,
+  assertUniqueCursors,
+  waitForTerminalProfile,
+  governanceProfile,
+} from "./support/execution";
+type SessionResponse = { session_id: string; status: string };
+type ExecutionEventPage = { events: Array<{ cursor: string }> };
 type MemoryList = {
-  entries: Array<{ id: string; title: string; content: string; source: string }>;
+  entries: Array<{
+    id: string;
+    title: string;
+    content: string;
+    source: string;
+  }>;
 };
-
 type InferenceModel = { id: string; model_name: string; kind: string };
-
-type ChatBody = {
-  message?: string;
-  request_id?: string;
-  event_id?: string;
-  model_id?: string;
-  mode?: "ask" | "agent";
-};
-
-function cover(...requirementIds: string[]): void {
-  for (const requirementId of requirementIds) {
-    test
-      .info()
-      .annotations.push({ type: "acceptance", description: requirementId });
-  }
-}
-
-async function createSession(
-  page: Page,
-  title: string,
-  mode: "ask" | "agent",
-  modelId?: string,
-): Promise<string> {
-  const session = await appApi<{ session_id: string }>(page, "/sessions", {
-    method: "POST",
-    body: {
-      title,
-      mode,
-      ...(modelId ? { model_id: modelId } : {}),
-    },
-  });
-  registerCleanupAction({
-    action: "delete-resource",
-    resource: "session",
-    resource_id: session.data.session_id,
-  });
-  return session.data.session_id;
-}
-
-async function governanceProfile(
-  page: Page,
-  sessionId: string,
-): Promise<GovernanceProfile> {
-  return (
-    await appApi<GovernanceProfile>(
-      page,
-      `/admin/governance/sessions/${encodeURIComponent(sessionId)}/profile`,
-    )
-  ).data;
-}
-
-async function readChatStream(
-  page: Page,
-  sessionId: string,
-  body: ChatBody,
-  options: { stopAfter?: number; timeoutMs?: number } = {},
-): Promise<StreamEvent[]> {
-  return page.evaluate(
-    async ({ sessionId, body, stopAfter, timeoutMs }) => {
-      const cookies = document.cookie.split("; ");
-      const csrf = (
-        cookies.find((cookie) => cookie.startsWith("__Host-csrf_token=")) ??
-        cookies.find((cookie) => cookie.startsWith("csrf_token="))
-      )
-        ?.split("=")
-        .slice(1)
-        .join("=");
-      const workspaceId = window.localStorage.getItem(
-        "opencitadel-active-workspace",
-      );
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-      const events: StreamEvent[] = [];
-      let buffer = "";
-
-      function parseFrame(frame: string): StreamEvent | null {
-        let cursor = "";
-        let eventType = "message";
-        const data: string[] = [];
-        for (const line of frame.split("\n")) {
-          if (line.startsWith("id:")) cursor = line.slice(3).trim();
-          if (line.startsWith("event:")) eventType = line.slice(6).trim();
-          if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-        }
-        if (!cursor || data.length === 0) return null;
-        return {
-          cursor,
-          type: eventType,
-          data: JSON.parse(data.join("\n")) as Record<string, unknown>,
-        };
-      }
-
-      try {
-        const response = await fetch(
-          `/api/sessions/${encodeURIComponent(sessionId)}/chat`,
-          {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              Accept: "text/event-stream",
-              "Content-Type": "application/json",
-              ...(csrf ? { "X-CSRF-Token": decodeURIComponent(csrf) } : {}),
-              ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          },
-        );
-        if (!response.ok) {
-          throw new Error(
-            `chat stream returned HTTP ${response.status}: ${await response.text()}`,
-          );
-        }
-        if (!response.body) throw new Error("chat stream response has no body");
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          buffer += decoder.decode(value, { stream: !done }).replaceAll(
-            "\r\n",
-            "\n",
-          );
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary >= 0) {
-            const frame = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            const event = parseFrame(frame);
-            if (event) {
-              events.push(event);
-              if (stopAfter && events.length >= stopAfter) {
-                await reader.cancel();
-                controller.abort();
-                return events;
-              }
-            }
-            boundary = buffer.indexOf("\n\n");
-          }
-          if (done) return events;
-        }
-      } finally {
-        window.clearTimeout(timer);
-      }
-    },
-    {
-      sessionId,
-      body,
-      stopAfter: options.stopAfter,
-      timeoutMs: options.timeoutMs ?? 120_000,
-    },
-  );
-}
-
-function assertUniqueCursors(events: readonly StreamEvent[]): void {
-  expect(new Set(events.map((event) => event.cursor)).size).toBe(events.length);
-  for (const event of events) {
-    expect(event.data.event_id).toBe(event.cursor);
-  }
-}
-
-async function waitForTerminalProfile(
-  page: Page,
-  sessionId: string,
-  status: "completed" | "cancelled" | "failed",
-): Promise<GovernanceProfile> {
-  return pollProjection(
-    () => governanceProfile(page, sessionId),
-    (profile) =>
-      profile.session.status === status &&
-      profile.runs.length === 1 &&
-      profile.runs[0]?.status === status &&
-      Boolean(profile.runs[0]?.terminal_at),
-    {
-      timeout: 120_000,
-      intervals: [100, 250, 500, 1_000],
-      message: `session ${sessionId} reaches ${status}`,
-    },
-  );
-}
 
 test.describe.configure({ mode: "serial" });
 
@@ -272,18 +49,16 @@ test("Agent and Ask terminate through formal retrieval and model Activities", as
     assertUniqueCursors(streamed);
     expect(streamed.at(-1)?.type).toBe("done");
     const assistant = streamed.find(
-      (event) =>
-        event.type === "message" && event.data.role === "assistant",
+      (event) => event.type === "message" && event.data.role === "assistant",
     );
     expect(assistant?.data.message).toBe(`Acceptance response: ${prompt}`);
 
-    const profile = await waitForTerminalProfile(
-      page,
-      sessionId,
-      "completed",
-    );
+    const profile = await waitForTerminalProfile(page, sessionId, "completed");
     expect(profile.chain.verified).toBe(true);
-    expect(profile.runs[0]).toMatchObject({ family: mode, status: "completed" });
+    expect(profile.runs[0]).toMatchObject({
+      family: mode,
+      status: "completed",
+    });
     expect(
       profile.activities.map((activity) => [
         activity.activity_type,
@@ -327,9 +102,7 @@ test("SSE reconnect from a formal cursor has no duplicates or missing events", a
   });
   expect(resumed.at(-1)?.type).toBe("done");
   assertUniqueCursors(resumed);
-  expect(first.map((event) => event.cursor)).not.toContain(
-    resumed[0]?.cursor,
-  );
+  expect(first.map((event) => event.cursor)).not.toContain(resumed[0]?.cursor);
 
   await waitForTerminalProfile(page, sessionId, "completed");
   const persisted = (
@@ -349,8 +122,8 @@ test("approval executes one declared external effect and rejection executes none
   test.setTimeout(300_000);
   cover("RUN-APPROVE", "RUN-REJECT");
 
-  const before = (await appApi<MemoryList>(page, "/memories?q=acceptance"))
-    .data.entries;
+  const before = (await appApi<MemoryList>(page, "/memories?q=acceptance")).data
+    .entries;
   const beforeIds = new Set(before.map((entry) => entry.id));
 
   const approvedSessionId = await createSession(
@@ -396,9 +169,10 @@ test("approval executes one declared external effect and rejection executes none
   ).toHaveLength(1);
 
   const afterApproval = await pollProjection(
-    async () => (await appApi<MemoryList>(page, "/memories?q=acceptance"))
-      .data.entries,
-    (entries) => entries.filter((entry) => !beforeIds.has(entry.id)).length === 1,
+    async () =>
+      (await appApi<MemoryList>(page, "/memories?q=acceptance")).data.entries,
+    (entries) =>
+      entries.filter((entry) => !beforeIds.has(entry.id)).length === 1,
     { timeout: 60_000, message: "approved memory effect appears once" },
   );
   const createdMemory = afterApproval.filter(
@@ -539,11 +313,7 @@ test("cancellation converges Run, session, Activity, and reloaded UI", async ({
     body: {},
   });
 
-  const cancelled = await waitForTerminalProfile(
-    page,
-    sessionId,
-    "cancelled",
-  );
+  const cancelled = await waitForTerminalProfile(page, sessionId, "cancelled");
   expect(cancelled.activities).toContainEqual(
     expect.objectContaining({
       activity_type: "model.call",
@@ -553,9 +323,7 @@ test("cancellation converges Run, session, Activity, and reloaded UI", async ({
   );
   expect(
     cancelled.activities.every((activity) =>
-      ["succeeded", "failed", "unknown", "cancelled"].includes(
-        activity.status,
-      ),
+      ["succeeded", "failed", "unknown", "cancelled"].includes(activity.status),
     ),
   ).toBe(true);
 
@@ -567,7 +335,11 @@ test("cancellation converges Run, session, Activity, and reloaded UI", async ({
   ).data;
   expect(session.status).toBe("cancelled");
   await page.goto(`/sessions/${encodeURIComponent(sessionId)}`);
-  await expect(page.getByText(/^Task cancelled\.$|^任务已取消。$/)).toBeVisible();
+  await expect(
+    page.getByText(/^Task cancelled\.$|^任务已取消。$/),
+  ).toBeVisible();
   await page.reload();
-  await expect(page.getByText(/^Task cancelled\.$|^任务已取消。$/)).toBeVisible();
+  await expect(
+    page.getByText(/^Task cancelled\.$|^任务已取消。$/),
+  ).toBeVisible();
 });

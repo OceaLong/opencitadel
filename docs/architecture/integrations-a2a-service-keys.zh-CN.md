@@ -10,18 +10,22 @@ Reference 下解析它们。
 MCP Record 定义 Transport、Endpoint/Command、Header/Env、Enabled、Tool Policy、Visibility、
 Owner/Team。A2A Record 定义 Endpoint、Enabled、Tool Policy、Visibility、Owner/Team。HTTP
 Destination 通过 Outbound SSRF Validation。Stdio MCP 会在执行内核信任边界启动本地进程，
-因此仅 Admin 可创建。
+因此配置（包括更新）仅限 Admin。
 
 Agent Tool Catalog 只解析 Enabled、可访问 Record；带 Server Ref 的 Skill 进一步收窄。
 Model 看到工具前先按 Mode/Policy Filter，Invocation 前再次 Resolve/Check。缺失或歧义 Tool Name
 关闭失败。
 
-MCP URL、Header 与 Environment Dictionary 中的 Secret 使用版本化加密信封。Response 做 Mask。
+MCP URL、Header 与 Environment Dictionary 中的 Secret 使用版本化加密信封。Dictionary
+Update 替换本次提交的 Dictionary；省略的 Key 会移除，已提交的 Masked/Blank Value
+保留相应旧值。Response 做 Mask。
 Masked/Blank Update 保留当前值；真实新值用 Active Key 加密。
 
 ## 入站 A2A
 
-入站 `/api/a2a` 使用 Service API Key，在 Key Owner Authority 下提交正常 Agent Execution。
+入站 `/api/a2a` 使用 `X-Api-Key` 中的 Service API Key，在 Key Owner 的 Personal Authority
+下提交正常 Agent Execution。JSON-RPC Method 为 `message/send`、`message/stream`、
+`tasks/get`、`tasks/cancel`；`/.well-known/agent-card.json` 公开可读。
 Service Key 只显示一次、Hash 存储、可撤销且有 Audit。Auditor Owner 的 Key 不能调用 A2A。
 Service Key 不隐式选择 Team；Team Scope 交互 API 使用 Session Auth 与 `X-Workspace-Id`。
 

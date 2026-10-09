@@ -19,7 +19,7 @@ post-commit 阶段，因此 Redis 故障最多增加延迟，不能改变 Postgr
 
 ## 3. PostgreSQL 事件溯源执行
 
-每个 Agent、Ask、资源构建、自动化、巡检与修复行为都是强类型 Run。追加式、哈希链执行
+每个 Agent、Ask、资源构建、自动化、巡检、修复以及评测 Subject/Judge 执行都是强类型 Run。追加式、哈希链执行
 事件是唯一生命周期事实。同一个 PostgreSQL 提供 Command Inbox 幂等、持久 Activity、Timer、
 Outbox、完整性校验 Snapshot 与可重建投影。
 
@@ -69,7 +69,23 @@ Next.js UI 提交 Command 并展示正式投影。SSE 实时流与回放使用�
 LLM 与集成 Secret 使用 `v2.<key-id>...` Fernet 信封。当前 Key 写新值，显式 Previous-Key
 Ring 支持计划内轮换；审计签名有独立 Key Ring。明文凭据不是受支持的持久格式。
 
-## 12. 单一全新 Schema
+## 12. 单一全新 Schema 谱系
 
-Alembic 只包含当前 Catalog 的一个 Initial Revision。项目不提供执行历史转换、备用事件 Schema
-或 Engine 间运行时路由。首个受支持生产版本建立升级契约前，结构变更直接更新全新 Schema。
+Alembic 使用从 `0001greenfield` 到 `0030evaluation_judge_history` 的单条线性版本链。
+后续 Revision 添加执行视图、资源 Pin、评测、分析、比较和导出；新数据库通过
+`alembic upgrade head` 应用完整版本链。项目没有备用执行 Schema、历史转换引擎或运行时
+Engine 路由。该版本链不代表已经建立旧生产版本的受支持升级契约。
+
+## 13. 固定分析证据与当前授权
+
+分析来源、比较 Revision 与导出 Job 固定 Run/评测 Revision，并捕获有界来源事实。
+后续读取验证当前 Principal/Workspace 权限与已捕获资源闭包；历史 Capture 不会保留已撤销
+的访问权。原生数据库函数与 FORCE RLS 在 Capture、分页、Worker I/O 和下载边界共同执行
+Scope 约束。可过期 Worker Lease 与对象写入 Intent 对发布和清理进行 Fencing。
+
+## 14. 内核中的评测消费链
+
+评测调度、协调、Rule/Judge 评分与清理是受监督的 Kernel Consumer，读取持久表。
+Subject/Judge 工作复用既有 Run/Activity 协议。物理模型调用先预留预算，再访问 Provider，
+由正式 Usage 证据结算。未知外部结果保留计费义务；关闭 Admission 或清理 Sandbox 不能
+伪造 Settlement，也不能释放 Unknown Hold。

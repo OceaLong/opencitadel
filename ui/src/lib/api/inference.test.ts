@@ -23,7 +23,7 @@ describe("inferenceApi", () => {
     await inferenceApi.probeModel("model-1");
 
     expect(get).toHaveBeenCalledWith("/inference/endpoints");
-    expect(get).toHaveBeenCalledWith("/inference/models");
+    expect(get).toHaveBeenCalledWith("/inference/models", undefined, undefined);
     expect(post).toHaveBeenCalledWith("/inference/models/model-1/probe", {});
   });
 

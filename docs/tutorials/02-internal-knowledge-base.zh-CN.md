@@ -1,3 +1,5 @@
+[English](02-internal-knowledge-base.md)
+
 # 构建并使用内部知识库
 
 本教程将创建版本化知识库、跟踪构建、启动固定版本的 Ask/Agent 会话，并在没有检索中断的前提下安全更新内容。
@@ -19,18 +21,18 @@
 资料库视图会显示 active 版本和 active 候选，也可以查看：
 
 ```text
-GET /knowledge-bases/{kb_id}/versions
-GET /knowledge-bases/{kb_id}/versions/{version_id}
+GET /api/knowledge-bases/{kb_id}/versions
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}
 ```
 
 流水线会报告解析、分块、关键词索引、向量、图、验证和发布进度。状态含义如下：
 
-| 状态 | 含义 |
-| --- | --- |
-| `building` | 候选尚不完整，Ask 和 Agent 都不能使用 |
-| `ready` | 已发布，所有配置能力可用 |
+| 状态       | 含义                                                  |
+| ---------- | ----------------------------------------------------- |
+| `building` | 候选尚不完整，Ask 和 Agent 都不能使用                 |
+| `ready`    | 已发布，所有配置能力可用                              |
 | `degraded` | 已发布；强制关键词/来源读取可用，可选能力禁用情况明确 |
-| `failed` | 候选未发布；上一个 active 版本持续可读 |
+| `failed`   | 候选未发布；上一个 active 版本持续可读                |
 
 修订处于 `parsed` 仍不可检索。必须等待候选版本发布，不能用 `ready_doc_count` 绕过检查。
 
@@ -63,7 +65,7 @@ GET /knowledge-bases/{kb_id}/versions/{version_id}
 没有页码元数据的来源允许 `page_no` 为空。打开引用时使用版本化来源接口：
 
 ```text
-GET /knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
 ```
 
 可以使用页码过滤，也可以用响应中的 `next_cursor` 继续。响应还包含
@@ -76,10 +78,10 @@ GET /knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
 对 `graph_search=true` 的已发布版本，打开图面板，或调用：
 
 ```text
-GET /knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
+GET /api/knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
 ```
 
-返回 `cursor` 时可继续翻页。节点是真实抽取实体，边连接返回集合中的真实实体端点，边证据可回到精确来源分块。若
+将返回的 `next_cursor` 作为 `cursor` 参数即可继续翻页。节点是真实抽取实体，边连接返回集合中的真实实体端点，边证据可回到精确来源分块。若
 `capability=false`，应改用关键词/向量检索，不能把空图解释成“没有关系”。
 
 图处理受分块数、LLM 调用数、Token、并发度和截止时间预算约束。超出预算会降级图能力，但不阻塞关键词发布。
@@ -101,7 +103,7 @@ GET /knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
 对于失败构建，选择 **重试** 或调用：
 
 ```text
-POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
+POST /api/knowledge-bases/{kb_id}/builds/{build_id}/retry
 ```
 
 重试会从失败候选的不可变清单创建新候选，失败版本仍保留在审计历史中。
@@ -109,7 +111,7 @@ POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
 对于 active queued/running 构建，选择 **取消** 或调用：
 
 ```text
-POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
+POST /api/knowledge-bases/{kb_id}/builds/{build_id}/cancel
 ```
 
 该请求在 Run 中记录取消，并在 Activity 边界停止。请继续观察构建状态直到进入终态。如果 Activity Claim 过期，执行内核会安全继续持久构建，或将其标记失败，且不会改变 Active 版本。

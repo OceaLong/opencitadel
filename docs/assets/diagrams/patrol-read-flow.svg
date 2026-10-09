@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1010" viewBox="0 0 1440 1010" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Ops Patrol · Read, validation and evidence</title>
+<desc id="desc">A versioned Pack admits a Patrol Run; fixed Collector probes never authorize Kubernetes writes. Scheduled Pack firings use an Automation parent linked to this Patrol child; manual runs use direct admission. Evidence export contains its verification result; a signed package alone does not prove a valid source chain.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1010" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Ops Patrol · Read, validation and evidence</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">A versioned Pack admits a Patrol Run; fixed Collector probes never authorize Kubernetes writes.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="pack" data-target="admission" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="admission" data-target="run" d="M 780,230 L 900,230" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="run" data-target="activity" d="M 1110.0,280 L 1110.0,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="activity" data-target="collector" d="M 900,500 L 780,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="collector" data-target="validate" d="M 480,500 L 360,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="validate" data-target="assertions" d="M 210.0,550 L 210.0,720" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="assertions" data-target="evidence" d="M 360,770 L 480,770" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-7" data-edge-id="edge-7" data-graph-role="edge" data-source="evidence" data-target="proposal" d="M 780,770 L 900,770" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="pack" data-node-id="pack" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="81" cy="203" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 71,203 V 216 Q 81,223 91,216 V 203" fill="none" stroke="#16a34a"/>
+<text x="104" y="213" font-size="20" font-weight="600">Versioned Patrol Pack</text>
+<text x="78" y="240" font-size="15" class="secondary">Mutable draft / validate / active state</text>
+<text x="78" y="262" font-size="14" class="secondary">Run captures an immutable snapshot</text>
+</g>
+<g id="admission" data-node-id="admission" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Patrol admission</text>
+<text x="498" y="240" font-size="15" class="secondary">Bind configuration and resources</text>
+<text x="498" y="262" font-size="14" class="secondary">Submit typed CreateRun</text>
+</g>
+<g id="run" data-node-id="run" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Patrol Run</text>
+<text x="918" y="240" font-size="15" class="secondary">Durable command / event protocol</text>
+<text x="918" y="262" font-size="14" class="secondary">No transport-owned lifecycle</text>
+</g>
+<g id="activity" data-node-id="activity" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">patrol.execute Activity</text>
+<text x="918" y="510" font-size="15" class="secondary">Fenced invocation + call-start</text>
+<text x="918" y="532" font-size="14" class="secondary">Read-only tools from admitted catalog</text>
+</g>
+<g id="collector" data-node-id="collector" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Ops Collector</text>
+<text x="498" y="510" font-size="15" class="secondary">Bearer token + namespace RBAC</text>
+<text x="498" y="532" font-size="14" class="secondary">Fixed registered read probes</text>
+</g>
+<g id="validate" data-node-id="validate" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Bundle validation</text>
+<text x="78" y="510" font-size="15" class="secondary">Manifest, schema and target checks</text>
+<text x="78" y="532" font-size="14" class="secondary">Reject invalid collected material</text>
+</g>
+<g id="assertions" data-node-id="assertions" data-graph-role="node" data-bounds="60,720,360,820">
+<rect x="60" y="720" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="753" font-size="20" font-weight="600">Deterministic assertions</text>
+<text x="78" y="780" font-size="15" class="secondary">Evaluate trusted structured fields</text>
+<text x="78" y="802" font-size="14" class="secondary">Model output cannot replace checks</text>
+</g>
+<g id="evidence" data-node-id="evidence" data-graph-role="node" data-bounds="480,720,780,820">
+<rect x="480" y="720" width="300" height="100" rx="8" fill="#f0fdf4" stroke="#d1d5db" stroke-width="1.5"/>
+<ellipse cx="501" cy="743" rx="10" ry="4" fill="none" stroke="#16a34a"/>
+<path d="M 491,743 V 756 Q 501,763 511,756 V 743" fill="none" stroke="#16a34a"/>
+<text x="524" y="753" font-size="20" font-weight="600">Findings + evidence</text>
+<text x="498" y="780" font-size="15" class="secondary">Collected references and digests</text>
+<text x="498" y="802" font-size="14" class="secondary">Signed ZIP is an explicit export</text>
+</g>
+<g id="proposal" data-node-id="proposal" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">Remediation proposal</text>
+<text x="918" y="780" font-size="15" class="secondary">Frozen narrow action and arguments</text>
+<text x="918" y="802" font-size="14" class="secondary">No write until separate approval</text>
+</g>
+<text x="420.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">admit</text>
+<text x="840.0" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">commit</text>
+<text x="1151.6" y="370.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">dispatch</text>
+<text x="840.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">read</text>
+<text x="420.0" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">bundle</text>
+<text x="251.6" y="640.0" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">validate</text>
+<text x="420.0" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">derive</text>
+<text x="840.0" y="758" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-7">propose</text>
+<g data-graph-role="legend">
+<line x1="60" y1="882" x2="96" y2="882" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="887" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="882" x2="536" y2="882" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="887" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="882" x2="976" y2="882" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="887" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="930" font-size="15" class="secondary" data-graph-role="label">Scheduled Pack firings use an Automation parent linked to this Patrol child; manual runs use direct admission.</text>
+<text x="60" y="954" font-size="15" class="secondary" data-graph-role="label">Evidence export contains its verification result; a signed package alone does not prove a valid source chain.</text>
+</svg>

@@ -7,6 +7,10 @@ from typing import Protocol
 
 from app.application.execution import activity_types
 from app.application.execution.activity_inputs import ActivityObjectStore
+from app.application.ports.inference_dispatch import (
+    auxiliary_activity_context,
+    close_inference_adapters,
+)
 from app.application.services.inference_model_service import InferenceModelService
 from app.domain.execution.activity import (
     ActivityContext,
@@ -140,7 +144,9 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         pipeline: KnowledgeBuildPipeline,
         models: InferenceModelService | None = None,
         client_factory: Callable[..., LLM] | None = None,
+        execution_usage=None,
     ) -> None:
+        self._execution_usage = execution_usage
         super().__init__(objects=objects)
         self._pipeline = pipeline
         self._models = models
@@ -177,7 +183,11 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         ocr_llm = client if (need_ocr and resolved.model.capabilities.vision) else None
         return graph_llm, ocr_llm
 
-    async def execute(
+    async def execute(self, request, context):
+        with auxiliary_activity_context(self._execution_usage, request, context):
+            return await self._execute(request, context)
+
+    async def _execute(
         self,
         request: ActivityRequest,
         context: ActivityContext,
@@ -206,6 +216,8 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         except asyncio.CancelledError:
             await self._pipeline.cancel(build_id)
             raise
+        finally:
+            await close_inference_adapters([graph_llm, ocr_llm])
 
 
 __all__ = ["KnowledgeBuildActivityHandler"]

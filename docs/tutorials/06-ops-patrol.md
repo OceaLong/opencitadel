@@ -8,7 +8,7 @@ Ops Patrol checks a self-hosted Kubernetes application through a fixed, read-onl
 
 You need:
 
-- a running API, execution kernel, PostgreSQL, Redis, and tool-capable model;
+- a running API, execution kernel, PostgreSQL, and Redis;
 - an Ops Collector deployed in the target cluster with its dedicated read-only ServiceAccount;
 - reviewed namespace/workload allowlists and registered probes;
 - an enabled streamable-HTTP MCP Server whose nine tool policies are fixed read-only;
@@ -23,18 +23,26 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 
 The Compose profile does not mount a host kubeconfig. Use the Helm/Kustomize ServiceAccount for real Kubernetes observations. Never expose the Collector publicly.
 
+Set a strong `OPS_COLLECTOR_TOKEN` (at least 32 characters; Helm uses
+`opsCollector.token`) and configure matching encrypted integration headers
+`Authorization: Bearer <token>`. Allow the exact internal Collector hostname
+through the deployment outbound policy. HTTP listener health alone does not
+prove authenticated access or Kubernetes readiness. Formal Patrol checks use
+fixed Collector tools and server assertions; a model is needed only for
+separate Agent workflows.
+
 ## Prepare the Collector
 
 The built-in `kubernetes-baseline-v1` wizard creates ten enabled checks. Before validation, register the external targets that use these identifiers:
 
-| Check | Required registered id |
-|-------|------------------------|
-| PVC utilization | `pvc-utilization` Prometheus query |
-| HTTP 5xx ratio | `app-5xx-ratio` Prometheus query |
-| Endpoint health | `primary-endpoint` HTTP probe |
-| Certificate expiry | `primary-tls` certificate probe |
-| Backup freshness | `primary-database` backup status |
-| Dependency health | `primary-dependencies` dependency group |
+| Check              | Required registered id                  |
+| ------------------ | --------------------------------------- |
+| PVC utilization    | `pvc-utilization` Prometheus query      |
+| HTTP 5xx ratio     | `app-5xx-ratio` Prometheus query        |
+| Endpoint health    | `primary-endpoint` HTTP probe           |
+| Certificate expiry | `primary-tls` certificate probe         |
+| Backup freshness   | `primary-database` backup status        |
+| Dependency health  | `primary-dependencies` dependency group |
 
 The four Kubernetes checks use the Pack namespace and the Collector namespace/workload allowlists. Full configuration examples are in the [Collector README](../../ops-collector/README.md#configuration-reference).
 
@@ -70,12 +78,12 @@ The Collector itself never gains mutation rights. A separate, narrowly-scoped Op
 
 ## Interpret results
 
-| Status | Meaning |
-|--------|---------|
-| `pass` | All configured server assertions passed |
-| `warn` / `fail` | Threshold breach; a Finding may be created or deduplicated |
-| `error` | Probe, schema, capability, or required-evidence failure; not healthy |
-| `skipped` | Explicitly skipped according to the Pack missing-data contract; not silently passed |
+| Status          | Meaning                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `pass`          | All configured server assertions passed                                             |
+| `warn` / `fail` | Threshold breach; a Finding may be created or deduplicated                          |
+| `error`         | Probe, schema, capability, or required-evidence failure; not healthy                |
+| `skipped`       | Explicitly skipped according to the Pack missing-data contract; not silently passed |
 
 The Pack detail shows 30-day scheduled-run success, Finding and false-positive counts, and median review time. Review time remains absent until an operator opens a Run and decides a Finding.
 

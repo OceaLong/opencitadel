@@ -477,6 +477,9 @@ class MCPClientManager:
                 return server_name, tool_name[len(expected_prefix) + 1 :]
         return None, None
 
+    def get_tool_source(self, tool_name: str) -> tuple[str, str] | None:
+        return self._canonical_to_source.get(tool_name)
+
     def get_tool_policy(self, tool_name: str) -> ToolExecutionPolicy:
         """Resolve administrator-owned metadata for one canonical MCP function."""
         server_name, source_name = self._resolve_tool_source(tool_name)

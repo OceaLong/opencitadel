@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -40,6 +41,7 @@ from app.application.services.compliance_service import (
 )
 from app.application.services.embedding_service import EmbeddingService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.execution_usage_service import ExecutionUsageService
 from app.application.services.file_service import FileService
 from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
@@ -143,10 +145,12 @@ from app.infrastructure.external.search.providers import (
 )
 from app.infrastructure.external.session_list_notifier import DebouncedSessionListPublisher
 from app.infrastructure.observability.otel_adapter import OtelObservabilityAdapter
+from app.infrastructure.repositories.db_execution_usage_repository import DBExecutionUsageRepository
 from app.infrastructure.repositories.postgres_runtime_policy_repository import (
     PostgresRuntimePolicyRepository,
 )
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
@@ -195,6 +199,7 @@ class SharedServices:
     service_api_key_service: ServiceApiKeyService
     memory_service: MemoryService
     llm_token_usage_service: LLMTokenUsageService
+    execution_usage_service: ExecutionUsageService
     status_service: StatusService
     file_service: FileService
     session_service: SessionService
@@ -304,11 +309,16 @@ def fixture_replay_enabled(settings) -> bool:
     return bool(settings.env.lower() != "production" and settings.patrol_fixture_replay_enabled)
 
 
-def _object_storage(resources: ResourceBundle) -> ObjectStoragePort:
-    return create_object_storage_adapter(
+def _object_storage(
+    resources: ResourceBundle,
+    *,
+    wrapper: Callable[[ObjectStoragePort], ObjectStoragePort] | None = None,
+) -> ObjectStoragePort:
+    adapter = create_object_storage_adapter(
         provider=resources.settings.storage_provider,
         client=resources.object_storage_client,
     )
+    return wrapper(adapter) if wrapper is not None else adapter
 
 
 def _file_storage(
@@ -334,6 +344,7 @@ def build_shared_services(
     resources: ResourceBundle,
     *,
     supervisor: TaskSupervisor,
+    object_storage_wrapper: Callable[[ObjectStoragePort], ObjectStoragePort] | None = None,
     runtime_policy_repository_factory: RuntimePolicyRepositoryFactory = (
         _default_runtime_policy_repository
     ),
@@ -450,8 +461,7 @@ def build_shared_services(
         endpoint=settings.search_endpoint,
         api_key=settings.search_api_key,
     )
-    image_generator = ProviderImageGenerator(outbound_policy=outbound_policy)
-    object_storage = _object_storage(resources)
+    object_storage = _object_storage(resources, wrapper=object_storage_wrapper)
     file_storage = _file_storage(resources, uow_factory=uow_factory)
     activity_objects = ActivityObjectStore(object_storage)
     # Dual-process identity (D14/P2-16①): the execution kernel graph carries an
@@ -490,13 +500,6 @@ def build_shared_services(
     run_projection = PostgresRunProjection(
         session_factory=resources.postgres.session_factory,
         authorization=execution_authorization,
-    )
-    run_admission_service = RunAdmissionService(
-        command_ingress=command_ingress,
-        activity_objects=activity_objects,
-        policy_heads=runtime_policy_reader,
-        # Hard per-scope root admission ceiling including pending commands (0 disables).
-        max_active_runs_per_scope=settings.execution_max_active_runs_per_scope,
     )
     run_control_service = RunControlService(
         commands=command_ingress,
@@ -562,11 +565,29 @@ def build_shared_services(
         uow_factory=uow_factory,
         usage_query=quota_usage_query,
     )
+    from app.composition.evaluation import build_budget_authority
+    from app.composition.evaluation_execution import configured_execution_policy
+    from app.composition.physical_budget import configured_physical_policy
+    from app.infrastructure.execution.budget_dispatch import DurableBudgetDispatchService
+
+    budget_authority = build_budget_authority(settings)
+    from app.infrastructure.execution.direct_physical_dispatch import DirectPhysicalDispatchService
+
+    direct_physical_dispatch = DirectPhysicalDispatchService(
+        uow_factory=uow_factory,
+        inventory=budget_authority.inventory if budget_authority else None,
+        physical_policy=configured_physical_policy(settings),
+    )
+    image_generator = ProviderImageGenerator(
+        outbound_policy=outbound_policy,
+        physical_dispatch=direct_physical_dispatch,
+    )
     inference_model_service = InferenceModelService(
         uow_factory=uow_factory,
         provider_catalog=inference_provider,
         model_client_factory=inference_provider,
         embedding_factory=inference_provider,
+        physical_dispatch=direct_physical_dispatch,
     )
     inference_endpoint_service = InferenceEndpointService(
         uow_factory=uow_factory,
@@ -582,6 +603,7 @@ def build_shared_services(
         bindings=inference_binding_service,
         models=inference_model_service,
         embedding_factory=inference_provider,
+        physical_dispatch=direct_physical_dispatch,
     )
     capability_service = CapabilityService(
         bindings=inference_binding_service,
@@ -610,6 +632,35 @@ def build_shared_services(
         embeddings=embedding_service,
     )
     llm_token_usage_service = LLMTokenUsageService(uow_factory=uow_factory)
+
+    @asynccontextmanager
+    async def usage_repositories():
+        async with resources.postgres.session_factory() as session:
+            await configure_session_authorization(session, execution_authorization)
+            yield DBExecutionUsageRepository(
+                session, signing_secret=settings.database_authorization_signing_secret
+            )
+            await session.commit()
+
+    physical_dispatch = DurableBudgetDispatchService(
+        uow_factory=uow_factory,
+        inventory=budget_authority.inventory if budget_authority else None,
+        physical_policy=configured_physical_policy(settings),
+        execution_policy=configured_execution_policy(settings),
+    )
+    execution_usage_service = ExecutionUsageService(
+        repository_context=usage_repositories,
+        physical_dispatch=physical_dispatch,
+        admission_authorization=execution_authorization,
+    )
+    run_admission_service = RunAdmissionService(
+        command_ingress=command_ingress,
+        configuration_resolver=execution_usage_service.admission_resolver(inference_model_service),
+        activity_objects=activity_objects,
+        policy_heads=runtime_policy_reader,
+        # Hard per-scope root admission ceiling including pending commands (0 disables).
+        max_active_runs_per_scope=settings.execution_max_active_runs_per_scope,
+    )
     file_service = FileService(uow_factory=uow_factory, file_storage=file_storage)
 
     knowledge_version_service = KnowledgeVersionService(uow_factory=uow_factory)
@@ -640,7 +691,15 @@ def build_shared_services(
         inference_bindings=inference_binding_service,
         quota_service=quota_service,
     )
+    from app.infrastructure.repositories.postgres_artifact_upload_intents import (
+        PostgresArtifactUploadIntentWriter,
+    )
+
     artifact_service = ArtifactService(
+        upload_intents=PostgresArtifactUploadIntentWriter(
+            resources.postgres.upload_intent_session_factory,
+            signing_secret=resources.settings.database_authorization_signing_secret,
+        ),
         uow_factory=uow_factory,
         object_storage=object_storage,
         file_storage=file_storage,
@@ -782,6 +841,7 @@ def build_shared_services(
         service_api_key_service=service_api_key_service,
         memory_service=memory_service,
         llm_token_usage_service=llm_token_usage_service,
+        execution_usage_service=execution_usage_service,
         status_service=status_service,
         file_service=file_service,
         session_service=session_service,

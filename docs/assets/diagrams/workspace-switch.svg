@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Teams · Workspace switching and generation invalidation</title><desc id="desc">The provider invalidates old authenticated resources before publishing the selected workspace.</desc>
+<style>text {font-family: Helvetica, Arial, sans-serif;fill:#111827} .secondary {fill:#6b7280}</style>
+<rect width="1400" height="900" fill="#ffffff" data-graph-role="background"/>
+<defs><marker id="blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#2563eb"/></marker><marker id="green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#16a34a"/></marker></defs>
+<text x="50" y="62" font-size="28" font-weight="600" data-graph-role="label">Teams · Workspace switching and generation invalidation</text>
+<text x="50" y="98" font-size="15" class="secondary" data-graph-role="label">The provider invalidates old authenticated resources before publishing the selected workspace.</text>
+<rect id="user" data-node-id="user" data-graph-role="node" x="45" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="150" y="170" font-size="17" font-weight="600" text-anchor="middle">User</text>
+<text x="150" y="192" font-size="12" class="secondary" text-anchor="middle">Authenticated identity</text>
+<line x1="150" y1="210" x2="150" y2="750" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="switch" data-node-id="switch" data-graph-role="node" x="305" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="410" y="170" font-size="17" font-weight="600" text-anchor="middle">WorkspaceSwitcher</text>
+<text x="410" y="192" font-size="12" class="secondary" text-anchor="middle">UI selector</text>
+<line x1="410" y1="210" x2="410" y2="750" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="scope" data-node-id="scope" data-graph-role="node" x="565" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="670" y="170" font-size="17" font-weight="600" text-anchor="middle">ClientDataProvider</text>
+<text x="670" y="192" font-size="12" class="secondary" text-anchor="middle">Scope + generation</text>
+<line x1="670" y1="210" x2="670" y2="750" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="storage" data-node-id="storage" data-graph-role="node" x="825" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="930" y="170" font-size="17" font-weight="600" text-anchor="middle">localStorage</text>
+<text x="930" y="192" font-size="12" class="secondary" text-anchor="middle">User-keyed workspace</text>
+<line x1="930" y1="210" x2="930" y2="750" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="api" data-node-id="api" data-graph-role="node" x="1085" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="1190" y="170" font-size="17" font-weight="600" text-anchor="middle">fetch.ts / API</text>
+<text x="1190" y="192" font-size="12" class="secondary" text-anchor="middle">Header + authorization</text>
+<line x1="1190" y1="210" x2="1190" y2="750" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="user" data-target="switch" d="M 150,240 L 410,240" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="280.0" y="228" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">Select workspace</text>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="switch" data-target="scope" d="M 410,310 L 670,310" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="540.0" y="298" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">setWorkspaceId(team or personal)</text>
+<rect x="682" y="358" width="215" height="40" rx="5" fill="#f0fdf4" stroke="#d1d5db" data-graph-role="decoration"/>
+<text x="693" y="383" font-size="13" class="secondary">Invalidate old scope generation</text>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="scope" data-target="storage" d="M 670,450 L 930,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="800.0" y="438" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">Persist per-user key + header mirror</text>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="scope" data-target="switch" d="M 670,520 L 410,520" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="540.0" y="508" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">Publish next scope revision</text>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="switch" data-target="user" d="M 410,590 L 150,590" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="280.0" y="578" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">Full page reload</text>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="user" data-target="api" d="M 150,660 L 1190,660" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="670.0" y="648" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">Subsequent scoped API requests</text>
+<rect x="963" y="708" width="215" height="40" rx="5" fill="#f0fdf4" stroke="#d1d5db" data-graph-role="decoration"/>
+<text x="974" y="733" font-size="13" class="secondary">Attach X-Workspace-Id if team</text>
+<text x="50" y="805" font-size="14" class="secondary" data-graph-role="label">Anonymous state cannot read authenticated resources; a late old-generation response cannot populate the new scope.</text>
+<text x="50" y="830" font-size="14" class="secondary" data-graph-role="label">The server validates current team roles. Omitting X-Workspace-Id selects personal scope.</text>
+</svg>

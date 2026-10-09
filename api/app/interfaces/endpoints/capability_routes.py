@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.application.services.capability_service import CapabilityService
+from app.application.services.capability_service import CapabilityService, execution_grants
 from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context
 from app.interfaces.schemas.base import Response
@@ -16,4 +16,8 @@ async def get_capabilities(
     service: CapabilityService = Depends(get_capability_service),
 ) -> Response[CapabilityResponse]:
     snapshot = await service.get_capabilities(ctx.scope)
-    return Response.success(CapabilityResponse.model_validate(snapshot.model_dump()))
+    return Response.success(
+        CapabilityResponse.model_validate(
+            {**snapshot.model_dump(), "grants": execution_grants(ctx)}
+        )
+    )

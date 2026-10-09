@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="740" viewBox="0 0 1440 740" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Frontend · Source and contract boundaries</title>
+<desc id="desc">Hooks own execution responses; provider caches and translation catalogs have separate ownership. Additional contracts: src/lib/execution-view, analysis-view, evaluation-view; src/lib/session-events.ts. npm scripts verify formatting, OpenAPI types, i18n, TypeScript, lint, Vitest and the production build.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="740" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Frontend · Source and contract boundaries</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Hooks own execution responses; provider caches and translation catalogs have separate ownership.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="pages" data-target="components" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="components" data-target="hooks" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="hooks" data-target="api" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="scope" data-target="hooks" d="M 780,500 L 840,500 L 840,270 L 900,270" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="components" data-target="i18n" d="M 630,280 L 630,365 L 210,365 L 210,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="pages" data-node-id="pages" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="213" font-size="20" font-weight="600">App Router pages</text>
+<text x="78" y="240" font-size="15" class="secondary">src/app: sessions / runs / analysis</text>
+<text x="78" y="262" font-size="14" class="secondary">evaluation / patrol / admin / teams</text>
+</g>
+<g id="components" data-node-id="components" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Domain components</text>
+<text x="498" y="240" font-size="15" class="secondary">src/components: domain surfaces</text>
+<text x="498" y="262" font-size="14" class="secondary">Shared Radix UI primitives</text>
+</g>
+<g id="hooks" data-node-id="hooks" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Domain hooks</text>
+<text x="918" y="240" font-size="15" class="secondary">src/hooks: requests / playback / bodies</text>
+<text x="918" y="262" font-size="14" class="secondary">Scope revision + request generation</text>
+</g>
+<g id="i18n" data-node-id="i18n" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Internationalization</text>
+<text x="78" y="510" font-size="15" class="secondary">src/i18n + messages/en.json, zh.json</text>
+<text x="78" y="532" font-size="14" class="secondary">Strict catalog and runtime-key checks</text>
+</g>
+<g id="scope" data-node-id="scope" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Scope + caches</text>
+<text x="498" y="510" font-size="15" class="secondary">src/providers + src/lib/data</text>
+<text x="498" y="532" font-size="14" class="secondary">Provider cache: inference / skills</text>
+</g>
+<g id="api" data-node-id="api" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Typed API clients</text>
+<text x="918" y="510" font-size="15" class="secondary">src/lib/api; generated/schema.d.ts</text>
+<text x="918" y="532" font-size="14" class="secondary">Opaque cursors + scoped options</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">render</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">consume</text>
+<text x="1153" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">request</text>
+<text x="802" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">scope</text>
+<text x="420" y="353" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">translate</text>
+<g data-graph-role="legend">
+<line x1="60" y1="612" x2="96" y2="612" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="617" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="612" x2="536" y2="612" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="617" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="612" x2="976" y2="612" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="617" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="660" font-size="15" class="secondary" data-graph-role="label">Additional contracts: src/lib/execution-view, analysis-view, evaluation-view; src/lib/session-events.ts.</text>
+<text x="60" y="684" font-size="15" class="secondary" data-graph-role="label">npm scripts verify formatting, OpenAPI types, i18n, TypeScript, lint, Vitest and the production build.</text>
+</svg>

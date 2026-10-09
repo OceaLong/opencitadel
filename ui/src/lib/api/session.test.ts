@@ -139,3 +139,31 @@ describe("sessionApi.streamSessions", () => {
     await Promise.resolve();
   });
 });
+it("actual session SSE parser and normalization retain transport Run identity", async () => {
+  const { normalizeEvent } = await import("@/lib/session-events");
+  const body = {
+    run_id: "R2",
+    event_id: "opaque-created",
+    role: "user",
+    message: "new turn",
+    persist: true,
+  };
+  mocks.createSSEStream.mockResolvedValue(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(`event: message\ndata: ${JSON.stringify(body)}\n\n`),
+        );
+        controller.close();
+      },
+    }),
+  );
+  const received = vi.fn();
+  sessionApi.chat(
+    "s",
+    { message: "new turn", request_id: "request" },
+    (event) => received(normalizeEvent(event)),
+    () => {},
+  );
+  await vi.waitFor(() => expect(received).toHaveBeenCalledWith({ type: "message", data: body }));
+});

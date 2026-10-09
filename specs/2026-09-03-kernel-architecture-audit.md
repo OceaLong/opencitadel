@@ -1,3 +1,5 @@
+> **历史归档 / Historical archive**：本文件记录 2026-09-03/04 的设计、计划或当时审计结果，不是当前实现、部署操作或验收状态。原文的待实现项、版本数量、命令与暂存要求仅属于历史上下文，不适用于当前工作。当前架构以[架构总览](../docs/architecture/overview.zh-CN.md)、[执行内核](../docs/architecture/execution-kernel.zh-CN.md)、[评测控制面](../docs/architecture/evaluation-control-plane.zh-CN.md)及[容量协议](../scripts/execution_capacity/REFERENCE.md)为准。AC21 完整容量验收仍未完成；不从历史“全绿”结论推导当前状态。
+
 # 执行内核与可插拔扩展 · 架构级审计报告（2026-09-03）
 
 审计对象：`api/app/domain/execution`（事件溯源领域层）、`api/app/application/execution`（决策/活动/收发件箱/定时器运行时）、可插拔扩展面（decisions / activity_registry / tools / skills / MCP / A2A / LLM & search 工厂）、投影与分层边界、`composition/kernel.py` 装配、双进程共享组件。四个并行深读代理全量通读约 1.4 万行内核代码，最高严重度发现已人工抽查证实（file:line 均已核对）。

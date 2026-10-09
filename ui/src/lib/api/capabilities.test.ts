@@ -17,7 +17,7 @@ describe("capabilitiesApi", () => {
 
     await capabilitiesApi.get();
 
-    expect(get).toHaveBeenCalledWith("/capabilities");
+    expect(get).toHaveBeenCalledWith("/capabilities", undefined, undefined);
   });
 
   it("treats only available capabilities as admitted", () => {

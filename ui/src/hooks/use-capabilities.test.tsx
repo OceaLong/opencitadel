@@ -8,6 +8,8 @@ import { renderComponent } from "@/test-utils/render";
 const mocks = vi.hoisted(() => ({
   auth: { loading: true, user: null as { id: string } | null },
   get: vi.fn(),
+  workspaceId: "",
+  scopeRevision: 0,
 }));
 
 vi.mock("@/lib/api/capabilities", () => ({
@@ -16,6 +18,13 @@ vi.mock("@/lib/api/capabilities", () => ({
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => mocks.auth,
+}));
+
+vi.mock("@/providers/client-data-provider", () => ({
+  useClientDataScope: () => ({
+    scope: mocks.auth.user ? { userId: mocks.auth.user.id, workspaceId: mocks.workspaceId } : null,
+    scopeRevision: mocks.scopeRevision,
+  }),
 }));
 
 import { CAPABILITIES_CHANGED_EVENT } from "@/lib/events";
@@ -36,6 +45,8 @@ async function rerender(root: Awaited<ReturnType<typeof renderComponent>>["root"
 
 describe("useCapabilities authentication lifecycle", () => {
   beforeEach(() => {
+    mocks.workspaceId = "";
+    mocks.scopeRevision = 0;
     mocks.auth.loading = true;
     mocks.auth.user = null;
     mocks.get.mockResolvedValue({
@@ -101,4 +112,37 @@ describe("useCapabilities authentication lifecycle", () => {
     window.dispatchEvent(new Event("focus"));
     expect(mocks.get).toHaveBeenCalledTimes(3);
   });
+});
+
+it("rejects late old-workspace success, error and finally", async () => {
+  mocks.auth.loading = false;
+  mocks.auth.user = { id: "user-1" };
+  let oldResolve!: (value: unknown) => void;
+  let nextResolve!: (value: unknown) => void;
+  mocks.get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        oldResolve = resolve;
+      }),
+  );
+  const { container, root, unmount } = await renderComponent(<Probe />);
+  mocks.workspaceId = "team-2";
+  mocks.scopeRevision++;
+  mocks.get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        nextResolve = resolve;
+      }),
+  );
+  await rerender(root);
+  await act(async () => {
+    oldResolve({ items: { chat: { state: "available" } } });
+  });
+  expect(container.textContent).toBe("loading");
+  expect(mocks.get.mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: "team-2" });
+  await act(async () => {
+    nextResolve({ items: { chat: { state: "denied" } } });
+  });
+  expect(container.textContent).toBe("denied");
+  await unmount();
 });

@@ -46,6 +46,10 @@ class _FakePostgres:
 
         return unopened_session
 
+    @property
+    def upload_intent_session_factory(self):
+        return self.session_factory
+
     async def init(self) -> None:
         self.events.append("postgres:start")
 
@@ -119,8 +123,19 @@ def _resource_factories(events: list[str]) -> ResourceFactories:
     )
 
 
+@pytest.fixture(autouse=True)
+def physical_startup(monkeypatch):
+    calls = []
+
+    async def verify(**kwargs):
+        calls.append(kwargs["settings"])
+
+    monkeypatch.setattr("app.composition.physical_budget.verify_physical_policy", verify)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_api_runtime_builds_complete_graph_without_kernel_workers() -> None:
+async def test_api_runtime_builds_complete_graph_without_kernel_workers(physical_startup) -> None:
     """API composition must expose its graph without accidentally owning workers."""
     events: list[str] = []
     repository = _PolicyRepository()
@@ -130,6 +145,14 @@ async def test_api_runtime_builds_complete_graph_without_kernel_workers() -> Non
         factories=_resource_factories(events),
         runtime_policy_repository_factory=lambda _resources: repository,
     ) as runtime:
+        from app.application.services.execution_content_service import ExecutionContentService
+        from app.domain.models.authorization import AuthorizationContext
+
+        content = runtime.execution_content_factory(AuthorizationContext.anonymous())
+        assert isinstance(content, ExecutionContentService)
+        assert content.files is runtime.file_service
+        assert content.artifacts is runtime.artifact_service
+        assert physical_startup == [TEST_SETTINGS]
         assert isinstance(runtime.auth_service, AuthService)
         assert isinstance(runtime.session_service, SessionService)
         assert isinstance(runtime.runtime_policy_service, RuntimePolicyService)

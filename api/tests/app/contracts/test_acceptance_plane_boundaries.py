@@ -12,7 +12,7 @@ COMPOSE_PATH = REPOSITORY_ROOT / "docker-compose.yml"
 EVIDENCE_SCHEMA_PATH = REPOSITORY_ROOT / "contracts/acceptance-evidence.schema.json"
 CI_WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/ci.yml"
 
-REQUIRED_ACCEPTANCE_IDS = frozenset(
+REQUIRED_ACCEPTANCE_IDS = frozenset(f"AC{i:02d}" for i in range(1, 23)) | frozenset(
     {
         "ID-LOGIN",
         "ID-LOGOUT",

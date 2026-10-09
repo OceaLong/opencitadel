@@ -20,7 +20,9 @@ cd opencitadel
 make quickstart
 ```
 
-脚本会将 `.env.example` 复制为 `.env`，生成密钥，并提示你设置 `BOOTSTRAP_ADMIN_PASSWORD`。
+首次运行会将 `.env.example` 复制为 `.env`，在 `openssl` 可用时生成密钥，并提示设置
+`BOOTSTRAP_ADMIN_PASSWORD`。已有 `.env` 会被保留；再次运行前请检查其中的密钥、
+Profile 和存储设置。非交互运行必须事先提供密码。
 
 > **仅用于本地体验：** quickstart 会主动设置 `ENV=development`、
 > `COOKIE_SECURE=false`、内置 MinIO 与 localhost URL。不要把该 `.env`
@@ -65,9 +67,9 @@ make quickstart
 
 观察 Agent 规划、在沙箱中使用工具，并实时流式输出结果。
 
-## 完全离线（可选）
+## 本地推理（可选）
 
-适用于气隙或纯本地部署，在 `.env` 中设置：
+使用本地推理时，在 `.env` 中设置：
 
 ```bash
 COMPOSE_PROFILES=local
@@ -82,14 +84,15 @@ OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 保留精确白名单，不要使用通配符。完整本地模式说明见
 [部署指南 — local 模式](../operations/deployment.zh-CN.md#local-模式配置)。
 
-**注意：** 较小的本地模型可能难以完成多步 Agent 任务。自带云端 API Key 能获得最佳首次体验。
+气隙安装需要在断网前备齐容器镜像、模型权重与依赖，并使用不依赖远程来源的任务。
+本地推理本身不会让浏览器和集成离线。Agent 工作流所选模型必须支持工具调用。
 
 ## 故障排查
 
-| 问题 | 解决方法 |
-|------|----------|
-| 登录 502 | 等待 `opencitadel-migrate` 完成；查看 `docker compose logs opencitadel-migrate` |
-| Agent 无响应 | 确认有效 `chat` Binding 能解析到可访问 Model 与 Endpoint Credential |
+| 问题           | 解决方法                                                                         |
+| -------------- | -------------------------------------------------------------------------------- |
+| 登录 502       | 等待 `opencitadel-migrate` 完成；查看 `docker compose logs opencitadel-migrate`  |
+| Agent 无响应   | 确认有效 `chat` Binding 能解析到可访问 Model 与 Endpoint Credential              |
 | OOM / 运行缓慢 | 参见 [部署指南](../operations/deployment.zh-CN.md) 内存调优；在小 VM 上启用 swap |
 
 ## 下一步

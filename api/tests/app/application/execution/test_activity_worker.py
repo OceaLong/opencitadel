@@ -769,3 +769,159 @@ async def test_run_context_unavailable_during_rebuild_defers_instead_of_failing(
     # No settlement command was submitted: the activity is untouched.
     assert service.commands == []
     assert handler.calls == []
+
+
+@pytest.mark.asyncio
+async def test_actual_claim_start_ids_change_but_settlement_identity_is_preserved():
+    from uuid import NAMESPACE_URL, uuid5
+
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    registry.register(Handler(idempotent=True))
+    for generation in (3, 4, 4):
+        current = claim().model_copy(update={"claim_generation": generation})
+        worker = ActivityWorker(
+            store=FakeStore((current,)),
+            run_contexts=FakeRunContexts(),
+            run_service=service,
+            registry=registry,
+            worker_id="f02",
+        )
+        await worker.run_once(now=NOW, limit=1)
+    starts = [c for c, _ in service.commands if c.command_type == "MarkActivityCallStarted"]
+    outcomes = [c for c, _ in service.commands if c.command_type == "CompleteActivity"]
+    assert [c.payload["claim_generation"] for c in starts] == [3, 4, 4]
+    assert all(c.command_schema_version == 2 for c in starts + outcomes)
+    assert starts[0].command_id != starts[1].command_id == starts[2].command_id
+    assert {c.command_id for c in outcomes} == {
+        uuid5(NAMESPACE_URL, f"opencitadel:{ACTIVITY_ID}:CompleteActivity")
+    }
+
+
+@pytest.mark.asyncio
+async def test_execution_gate_defers_before_call_started_or_handler():
+    from app.application.execution.run_context import RunContextUnavailableError
+
+    candidate = claim()
+    store = FakeStore((candidate,))
+    handler = Handler(idempotent=True)
+
+    class Gate:
+        async def before_activity(self, claim, run):
+            raise RunContextUnavailableError("execution lease not active")
+
+    registry = ActivityRegistry()
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=FakeRunService(),
+        registry=registry,
+        worker_id="test-gated",
+        execution_gate=Gate(),
+    )
+    result = await worker.run_once(now=NOW, limit=1)
+    assert result.deferred == 1
+    assert not store.started
+    assert not handler.calls
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_post_start_timeout_cannot_schedule_retry() -> None:
+    from app.application.execution.decisions.base import fail_for_activity
+
+    store = FakeStore((claim(timeout_at=NOW + timedelta(milliseconds=30)),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = BlockingHandler(idempotent=False)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="timeout-worker",
+    )
+    stats = await worker.run_once(now=NOW, limit=1)
+    assert len(handler.calls) == 1
+    assert stats.unknown == 1
+    outcome = service.commands[-1][0]
+    assert outcome.command_type == "MarkActivityOutcomeUnknown"
+    assert outcome.payload["failure_code"] == "NON_IDEMPOTENT_OUTCOME_UNKNOWN"
+    state = RunState(
+        run_id=RUN_ID,
+        family=RunFamily.AGENT,
+        status=RunStatus.RUNNING,
+        stream_version=4,
+        policy_snapshot=run_policy_snapshot_json("agent"),
+        activity_failure_codes=((ACTIVITY_ID, 0, outcome.payload["failure_code"]),),
+    )
+    decision = fail_for_activity(state, "unknown", activity_id=ACTIVITY_ID, max_retries=3)
+    assert decision.payload["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_post_start_exception_is_unknown() -> None:
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    registry.register(UnexpectedFailureHandler(idempotent=False))
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="exception-worker",
+    )
+    stats = await worker.run_once(now=NOW, limit=1)
+    assert stats.unknown == 1
+    assert service.commands[-1][0].command_type == "MarkActivityOutcomeUnknown"
+
+
+@pytest.mark.asyncio
+async def test_httpx_read_loss_uses_unknown_not_infrastructure_defer_or_blind_retry() -> None:
+    """Source-only classification regression; fake handler is NOT physical-write evidence."""
+    import httpx
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.application.execution.decisions.base import fail_for_activity
+
+    class ReadLossHandler(UnexpectedFailureHandler):
+        async def execute(self, request, context):
+            raise httpx.ReadError("owned receipt withheld")
+
+    error = httpx.ReadError("owned receipt withheld")
+    assert not isinstance(error, (SQLAlchemyError, OSError, TimeoutError))
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    registry.register(ReadLossHandler(idempotent=False))
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="receipt-classification-only",
+        infrastructure_errors=(SQLAlchemyError, OSError, TimeoutError),
+    )
+    stats = await worker.run_once(now=NOW, limit=1)
+    assert stats.unknown == 1
+    assert store.deferred == []
+    assert len(store.started) == 1
+    outcome = service.commands[-1][0]
+    assert outcome.command_type == "MarkActivityOutcomeUnknown"
+    assert outcome.payload["failure_code"] == "NON_IDEMPOTENT_OUTCOME_UNKNOWN"
+    state = RunState(
+        run_id=RUN_ID,
+        family=RunFamily.AGENT,
+        status=RunStatus.RUNNING,
+        stream_version=4,
+        policy_snapshot=run_policy_snapshot_json("agent"),
+        activity_failure_codes=((ACTIVITY_ID, 0, outcome.payload["failure_code"]),),
+    )
+    assert (
+        fail_for_activity(state, "unknown", activity_id=ACTIVITY_ID, max_retries=3).payload[
+            "retryable"
+        ]
+        is False
+    )

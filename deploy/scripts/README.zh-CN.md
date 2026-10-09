@@ -6,10 +6,10 @@
 
 ## 脚本列表
 
-| 脚本 | 用途 |
-|------|------|
-| [`host-tune.sh`](host-tune.sh) | 16 GB 单节点生产的内核 sysctl、swap、Docker daemon 调优 |
-| [`verify-host-health.sh`](verify-host-health.sh) | 调优前后采集内存、swap 与容器指标 |
+| 脚本                                             | 用途                                                 |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| [`host-tune.sh`](host-tune.sh)                   | 16 GB 单节点生产的内核 sysctl、swap、Docker 日志轮转 |
+| [`verify-host-health.sh`](verify-host-health.sh) | 调优前后采集内存、swap 与容器指标                    |
 
 ## 用法
 
@@ -19,7 +19,7 @@
 # 调优前 — 基线快照
 bash deploy/scripts/verify-host-health.sh before
 
-# 应用主机调优（swap、sysctl、Docker 限制）
+# 应用主机调优（swap、sysctl、Docker 日志轮转）
 sudo bash deploy/scripts/host-tune.sh
 
 # 调优后 — 对比快照
@@ -27,6 +27,8 @@ bash deploy/scripts/verify-host-health.sh after
 ```
 
 输出默认写入 `/tmp/opencitadel-health/health-{phase}-{timestamp}.txt`。
+
+`host-tune.sh` 默认创建 4 GiB `/swapfile`（可用 `SWAP_SIZE_GB`、`SWAP_FILE` 覆盖），设置 `somaxconn=65535`、`tcp_max_syn_backlog=65535`、`swappiness=10`，并设置 JSON 日志每份 100 MB、保留 3 份。若 Docker 正在运行会重启 daemon，应在维护窗口执行。脚本不设置容器内存或 CPU 配额；这些由 Compose 与 Runtime Policy 配置。快照脚本只采集指标，不执行调优或容量验收，`OUT_DIR` 可覆盖输出目录。
 
 ## 相关文档
 

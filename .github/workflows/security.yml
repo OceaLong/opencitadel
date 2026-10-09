@@ -139,6 +139,10 @@ jobs:
             context: api
             file: api/Dockerfile
             target: api
+          - name: sandbox-broker
+            context: api
+            file: api/Dockerfile
+            target: sandbox-broker
           - name: ui
             context: ui
             file: ui/Dockerfile

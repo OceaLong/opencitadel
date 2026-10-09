@@ -97,3 +97,38 @@ def test_anthropic_synthetic_tool_stream_yields_content_not_tool_calls():
     assert chunks[1] == {"content": ':"ok"}'}
     assert all("tool_calls" not in chunk for chunk in chunks)
     assert chunks[-1]["usage"]["total_tokens"] == 3
+
+
+def test_anthropic_unsolicited_synthetic_tool_is_preserved_as_tool_call():
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "attack",
+                        "name": "emit_result",
+                        "input": {"score": 4},
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    async def run():
+        llm = AnthropicLLM(
+            resolved_chat_model(
+                provider=InferenceProvider.ANTHROPIC, credential="test", model_name="claude-test"
+            )
+        )
+
+        async def post(payload):
+            assert "tools" not in payload
+            return Response()
+
+        llm._post_messages = post
+        response = await llm.invoke([{"role": "user", "content": "score"}])
+        assert response["tool_calls"][0]["function"]["name"] == "emit_result"
+
+    asyncio.run(run())

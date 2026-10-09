@@ -2,28 +2,18 @@
 
 [简体中文](runtime-policy-control-plane.zh-CN.md)
 
-Runtime Policy is the only authority for live behavioral settings. PostgreSQL
+Runtime Policy is the authority for typed live domain policy settings.
+Deployment Settings retain process safety and maintenance limits described in
+[configuration sources](config-source-governance.md). PostgreSQL
 stores immutable typed revisions and one atomic head; Redis carries refresh hints
 only and is never a source of truth.
 
-```mermaid
-flowchart LR
-  Admin[Admin UI / API] -->|CAS head version| DB[(PostgreSQL)]
-  DB --> ER[Execution revision]
-  DB --> OR[Operations revision]
-  DB --> H[Atomic head]
-  H --> Reader[Verified process-local reader]
-  Reader --> API[API admission]
-  Reader --> Kernel[Execution kernel]
-  Reader --> Broker[Sandbox create envelope]
-  Admin -. refresh hint .-> Redis[(Redis)]
-  Redis -. invalidate / refresh .-> Reader
-```
+![runtime policy](../assets/diagrams/runtime-policy.png)
 
 ## Policy families
 
 Execution Policy is snapshot semantics. Admission writes its revision ID and
-complete validated policy snapshot into every Run. Agent limits, model
+validated common plus family-bounded policy snapshot into every Run. Agent limits, model
 resilience, activity timeouts, memory, and knowledge behavior therefore
 cannot drift during retries, approvals, restarts, or replay.
 
@@ -44,13 +34,19 @@ revision and carries a monotonically increasing version. Readers verify:
 3. the pair belongs to the current atomic head;
 4. the last verified read is within the configured staleness window.
 
-Integrity failure, unavailable storage, and excessive staleness are distinct
-errors and all fail closed at behavioral boundaries. Readiness exposes the same
-stable reason keys.
+Integrity failure and excessive staleness fail closed at fresh behavioral
+boundaries. Before initialization, storage unavailability blocks work. After a
+verified read, transient storage failure may serve the cached pair within the
+maximum staleness window; readiness still reports `runtimePolicy.unavailable`.
+Persistent policy/integrity errors are rejected immediately. Readiness exposes
+stable reason keys for these distinct cases.
 
 ## Mutation model
 
-Only administrators may create or activate revisions. Writes include the
+Only administrators may create and activate revisions through
+`/api/runtime-policies/{execution|operations}/revisions`; each successful create
+atomically activates the new revision. History and restore are under the same
+family path. Writes include the
 expected head version and use compare-and-swap. Conflicts return the current head
 without discarding the caller's draft. Restore is append-only: it copies a
 historical policy into a new revision and atomically activates that revision.
@@ -61,9 +57,11 @@ preserving edits until the operator explicitly reloads.
 
 ## Process lifecycle
 
-API, execution kernel, and migration bootstrap initialize their readers from
-PostgreSQL. A short local refresh interval bounds propagation even if Redis is
-down. Refresh hints reduce latency but contain no policy data. Processes reject
+API and execution kernel initialize readers from PostgreSQL; migration
+bootstrap verifies or seeds the typed revision/head pair. A short local refresh interval bounds propagation even if Redis is
+down. Fresh Execution Policy reads attempt PostgreSQL on every admission;
+Operations reads refresh when due and enforce the verified-cache age. Refresh
+hints reduce latency but contain no policy data. Processes reject
 policy-dependent work until initialization and verification succeed.
 
 ## Sandbox boundary

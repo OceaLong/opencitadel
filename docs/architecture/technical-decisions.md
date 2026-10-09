@@ -24,9 +24,10 @@ authoritative PostgreSQL result.
 
 ## 3. PostgreSQL event-sourced execution
 
-Every Agent, Ask, resource build, automation, patrol, and remediation action is
-a typed Run. Append-only, hash-chained execution events are the only lifecycle
-facts. Command inbox idempotency, durable Activities, timers, outbox delivery,
+Every Agent, Ask, resource build, automation, patrol, remediation action, and
+evaluation subject or Judge execution is a typed Run. Append-only, hash-chained
+execution events are the only lifecycle facts. Command inbox idempotency,
+durable Activities, timers, outbox delivery,
 integrity-checked snapshots, and rebuildable projections are implemented in
 the same PostgreSQL database.
 
@@ -91,10 +92,30 @@ key writes new values and an explicit previous-key ring supports planned key
 rotation. Audit signatures have a separate key ring. Plaintext credentials are
 never a supported persistence format.
 
-## 12. One greenfield schema
+## 12. One greenfield schema lineage
 
-Alembic contains one initial revision for the current catalog. The project
-does not ship execution history conversion, alternate event schemas, or
-runtime routing between engines. Structural changes update the greenfield
-schema until the first supported production release establishes an upgrade
-contract.
+Alembic has one linear lineage from `0001greenfield` through
+`0030evaluation_judge_history`. Later revisions add execution views, resource
+pins, evaluation, analysis, comparisons, and exports; a new database applies
+the complete lineage with `alembic upgrade head`. There are no alternate
+execution schemas, history-conversion engines, or runtime engine routing.
+This revision chain does not establish a supported upgrade contract for older
+production releases.
+
+## 13. Captured analysis with current authorization
+
+Analysis sources, comparison revisions, and export jobs capture fixed Run and
+evaluation revisions and bounded source facts. Continued reads validate current
+principal/workspace authority and the captured resource closure; a historical
+capture never grants access after revocation. Native database functions and
+FORCE RLS enforce the same scope at capture, paging, worker I/O, and download.
+Expiring worker leases and object write intents fence publication and cleanup.
+
+## 14. Evaluation within the execution kernel
+
+Evaluation scheduling, reconciliation, rule/Judge scoring, and cleanup are
+supervised kernel consumers over durable tables. Subject and Judge work uses
+the existing Run/Activity protocol. Physical model dispatch reserves budget
+before provider access, and formal usage evidence settles it. An unknown
+external outcome retains its accounting obligation; closing admission or
+cleaning a sandbox does not manufacture settlement or release unknown holds.

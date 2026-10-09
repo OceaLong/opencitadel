@@ -26,7 +26,7 @@ test("defines the complete project graph with unconditional teardown", () => {
     identity: ["bootstrap"],
     "control-plane": ["bootstrap"],
     resources: ["control-plane"],
-    execution: ["bootstrap"],
+    execution: ["bootstrap", "control-plane", "resources", "patrol-admin"],
     "patrol-admin": ["control-plane"],
   })) {
     expect(
@@ -52,4 +52,23 @@ test("bootstrap raises the acceptance request budget through a reversible policy
   expect(source).toContain("registerCleanupAction");
   expect(source).toContain("requests_per_minute: 100_000");
   expect(source).toContain('policy: "operations"');
+});
+
+test("execution collects evaluations, workbench and original sessions", () => {
+  const matcher = config.projects?.find(
+    (project) => project.name === "execution",
+  )?.testMatch;
+  const matchers = Array.isArray(matcher) ? matcher : [matcher];
+  const files = [
+    "execution.spec.ts",
+    "execution-workbench.spec.ts",
+    "evaluations.spec.ts",
+    "execution-analysis.spec.ts",
+    "evaluation-governance.spec.ts",
+  ];
+  expect(
+    files.filter((file) =>
+      matchers.some((match) => match instanceof RegExp && match.test(file)),
+    ),
+  ).toEqual(files);
 });

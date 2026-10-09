@@ -31,6 +31,7 @@ from app.domain.models.artifact import Artifact
 from app.interfaces.endpoints.artifact_routes import share_router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.interfaces.service_dependencies import get_artifact_service
+from tests.app.artifact_test_support import UnitOfWorkUploadIntents
 
 
 class _FakeArtifactRepo:
@@ -57,7 +58,11 @@ def _make_service(artifacts: list[Artifact]) -> ArtifactService:
 
         return _cm()
 
-    return ArtifactService(uow_factory=_uow_factory, object_storage=None)
+    return ArtifactService(
+        uow_factory=_uow_factory,
+        object_storage=None,
+        upload_intents=UnitOfWorkUploadIntents(_uow_factory),
+    )
 
 
 def _artifact(**overrides) -> Artifact:

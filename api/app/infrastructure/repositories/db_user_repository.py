@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.user import User
 from app.domain.repositories.user_repository import UserRepository
+from app.infrastructure.execution.original_evidence import retain_read
 from app.infrastructure.models.user import UserORM
 
 _OWNED_RESOURCE_TABLES = (
@@ -29,7 +30,22 @@ class DBUserRepository(UserRepository):
 
     async def get_by_id(self, user_id: str) -> User | None:
         result = await self.db_session.execute(select(UserORM).where(UserORM.id == user_id))
-        record = result.scalar_one_or_none()
+        try:
+            record = result.scalar_one_or_none()
+            retain_read(
+                self.db_session,
+                "principal-source",
+                "db_user_repository.py",
+                {"id": user_id},
+                record,
+                source_result=result,
+            )
+        finally:
+            result.close()
+            synchronous = getattr(self.db_session, "sync_session", self.db_session)
+            forget_result = getattr(synchronous, "forget_result", None)
+            if callable(forget_result):
+                forget_result(result)
         return record.to_domain() if record else None
 
     async def list_by_ids(self, user_ids: list[str]) -> list[User]:

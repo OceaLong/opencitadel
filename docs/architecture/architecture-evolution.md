@@ -20,6 +20,12 @@ processes.
   restoration for execution correctness.
 - Ops Collector and Actuator scale only within their narrow security roles.
 
+The current kernel also supervises separate evaluation scheduler, reconciler,
+scoring, and cleanup loops, plus comparison artifact-diff and export workers.
+These are independently fenced consumers inside `KernelRuntime`, not separate
+services or competing Run authorities. A critical evaluation-loop failure
+withdraws kernel readiness rather than leaving a dead consumer marked ready.
+
 ## Evolution invariants
 
 Any future queue, workflow engine, or service extraction must preserve:
@@ -51,3 +57,14 @@ database saturation, object-store latency, provider quotas, and sandbox
 admission. A growing durable pending age is the primary backpressure signal.
 Autoscaling must have hard concurrency and provider-rate limits to avoid
 amplifying an outage.
+
+Analysis and exports additionally enforce bounded source captures, page sizes,
+captured bytes, and per-caller active jobs. Evaluation admission combines durable
+execution slots, environment leases, and physical model-request budget buckets.
+Releasing execution capacity is distinct from settling accounting obligations;
+unknown external effects retain holds until supported resolution.
+
+Capacity limits in code are not a full-scale acceptance result. The AC21
+reference-environment run remains incomplete: multi-round source cleanup/reuse
+and native client collection are not fully connected. See the current
+[reference protocol and remaining work](../../scripts/execution_capacity/REFERENCE.md).

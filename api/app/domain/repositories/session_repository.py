@@ -91,7 +91,9 @@ class SessionRepository(Protocol):
         """恢复：清空 ``deleted_at``。仅命中回收站中的行；返回是否命中。"""
         ...
 
-    async def purge(self, session_id: str, scope: OwnerScope | None = None) -> bool:
+    async def purge(
+        self, session_id: str, scope: OwnerScope | None = None, *, force: bool = False
+    ) -> bool:
         """清除：物理删除回收站中的会话（``deleted_at`` 非空）；返回是否命中。"""
         ...
 

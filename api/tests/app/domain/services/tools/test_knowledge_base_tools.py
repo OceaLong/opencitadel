@@ -241,6 +241,7 @@ async def test_get_document_uses_bound_version_and_returns_exact_citations():
 
     assert result.citations == [
         KnowledgeCitation(
+            knowledge_base_id="kb1",
             version_id="kbv1",
             document_revision_id="revision-v1",
             doc_id="doc1",
@@ -441,6 +442,7 @@ async def test_graph_search_resolves_missing_endpoint_names_and_evidence():
     assert "entity2" not in result.data
     assert result.citations == [
         KnowledgeCitation(
+            knowledge_base_id="kb1",
             version_id="kbv1",
             document_revision_id="revision-v1",
             doc_id="doc1",

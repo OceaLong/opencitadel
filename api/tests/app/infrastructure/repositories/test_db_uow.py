@@ -2,8 +2,9 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.domain.evaluation.errors import DatasetUnavailable
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.team import TeamRole
@@ -41,6 +42,36 @@ async def test_db_uow_reraises_explicit_commit_integrity_error() -> None:
     with pytest.raises(IntegrityError):
         async with _make_uow(session) as uow:
             await uow.commit()
+
+    session.rollback.assert_awaited_once()
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_db_uow_maps_archived_resource_guard_to_domain_unavailable() -> None:
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    context = AuthorizationContext.for_principal(Principal(user_id="user-1"))
+    with pytest.raises(DatasetUnavailable, match="evaluation_resource_archived"):
+        async with _make_uow(session, authorization_context=context):
+            raise DBAPIError("INSERT", {}, Exception("evaluation_resource_archived"))
+
+    session.rollback.assert_awaited_once()
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_db_uow_preserves_archived_guard_for_system_kernel() -> None:
+    session = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+    context = AuthorizationContext.system("execution-kernel")
+
+    with pytest.raises(DBAPIError, match="evaluation_resource_archived"):
+        async with _make_uow(session, authorization_context=context):
+            raise DBAPIError("INSERT", {}, Exception("evaluation_resource_archived"))
 
     session.rollback.assert_awaited_once()
     session.close.assert_awaited_once()

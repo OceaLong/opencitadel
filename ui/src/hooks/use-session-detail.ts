@@ -36,6 +36,8 @@ export type UseSessionDetailResult = {
   ) => Promise<void>;
   resumeAfterExternalCommand: () => void;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;
+  admissionPending?: boolean;
+  admissionRevision?: number;
   streaming: boolean;
   streamStatus: SessionStreamStatus;
   streamError: Error | null;
@@ -159,6 +161,8 @@ export function useSessionDetail(
     sendMessage: streams.sendMessage,
     resumeAfterExternalCommand: streams.resumeAfterExternalCommand,
     updateSessionConfig,
+    admissionPending: streams.admissionPending,
+    admissionRevision: streams.admissionRevision,
     streaming: streams.streaming,
     streamStatus: streams.streamStatus,
     streamError: streams.streamError,

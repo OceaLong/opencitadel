@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="740" viewBox="0 0 1440 740" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Backend · Module and composition boundaries</title>
+<desc id="desc">Processes construct their own object graph; HTTP dependencies resolve services from app.state. Domain never imports application or infrastructure; application code depends on ports rather than adapters. alembic/versions contains one 0001greenfield → 0030evaluation_judge_history lineage for fresh databases.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="740" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">Backend · Module and composition boundaries</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">Processes construct their own object graph; HTTP dependencies resolve services from app.state.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="http" data-target="app" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="app" data-target="domain" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="entry" data-target="composition" d="M 360,500 L 480,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="composition" data-target="infra" d="M 780,500 L 900,500" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="composition" data-target="app" d="M 630,450 L 630,280" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="infra" data-target="domain" d="M 1110,450 L 1110,280" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<g id="http" data-node-id="http" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="213" font-size="20" font-weight="600">HTTP interfaces</text>
+<text x="78" y="240" font-size="15" class="secondary">app/interfaces/endpoints + schemas</text>
+<text x="78" y="262" font-size="14" class="secondary">Authorization and typed requests</text>
+</g>
+<g id="app" data-node-id="app" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Application layer</text>
+<text x="498" y="240" font-size="15" class="secondary">execution / evaluation / services</text>
+<text x="498" y="262" font-size="14" class="secondary">Ports; UoW; kernel decisions</text>
+</g>
+<g id="domain" data-node-id="domain" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Domain layer</text>
+<text x="918" y="240" font-size="15" class="secondary">execution / evaluation / analysis</text>
+<text x="918" y="262" font-size="14" class="secondary">Typed facts and pure rules</text>
+</g>
+<g id="entry" data-node-id="entry" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="104" y="483" font-size="20" font-weight="600">Process entry points</text>
+<text x="78" y="510" font-size="15" class="secondary">API / kernel / migration processes</text>
+<text x="78" y="532" font-size="14" class="secondary">One settings load per process</text>
+</g>
+<g id="composition" data-node-id="composition" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Typed composition</text>
+<text x="498" y="510" font-size="15" class="secondary">ApiRuntime / KernelRuntime</text>
+<text x="498" y="532" font-size="14" class="secondary">TaskSupervisor + owned resources</text>
+</g>
+<g id="infra" data-node-id="infra" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Infrastructure</text>
+<text x="918" y="510" font-size="15" class="secondary">PostgreSQL stores / repositories</text>
+<text x="918" y="532" font-size="14" class="secondary">Providers / security / observability</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">call service</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">use types</text>
+<text x="420" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">build runtime</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">construct</text>
+<text x="678" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">wire ports</text>
+<text x="1154" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">use types</text>
+<g data-graph-role="legend">
+<line x1="60" y1="612" x2="96" y2="612" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="617" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="612" x2="536" y2="612" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="617" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="612" x2="976" y2="612" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="617" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="660" font-size="15" class="secondary" data-graph-role="label">Domain never imports application or infrastructure; application code depends on ports rather than adapters.</text>
+<text x="60" y="684" font-size="15" class="secondary" data-graph-role="label">alembic/versions contains one 0001greenfield → 0030evaluation_judge_history lineage for fresh databases.</text>
+</svg>

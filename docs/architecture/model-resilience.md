@@ -10,8 +10,11 @@ Model calls have two explicit reliability layers with different scopes.
 `model_resilience.max_attempts_per_call` and
 `max_call_budget_seconds`, classifies transient transport/provider errors,
 records circuit-breaker state, and may select an eligible configured fallback
-model. Quota failures can move directly to another candidate. Cross-provider
-fallback is disabled unless explicitly configured.
+model. Quota failures can move directly to another candidate. Ordinary
+fallback defaults to disabled (`fallback_enabled=false`,
+`allow_cross_provider_fallback=false`); quota fallback and its cross-provider
+permission default to enabled (`fallback_on_quota_exceeded=true`,
+`allow_cross_provider_fallback_on_quota=true`). These are separate controls.
 
 Streaming is retried or rerouted only before the first output chunk. Once
 streaming begins, changing provider or repeating the request could duplicate
@@ -44,7 +47,7 @@ credentials.
 
 ## Configuration
 
-The active Execution Policy `model_resilience` section controls:
+The Run's frozen Execution Policy `model_resilience` section controls:
 
 - bounded attempts and wall-clock call budget;
 - breaker window, threshold, open TTL, and half-open probe timeout;

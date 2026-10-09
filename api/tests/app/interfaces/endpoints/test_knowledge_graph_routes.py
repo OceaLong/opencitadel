@@ -181,6 +181,7 @@ async def test_owner_scoped_graph_has_every_endpoint_and_exact_evidence():
         for edge in response.edges
     )
     assert response.edges[0].evidence[0].model_dump() == {
+        "knowledge_base_id": "kb1",
         "version_id": "v1",
         "document_revision_id": "rev1",
         "doc_id": "doc1",

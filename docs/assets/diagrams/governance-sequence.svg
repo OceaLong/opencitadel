@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2180" height="1180" viewBox="0 0 2180 1180" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">Governance · Tool admission, approval and invocation</title><desc id="desc">An approval covers frozen arguments; the external call starts only after a persisted decision.</desc>
+<style>text {font-family: Helvetica, Arial, sans-serif;fill:#111827} .secondary {fill:#6b7280}</style>
+<rect width="2180" height="1180" fill="#ffffff" data-graph-role="background"/>
+<defs><marker id="blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#2563eb"/></marker><marker id="green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#16a34a"/></marker></defs>
+<text x="50" y="62" font-size="28" font-weight="600" data-graph-role="label">Governance · Tool admission, approval and invocation</text>
+<text x="50" y="98" font-size="15" class="secondary" data-graph-role="label">An approval covers frozen arguments; the external call starts only after a persisted decision.</text>
+<rect x="50" y="408" width="2080" height="220" rx="8" fill="#f8fafc" stroke="#d1d5db" stroke-dasharray="6 4" data-graph-role="container"/>
+<text x="64" y="430" font-size="14" font-weight="600" data-graph-role="label">When approval is required</text>
+<rect id="catalog" data-node-id="catalog" data-graph-role="node" x="45" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="150" y="170" font-size="17" font-weight="600" text-anchor="middle">Tool catalog</text>
+<text x="150" y="192" font-size="12" class="secondary" text-anchor="middle">Narrow admitted schemas</text>
+<line x1="150" y1="210" x2="150" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="model" data-node-id="model" data-graph-role="node" x="305" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="410" y="170" font-size="17" font-weight="600" text-anchor="middle">Model</text>
+<text x="410" y="192" font-size="12" class="secondary" text-anchor="middle">Untrusted intent</text>
+<line x1="410" y1="210" x2="410" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="run" data-node-id="run" data-graph-role="node" x="565" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="670" y="170" font-size="17" font-weight="600" text-anchor="middle">Run decision</text>
+<text x="670" y="192" font-size="12" class="secondary" text-anchor="middle">Typed policy result</text>
+<line x1="670" y1="210" x2="670" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="authority" data-node-id="authority" data-graph-role="node" x="825" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="930" y="170" font-size="17" font-weight="600" text-anchor="middle">Commands / events</text>
+<text x="930" y="192" font-size="12" class="secondary" text-anchor="middle">PostgreSQL authority</text>
+<line x1="930" y1="210" x2="930" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="human" data-node-id="human" data-graph-role="node" x="1085" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="1190" y="170" font-size="17" font-weight="600" text-anchor="middle">Human reviewer</text>
+<text x="1190" y="192" font-size="12" class="secondary" text-anchor="middle">Dedicated approval API</text>
+<line x1="1190" y1="210" x2="1190" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="activity" data-node-id="activity" data-graph-role="node" x="1345" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="1450" y="170" font-size="17" font-weight="600" text-anchor="middle">Tool Activity</text>
+<text x="1450" y="192" font-size="12" class="secondary" text-anchor="middle">Fenced invocation</text>
+<line x1="1450" y1="210" x2="1450" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="provider" data-node-id="provider" data-graph-role="node" x="1605" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="1710" y="170" font-size="17" font-weight="600" text-anchor="middle">Tool provider</text>
+<text x="1710" y="192" font-size="12" class="secondary" text-anchor="middle">Sandbox / MCP / Ops</text>
+<line x1="1710" y1="210" x2="1710" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<rect id="evidence" data-node-id="evidence" data-graph-role="node" x="1865" y="145" width="210" height="65" rx="8" fill="#eff6ff" stroke="#d1d5db"/>
+<text x="1970" y="170" font-size="17" font-weight="600" text-anchor="middle">Evidence</text>
+<text x="1970" y="192" font-size="12" class="secondary" text-anchor="middle">Formal projections</text>
+<line x1="1970" y1="210" x2="1970" y2="1030" stroke="#cbd5e1" stroke-dasharray="5 4" data-graph-role="decoration"/>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="catalog" data-target="model" d="M 150,240 L 410,240" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="280.0" y="228" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">Narrow schemas + policy metadata</text>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="model" data-target="run" d="M 410,310 L 670,310" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="540.0" y="298" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">Proposed tool intent</text>
+<rect x="682" y="358" width="215" height="40" rx="5" fill="#f0fdf4" stroke="#d1d5db" data-graph-role="decoration"/>
+<text x="693" y="383" font-size="13" class="secondary">Validate name / args / policy</text>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="run" data-target="authority" d="M 670,450 L 930,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="800.0" y="438" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">ApprovalRequested event</text>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="human" data-target="authority" d="M 1190,520 L 930,520" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="1060.0" y="508" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">Approve / reject command</text>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="authority" data-target="run" d="M 930,590 L 670,590" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="800.0" y="578" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">Persisted approval decision</text>
+<path id="edge-6" data-edge-id="edge-6" data-graph-role="edge" data-source="run" data-target="activity" d="M 670,660 L 1450,660" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="1060.0" y="648" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-6">Persist request + invocation identity</text>
+<rect x="1462" y="708" width="215" height="40" rx="5" fill="#f0fdf4" stroke="#d1d5db" data-graph-role="decoration"/>
+<text x="1473" y="733" font-size="13" class="secondary">Claim + call-start before I/O</text>
+<path id="edge-8" data-edge-id="edge-8" data-graph-role="edge" data-source="activity" data-target="provider" d="M 1450,800 L 1710,800" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="1580.0" y="788" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-8">Invoke admitted tool</text>
+<path id="edge-9" data-edge-id="edge-9" data-graph-role="edge" data-source="provider" data-target="activity" d="M 1710,870 L 1450,870" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="1580.0" y="858" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-9">Result / explicit unknown outcome</text>
+<path id="edge-10" data-edge-id="edge-10" data-graph-role="edge" data-source="activity" data-target="authority" d="M 1450,940 L 930,940" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#blue)"/>
+<text x="1190.0" y="928" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-10">Completion / failure command</text>
+<path id="edge-11" data-edge-id="edge-11" data-graph-role="edge" data-source="authority" data-target="evidence" d="M 930,1010 L 1970,1010" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#green)"/>
+<text x="1450.0" y="998" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-11">Formal events and projections</text>
+<text x="50" y="1085" font-size="14" class="secondary" data-graph-role="label">Approval-required branch waits or rejects; skipped approval is allowed only when the captured effect policy permits it.</text>
+<text x="50" y="1110" font-size="14" class="secondary" data-graph-role="label">Unknown non-idempotent effects cannot be retried as if nothing happened; evidence includes verification outcomes.</text>
+</svg>

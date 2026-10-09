@@ -8,7 +8,9 @@ import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph";
 import { parseKbDocHref } from "@/components/knowledge/knowledge-utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-type SelectedSource = {
+export type SelectedSource = {
+  versionId: string;
+  chunkId?: string;
   documentId: string;
   page?: number;
   revisionId?: string;
@@ -17,6 +19,7 @@ type SelectedSource = {
 type KnowledgeContextPanelProps = {
   knowledgeBaseId: string;
   versionId: string;
+  fixedSource?: SelectedSource | null;
   onSourceClickRef?: React.MutableRefObject<((value: string) => void) | null>;
 };
 
@@ -24,6 +27,7 @@ export function KnowledgeContextPanel({
   knowledgeBaseId,
   versionId,
   onSourceClickRef,
+  fixedSource,
 }: KnowledgeContextPanelProps) {
   return (
     <BoundKnowledgeContextPanel
@@ -31,6 +35,7 @@ export function KnowledgeContextPanel({
       knowledgeBaseId={knowledgeBaseId}
       versionId={versionId}
       onSourceClickRef={onSourceClickRef}
+      fixedSource={fixedSource}
     />
   );
 }
@@ -39,28 +44,33 @@ function BoundKnowledgeContextPanel({
   knowledgeBaseId,
   versionId,
   onSourceClickRef,
+  fixedSource,
 }: KnowledgeContextPanelProps) {
   const t = useTranslations("knowledge");
   const tWorkspace = useTranslations("workspaceContext");
-  const [selectedSource, setSelectedSource] = useState<SelectedSource | null>(null);
+  const [localSource, setSelectedSource] = useState<SelectedSource | null>(null);
+  const selectedSource = fixedSource ?? localSource;
   const [citationError, setCitationError] = useState("");
 
   const handleSourceClick = useCallback(
     (value: string) => {
       const reference = parseKbDocHref(value);
       if (!reference) return;
-      if (reference.versionId && reference.versionId !== versionId) {
+      if (!reference.versionId || !reference.revisionId) {
+        setSelectedSource(null);
         setCitationError(t("citationVersionMismatch"));
         return;
       }
       setCitationError("");
       setSelectedSource({
         documentId: reference.docId,
+        versionId: reference.versionId,
+        chunkId: reference.chunkId,
         page: reference.page,
         revisionId: reference.revisionId,
       });
     },
-    [t, versionId],
+    [t],
   );
 
   useEffect(() => {
@@ -95,9 +105,10 @@ function BoundKnowledgeContextPanel({
           {selectedSource ? (
             <DocumentPager
               knowledgeBaseId={knowledgeBaseId}
-              versionId={versionId}
+              versionId={selectedSource.versionId}
               documentId={selectedSource.documentId}
               page={selectedSource.page}
+              chunkId={selectedSource.chunkId}
               expectedRevisionId={selectedSource.revisionId}
             />
           ) : (

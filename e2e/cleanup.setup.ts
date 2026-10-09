@@ -7,6 +7,7 @@ import {
   completeCleanupAction,
   partitionCleanupActions,
   readCleanupActions,
+  runCleanupPhases,
   type CleanupAction,
 } from "./support/cleanup-journal";
 import { cleanupProductResource } from "./support/product-cleanup";
@@ -20,6 +21,11 @@ async function executeCleanupAction(
   page: Parameters<typeof appApi>[0],
   value: CleanupAction,
 ): Promise<void> {
+  if (value.action === "disable-owned-actor") {
+    const { disableOwnedActor } = await import("./support/owned-actor");
+    await disableOwnedActor(page, value);
+    return;
+  }
   if (value.action === "restore-runtime-policy") {
     const active = await appApi<ActivePolicy>(
       page,
@@ -52,6 +58,13 @@ async function executeCleanupAction(
   }
   await cleanupProductResource(page, value.resource, value.resource_id, {
     workspaceId: value.workspace_id,
+    expectedRetention: value.expected_retention,
+    retainedRevision: value.retained_revision,
+    retainedAccounting: value.retained_accounting,
+    expectedUnknownRetention: value.expected_unknown_retention,
+    createdAt: value.created_at,
+    exportBinding: value.export_binding,
+    exportDownload: value.export_download,
   });
 }
 
@@ -62,7 +75,8 @@ test("remove acceptance product resources through public APIs", async ({
 }) => {
   const state = readBootstrapState();
   const errors: string[] = [];
-  const phases = partitionCleanupActions(readCleanupActions());
+  const entries = readCleanupActions();
+  const phases = partitionCleanupActions(entries);
 
   async function attempt(
     label: string,
@@ -77,52 +91,76 @@ test("remove acceptance product resources through public APIs", async ({
     }
   }
 
-  for (const entry of phases.resources) {
-    await attempt(`cleanup journal ${entry.order}`, async () => {
-      await executeCleanupAction(page, entry.value);
-      completeCleanupAction(entry);
-    });
-  }
-
-  if (state && !state.cleanup_completed) {
-    for (const purpose of [...state.binding_purposes].reverse()) {
-      await attempt(`delete inference binding ${purpose}`, async () => {
-        await appApi(
-          page,
-          `/inference/bindings/${purpose}?binding_scope=global`,
-          { method: "DELETE", expectStatus: [200, 404] },
-        );
-      });
-    }
-    for (const modelId of [state.model_ids.embedding, state.model_ids.chat]) {
-      if (!modelId) continue;
-      await attempt(`delete inference model ${modelId}`, async () => {
-        await appApi(page, `/inference/models/${encodeURIComponent(modelId)}`, {
-          method: "DELETE",
-          expectStatus: [200, 404],
-        });
-      });
-    }
-    if (state.endpoint_id) {
-      await attempt(
-        `delete inference endpoint ${state.endpoint_id}`,
-        async () => {
-          await appApi(
-            page,
-            `/inference/endpoints/${encodeURIComponent(state.endpoint_id as string)}`,
-            { method: "DELETE", expectStatus: [200, 404] },
+  errors.push(
+    ...(await runCleanupPhases(
+      entries,
+      async (entry) => {
+        const value = entry.value;
+        if (value.action === "delete-resource" && value.creator_id) {
+          const owner = phases.resources.find(
+            (candidate) =>
+              candidate.value.action === "disable-owned-actor" &&
+              candidate.value.resource_id === value.creator_id,
           );
-        },
-      );
-    }
-  }
-
-  for (const entry of phases.state) {
-    await attempt(`cleanup journal ${entry.order}`, async () => {
-      await executeCleanupAction(page, entry.value);
-      completeCleanupAction(entry);
-    });
-  }
+          if (
+            !owner ||
+            owner.value.action !== "disable-owned-actor" ||
+            owner.value.workspace_id !== value.workspace_id
+          )
+            throw new Error("creator cleanup binding unavailable");
+          const { recoverOwnedActor } = await import("./support/owned-actor");
+          const actor = await recoverOwnedActor(page, owner.value);
+          try {
+            await executeCleanupAction(actor.page, value);
+          } finally {
+            await actor.context.close();
+          }
+        } else await executeCleanupAction(page, value);
+      },
+      completeCleanupAction,
+      async () => {
+        if (state && !state.cleanup_completed) {
+          for (const purpose of [...state.binding_purposes].reverse()) {
+            await attempt(`delete inference binding ${purpose}`, async () => {
+              await appApi(
+                page,
+                `/inference/bindings/${purpose}?binding_scope=global`,
+                { method: "DELETE", expectStatus: [200, 404] },
+              );
+            });
+          }
+          for (const modelId of [
+            state.model_ids.embedding,
+            state.model_ids.chat,
+          ]) {
+            if (!modelId) continue;
+            await attempt(`delete inference model ${modelId}`, async () => {
+              await appApi(
+                page,
+                `/inference/models/${encodeURIComponent(modelId)}`,
+                {
+                  method: "DELETE",
+                  expectStatus: [200, 404],
+                },
+              );
+            });
+          }
+          if (state.endpoint_id) {
+            await attempt(
+              `delete inference endpoint ${state.endpoint_id}`,
+              async () => {
+                await appApi(
+                  page,
+                  `/inference/endpoints/${encodeURIComponent(state.endpoint_id as string)}`,
+                  { method: "DELETE", expectStatus: [200, 404] },
+                );
+              },
+            );
+          }
+        }
+      },
+    )),
+  );
 
   if (state && !state.cleanup_completed && errors.length === 0) {
     state.cleanup_completed = true;

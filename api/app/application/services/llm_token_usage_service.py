@@ -1,3 +1,11 @@
+"""Legacy session accounting compatibility sink.
+
+Execution reports/budgets use the physical dispatch ledger exclusively. Never
+sum this random-id session sink with execution_usage_facts: the same provider
+response may be represented in both. Missing provider usage is not recorded
+here; execution accounting retains that unknown coverage independently.
+"""
+
 import logging
 from collections.abc import Callable
 

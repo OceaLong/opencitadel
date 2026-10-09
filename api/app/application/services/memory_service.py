@@ -76,14 +76,15 @@ class MemoryService:
         policy: MemoryExecutionPolicy,
     ) -> MemoryEntry:
         await self._validate_entry(entry, owner_scope=owner_scope)
+        vector = await self._embed(
+            f"{entry.title}\n{entry.content}",
+            owner_scope or self._entry_scope(entry),
+            policy=policy,
+            purpose_context="memory.store",
+        )
+        await self._validate_entry(entry, owner_scope=owner_scope)
         async with self._uow_factory() as uow:
             await uow.memory_entry.save(entry)
-            vector = await self._embed(
-                f"{entry.title}\n{entry.content}",
-                owner_scope or self._entry_scope(entry),
-                policy=policy,
-                purpose_context="memory.store",
-            )
             if vector:
                 await uow.memory_entry.update_embedding(entry.id, vector)
             await uow.commit()
@@ -102,13 +103,20 @@ class MemoryService:
             existing = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
             if not existing:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
+        vector = await self._embed(
+            f"{updates.title}\n{updates.content}",
+            owner_scope or self._entry_scope(updates),
+            policy=policy,
+            purpose_context="memory.store",
+        )
+        await self._validate_entry(updates, owner_scope=owner_scope)
+        async with self._uow_factory() as uow:
+            current = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
+            if not current:
+                raise NotFoundError(f"记忆[{entry_id}]不存在")
             updates.id = entry_id
-            await uow.memory_entry.save(updates)
-            vector = await self._embed(
-                f"{updates.title}\n{updates.content}",
-                owner_scope or self._entry_scope(updates),
-                policy=policy,
-                purpose_context="memory.store",
+            await uow.memory_entry.save(
+                updates, expected_updated_at=existing.updated_at, owner_scope=owner_scope
             )
             if vector:
                 await uow.memory_entry.update_embedding(entry_id, vector)
@@ -137,18 +145,23 @@ class MemoryService:
             if session is None:
                 raise NotFoundError(f"会话[{session_id}]不存在")
             query_text = session.latest_message or ""
+        query_vector = (
+            await self._embed(
+                query_text, owner_scope, policy=policy, purpose_context="memory.query"
+            )
+            if policy.vector_enabled and query_text.strip()
+            else []
+        )
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id, scope=owner_scope)
+            if session is None:
+                raise NotFoundError(f"会话[{session_id}]不存在")
             entries = await uow.memory_entry.recall_for_session(
                 session_id, limit=policy.recall_limit
             )
             entries = rank_entries_with_decay(entries, policy.recall_limit)
 
-            if policy.vector_enabled and query_text.strip():
-                query_vector = await self._embed(
-                    query_text,
-                    owner_scope,
-                    policy=policy,
-                    purpose_context="memory.query",
-                )
+            if query_vector:
                 vector_entries = (
                     await uow.memory_entry.vector_search_entries(
                         query_vector,

@@ -7,13 +7,13 @@
 ## 启动
 
 ```bash
-cp .env.example .env
-# 设置必填 Secret，并配置支持工具调用的模型。
-docker compose --profile local --profile demo up -d --build
+./scripts/quickstart.sh --demo
 ```
 
 OpenCitadel 位于 `http://localhost:8088`；OpsConsole 位于
-`http://localhost:9099`（`agent` / `agent123`）。
+`http://localhost:9099`（`agent` / `agent123`）。在设置 → 推理中配置支持工具调用的
+`chat` Binding。Agent 沙箱内使用 `http://ops-console:9099`；其中 `localhost`
+指向沙箱本身。
 
 ## 运行
 

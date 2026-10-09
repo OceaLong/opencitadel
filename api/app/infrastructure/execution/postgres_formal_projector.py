@@ -41,6 +41,7 @@ from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.infrastructure.execution.models import (
     ExecutionActivityProjectionORM,
     ExecutionApprovalProjectionORM,
+    ExecutionEventORM,
     ExecutionOutboxORM,
     ExecutionProjectorCheckpointORM,
     ExecutionPublicEventORM,
@@ -270,6 +271,14 @@ class PostgresFormalProjector:
             last_position=last_position,
         )
 
+    async def rebuild_views(self, owner_scope: OwnerScope, *, target_algorithm_version: int = 1):
+        """Rebuild only disposable workbench views; operational recovery is separate."""
+        from app.infrastructure.execution.postgres_execution_view import PostgresExecutionView
+
+        return await PostgresExecutionView(
+            session_factory=self._session_factory, authorization=self._authorization
+        ).rebuild_scope_shadow(owner_scope, target_algorithm_version)
+
     async def rebuild(
         self,
         owner_scope: OwnerScope,
@@ -337,6 +346,9 @@ class PostgresFormalProjector:
         if event.stream_type == "run":
             tracker = await self._track_run(session, event, trackers)
             run_state = tracker.state
+            from app.infrastructure.execution.postgres_view_observations import observe_formal
+
+            await observe_formal(session, event, run_state)
             await self._project_activity(session, event, run_state)
             await self._project_approval(session, event, run_state)
             await self._project_product_lifecycle(session, event, run_state)
@@ -385,7 +397,7 @@ class PostgresFormalProjector:
                 created_at = event.occurred_at
             else:
                 previous = RunState.model_validate(existing.state)
-                if canonical_state_hash(previous) != existing.state_hash:
+                if canonical_state_hash(existing.state) != existing.state_hash:
                     record_replay_failure("projection_hash_mismatch")
                     raise ValueError("execution_run_projection state hash mismatch")
                 created_at = existing.created_at
@@ -471,6 +483,26 @@ class PostgresFormalProjector:
             ),
         )
 
+    async def _terminal_time(self, session, state, event):
+        if state.status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            return None
+        if state.terminal_event_id == event.event_id:
+            return event.occurred_at
+        # Metadata facts may follow termination. Preserve the timestamp of the
+        # exact persisted terminal fact, including same-batch replay/rebuild.
+        occurred_at = await session.scalar(
+            select(ExecutionEventORM.occurred_at).where(
+                ExecutionEventORM.event_id == state.terminal_event_id,
+                ExecutionEventORM.stream_type == "run",
+                ExecutionEventORM.stream_id == str(state.run_id),
+                ExecutionEventORM.owner_user_id.is_not_distinct_from(event.owner_user_id),
+                ExecutionEventORM.team_id.is_not_distinct_from(event.team_id),
+            )
+        )
+        if occurred_at is None:
+            raise ValueError("terminal event authority unavailable")
+        return occurred_at
+
     async def _flush_run(
         self,
         session: AsyncSession,
@@ -525,11 +557,7 @@ class PostgresFormalProjector:
             "last_event_hash": event.event_hash,
             "created_at": created_at,
             "updated_at": event.occurred_at,
-            "terminal_at": (
-                event.occurred_at
-                if state.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
-                else None
-            ),
+            "terminal_at": await self._terminal_time(session, state, event),
         }
         await session.execute(
             pg_insert(ExecutionRunProjectionORM)
@@ -757,12 +785,15 @@ class PostgresFormalProjector:
             if event.event_type == "ActivityCallStarted":
                 attempt += 1
         terminal = status in {"succeeded", "failed", "unknown", "cancelled"}
+        # Historical v1 events upcast an unknown generation as None. The
+        # formal activity baseline predates retries and is generation zero.
+        generation = int(event.public_payload.get("generation") or 0)
         state_json = {
             "activity_id": str(activity_id),
             "run_id": str(run_state.run_id),
             "activity_type": activity_type,
             "status": status,
-            "generation": int(event.public_payload.get("generation", 0)),
+            "generation": generation,
         }
         values = {
             "activity_id": activity_id,
@@ -770,7 +801,7 @@ class PostgresFormalProjector:
             "activity_type": activity_type,
             "status": status,
             "attempt": attempt,
-            "generation": int(event.public_payload.get("generation", 0)),
+            "generation": generation,
             "result_summary": event.public_payload.get("result_summary"),
             "failure_code": event.public_payload.get("failure_code"),
             "owner_user_id": event.owner_user_id,
@@ -951,11 +982,7 @@ class PostgresFormalProjector:
             "state_hash": canonical_state_hash(state),
             "created_at": existing.created_at if existing else event.occurred_at,
             "updated_at": event.occurred_at,
-            "terminal_at": (
-                event.occurred_at
-                if state.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
-                else None
-            ),
+            "terminal_at": await self._terminal_time(session, state, event),
         }
         await session.execute(
             pg_insert(ExecutionResourceBuildProjectionORM)

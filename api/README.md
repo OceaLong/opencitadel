@@ -5,11 +5,11 @@
 The Python backend has three explicit process roles. PostgreSQL execution
 events are the only workflow authority; Redis is a disposable wake-up channel.
 
-| Role | Entrypoint | Responsibility |
-| --- | --- | --- |
-| API | `app.main` / `run.sh` | Authentication, authorization, command admission, projection queries, SSE |
-| Execution kernel | `app.execution_kernel_main` / `execution-kernel.sh` | Inbox, decisions, Activities, timers, outbox, projectors, scheduler |
-| Migrate | `app.migrate` / `migrate.sh` | Greenfield Alembic schema and typed Runtime Policy seed |
+| Role             | Entrypoint                                          | Responsibility                                                                                                |
+| ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| API              | `app.main` / `run.sh`                               | Authentication, authorization, command admission, projection queries, SSE                                     |
+| Execution kernel | `app.execution_kernel_main` / `execution-kernel.sh` | Inbox, decisions, Activities, timers, outbox, projectors, scheduler, evaluation and comparison/export workers |
+| Migrate          | `app.migrate` / `migrate.sh`                        | Greenfield Alembic schema and typed Runtime Policy seed                                                       |
 
 The API never runs Agent or ingestion workflow steps. The execution kernel
 polls durable PostgreSQL work and may also wait on Redis hints. Deleting Redis
@@ -26,22 +26,7 @@ cannot delete an accepted command, Activity, timer, event, or outcome.
 
 ## Source map
 
-```text
-app/
-├── domain/execution/           typed commands, events, aggregates, policies
-├── application/execution/      orchestration, decisions, Activities, projectors
-├── infrastructure/execution/   PostgreSQL stores and Redis wake-up adapter
-├── composition/                manual typed API/kernel graphs and task ownership
-├── interfaces/                 FastAPI routes, schemas, auth dependencies
-├── application/services/       product application services
-├── domain/                     product entities and ports
-├── infrastructure/             repositories, providers, security, observability
-├── execution_kernel.py         application-only kernel orchestration
-├── execution_kernel_main.py
-├── migrate.py
-└── main.py
-alembic/versions/0001greenfield_initial.py
-```
+![Backend module boundaries](../docs/assets/diagrams/backend-module-map.png)
 
 All nondeterministic provider work is an Activity. An invocation identity,
 input digest, timeout, policy snapshot, and call-start state are committed
@@ -85,6 +70,9 @@ All application routes are under `/api`.
 - `/sessions/*`: session CRUD, message command admission, public event replay,
   VNC and files; `?q=` title/message search, and the soft-delete recycle bin
   (`GET /sessions/deleted`, `POST /sessions/{id}/delete|restore|purge`)
+- `/execution-runs/*`, `/execution-artifacts/*`, `/execution-sources/*`: workbench, pinned `at`, bounded Step/Timeline/Body pages, events and SSE
+- `/execution-analysis/*`, `/execution-comparisons/*`: captured analysis, timezone preferences, comparison revisions, diff jobs and private CSV/JSON exports
+- `/evaluation/*`: datasets, configuration/rubric/suite, preflight and batches, recorded/isolated environments, scores/reviews and protected archival
 - `/runs/*`, `/approval-batches/*`: formal execution and approval commands
 - `/approvals`: reviewer inbox — `GET /approvals?status=pending` (also
   `approved`/`rejected`/`cancelled`/`expired`) across Runs
@@ -106,27 +94,40 @@ All application routes are under `/api`.
   (`cascade` | `transfer_to_owner`) and user deletion
   (`anonymize` | `cascade` | `transfer_to_team`) are explicit audited strategies
 
-OpenAPI at `/openapi.json` is the route-level source of truth.
+OpenAPI at `/openapi.json` is the route-level source of truth; A2A discovery also
+has a root-level Well-known entry. SSE feed cursors use the public feed sequence,
+not a formal event position. Workbench historical reads use a separate `PlaybackBoundary`.
+
+Database suites require fresh schema roles and PostgreSQL/Redis. Ordinary tests
+may skip integration cases when dependencies are absent; `make test-api-strict`
+requires them, so skipped tests cannot establish integration success. See the
+[deployment guide](../docs/operations/deployment.md) for role bootstrap.
+
+CI and both Make targets exclude only `test_execution_visualization_closed_loop.py`.
+Its six current-invocation consumers run through the [acceptance runner](../e2e/README.md)
+after the native strict report and restoration receipt validate, with zero skips.
 
 ## Local development
 
 ```bash
-uv sync
-uv run pytest -q
+uv sync --all-groups
+uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
 uv run lint-imports
-uv run ruff check --select F821 app tests
+uv run ruff check --config ../ruff.toml . ../ops-actuator ../ops-collector ../sandbox ../scripts ../demo
 ```
 
 Run the roles in separate terminals after configuring `.env` and PostgreSQL:
 
 ```bash
-./migrate.sh
-./run.sh
-./execution-kernel.sh
+uv run ./migrate.sh
+uv run ./run.sh
+uv run ./execution-kernel.sh
 ```
 
-The migration is a single greenfield revision. There is no historical data
-conversion command or alternate execution schema.
+Alembic has one linear lineage from `0001greenfield` to
+`0030evaluation_judge_history`; a new database applies the complete `upgrade head`.
+This is not a supported data-upgrade contract for older production releases.
+There is no historical data conversion command or alternate execution schema.
 
 ## Containers
 
@@ -138,3 +139,6 @@ dedicated credentials.
 See [architecture overview](../docs/architecture/overview.md),
 [execution kernel](../docs/architecture/execution-kernel.md), and
 [deployment](../docs/operations/deployment.md).
+
+- [Execution analysis, comparisons, and exports](../docs/architecture/execution-analysis.md)
+- [Evaluation control plane](../docs/architecture/evaluation-control-plane.md)

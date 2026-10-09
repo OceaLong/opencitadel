@@ -1,5 +1,7 @@
 import logging
+import sys
 from collections.abc import AsyncGenerator
+from inspect import isawaitable
 from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
@@ -19,6 +21,7 @@ from app.infrastructure.external.llm.base_llm import (
     is_retriable_multimodal_error,
     normalize_usage,
 )
+from app.infrastructure.external.llm.dispatch import physical_send
 from app.infrastructure.external.llm.structured_output import to_openai_strict
 from app.infrastructure.observability.llm_metrics import record_multimodal_request
 from app.infrastructure.security.outbound_http import (
@@ -49,6 +52,12 @@ _THINKING_CONFIG_KEYS = frozenset(
         "thinking_model_name",
     }
 )
+
+
+def _physical_request_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
+    # OpenAI's timeout is an SDK transport option, not part of the provider
+    # request body that the budget authority attests before physical dispatch.
+    return {key: value for key, value in kwargs.items() if key != "timeout"}
 
 
 def _sanitize_messages_for_api(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -244,9 +253,10 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             }
             if not self._extra_params.get("omit_parallel_tool_calls"):
                 tool_kwargs["parallel_tool_calls"] = True
-            return await self._client.chat.completions.create(
-                **request_kwargs,
-                **tool_kwargs,
+            return await physical_send(
+                lambda: self._client.chat.completions.create(**request_kwargs, **tool_kwargs),
+                _physical_request_payload({**request_kwargs, **tool_kwargs}),
+                provider="openai",
             )
 
         logger.info(
@@ -255,7 +265,11 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             f" thinking={self._thinking_enabled}" if self._thinking_enabled else "",
             self._timeout,
         )
-        return await self._client.chat.completions.create(**request_kwargs)
+        return await physical_send(
+            lambda: self._client.chat.completions.create(**request_kwargs),
+            _physical_request_payload(request_kwargs),
+            provider="openai",
+        )
 
     def _raise_llm_error(self, error: Exception, request_model: str) -> None:
         error_text = str(error).lower()
@@ -294,7 +308,14 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         if self._temperature is not None:
             request_kwargs["temperature"] = self._temperature
         if self._max_tokens is not None and self._max_tokens > 0:
-            request_kwargs["max_tokens"] = self._max_tokens
+            token_field = (
+                "max_completion_tokens"
+                if self._provider == InferenceProvider.OPENAI
+                and (self._base_url or "").rstrip("/") == "https://api.openai.com/v1"
+                and request_model == "gpt-4.1-2025-04-14"
+                else "max_tokens"
+            )
+            request_kwargs[token_field] = self._max_tokens
         if response_schema and not tools and self._structured_output_mode() == "json_schema":
             request_kwargs["response_format"] = to_openai_strict(response_schema["model_class"])
         elif response_schema and not tools and self._structured_output_mode() == "json_object":
@@ -346,6 +367,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         if usage is not None:
             raw = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
             result["_usage"] = normalize_usage(raw)
+        result["_model_revision"] = getattr(response, "model", None)
         return result
 
     async def stream_invoke(
@@ -372,7 +394,14 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         if self._temperature is not None:
             request_kwargs["temperature"] = self._temperature
         if self._max_tokens is not None and self._max_tokens > 0:
-            request_kwargs["max_tokens"] = self._max_tokens
+            token_field = (
+                "max_completion_tokens"
+                if self._provider == InferenceProvider.OPENAI
+                and (self._base_url or "").rstrip("/") == "https://api.openai.com/v1"
+                and request_model == "gpt-4.1-2025-04-14"
+                else "max_tokens"
+            )
+            request_kwargs[token_field] = self._max_tokens
         if response_schema and not tools and self._structured_output_mode() == "json_schema":
             request_kwargs["response_format"] = to_openai_strict(response_schema["model_class"])
         elif response_schema and not tools and self._structured_output_mode() == "json_object":
@@ -396,9 +425,10 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 tool_kwargs["parallel_tool_calls"] = True
 
         try:
-            stream = await self._client.chat.completions.create(
-                **request_kwargs,
-                **tool_kwargs,
+            stream = await physical_send(
+                lambda: self._client.chat.completions.create(**request_kwargs, **tool_kwargs),
+                _physical_request_payload({**request_kwargs, **tool_kwargs}),
+                provider="openai",
             )
         except ServerRequestsError:
             raise
@@ -406,9 +436,10 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             if _has_multimodal_image_content(messages) and is_retriable_multimodal_error(error):
 
                 async def _create_stream_with_kwargs(kwargs: dict[str, Any]):
-                    return await self._client.chat.completions.create(
-                        **kwargs,
-                        **tool_kwargs,
+                    return await physical_send(
+                        lambda: self._client.chat.completions.create(**kwargs, **tool_kwargs),
+                        _physical_request_payload({**kwargs, **tool_kwargs}),
+                        provider="openai",
                     )
 
                 try:
@@ -424,47 +455,69 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             else:
                 self._raise_llm_error(error, request_model)
 
-        stream_usage: dict[str, int] = {}
+        stream_usage: dict[str, int] | None = None
+        final_usage_seen = False
         finish_reason: str | None = None
-        async for chunk in stream:
-            usage = getattr(chunk, "usage", None)
-            if usage is not None:
-                raw = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
-                stream_usage = normalize_usage(raw)
-            if not chunk.choices:
-                continue
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            delta = choice.delta
-            if delta is None:
-                continue
-            payload: dict[str, Any] = {}
-            if delta.content:
-                payload["content"] = delta.content
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                payload["reasoning_content"] = reasoning
-            if delta.tool_calls:
-                payload["tool_calls"] = []
-                for tool_call in delta.tool_calls:
-                    payload["tool_calls"].append(
-                        {
-                            "index": tool_call.index,
-                            "id": tool_call.id,
-                            "function": {
-                                "name": tool_call.function.name if tool_call.function else None,
-                                "arguments": tool_call.function.arguments
-                                if tool_call.function
-                                else "",
-                            },
-                        }
-                    )
-            if payload:
-                yield payload
+        try:
+            async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    if final_usage_seen:
+                        raise ValueError("duplicate final stream usage")
+                    final_usage_seen = finish_reason is not None
+                    raw = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
+                    stream_usage = normalize_usage(raw)
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                previous_finish = finish_reason
+                if choice.finish_reason:
+                    if finish_reason is not None:
+                        raise ValueError("duplicate stream terminal")
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
+                if delta is None:
+                    continue
+                payload: dict[str, Any] = {}
+                if delta.content:
+                    payload["content"] = delta.content
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    payload["reasoning_content"] = reasoning
+                if delta.tool_calls:
+                    payload["tool_calls"] = []
+                    for tool_call in delta.tool_calls:
+                        payload["tool_calls"].append(
+                            {
+                                "index": tool_call.index,
+                                "id": tool_call.id,
+                                "function": {
+                                    "name": tool_call.function.name if tool_call.function else None,
+                                    "arguments": tool_call.function.arguments
+                                    if tool_call.function
+                                    else "",
+                                },
+                            }
+                        )
+                if payload:
+                    if previous_finish is not None:
+                        raise ValueError("stream content follows terminal")
+                    yield payload
+        finally:
+            primary = sys.exception()
+            close = getattr(stream, "close", None)
+            if close is not None:
+                try:
+                    closed = close()
+                    if isawaitable(closed):
+                        await closed
+                except BaseException:
+                    if primary is None:
+                        raise
+                    logger.warning("SDK stream close failed during unwind")
         if finish_reason:
             yield {"finish_reason": finish_reason}
-        if stream_usage.get("total_tokens"):
+        if stream_usage is not None:
             yield {"usage": stream_usage}
 
     def _structured_output_mode(self) -> str:
@@ -480,3 +533,6 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         if self._provider == InferenceProvider.OPENAI and "openai.com" in (self._base_url or ""):
             return "json_schema"
         return "json_object"
+
+    async def aclose(self):
+        await self._client.close()

@@ -102,3 +102,13 @@ USER appuser
 
 # 11.启动命令脚本
 CMD ["./execution-kernel.sh"]
+
+# The socket-owning broker alone needs the Docker CLI for fixed E04 lifecycle
+# implementations. Kernel and HTTP targets do not contain this executable.
+FROM docker:29.8.2-cli AS evaluation-docker-cli
+FROM api AS sandbox-broker
+USER root
+RUN mkdir -p /var/lib/opencitadel-evaluation && chown appuser:appuser /var/lib/opencitadel-evaluation
+USER appuser
+COPY --from=evaluation-docker-cli /usr/local/bin/docker /usr/local/bin/docker
+CMD ["python", "-m", "app.infrastructure.external.sandbox.broker"]

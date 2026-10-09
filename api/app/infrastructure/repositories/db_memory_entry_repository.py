@@ -4,6 +4,7 @@ from sqlalchemy import and_, delete, or_, select, text, update
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.errors import ConflictError
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.memory_entry_repository import MemoryEntryRepository
@@ -104,10 +105,24 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def save(self, entry: MemoryEntry) -> None:
-        stmt = select(MemoryEntryORM).where(MemoryEntryORM.id == entry.id)
+    async def save(
+        self,
+        entry: MemoryEntry,
+        *,
+        expected_updated_at: datetime | None = None,
+        owner_scope: OwnerScope | None = None,
+    ) -> None:
+        stmt = (
+            select(MemoryEntryORM)
+            .where(MemoryEntryORM.id == entry.id, *self._scope_conditions(owner_scope))
+            .with_for_update()
+        )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
+        if expected_updated_at is not None and (
+            record is None or record.updated_at != expected_updated_at
+        ):
+            raise ConflictError("记忆已在嵌入生成期间修改，请重试")
         entry.updated_at = datetime.now(UTC)
         if record:
             record.scope = entry.scope.value

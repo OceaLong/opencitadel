@@ -9,6 +9,9 @@ class File(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 文件id
     filename: str = ""  # 文件名字
     filepath: str = ""  # 文件路径
+    content_digest: str | None = None
+    object_identity: str | None = None
+    content_available: bool = True
     key: str = ""  # 对象存储中的路径
     extension: str = ""  # 扩展名
     mime_type: str = ""  # mime-type类型

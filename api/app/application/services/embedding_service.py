@@ -4,6 +4,10 @@ from collections import OrderedDict
 from collections.abc import Sequence
 
 from app.application.ports.inference import EmbeddingFactoryPort
+from app.application.ports.inference_dispatch import (
+    close_inference_adapter,
+    physical_request_context,
+)
 from app.application.services.inference_binding_service import InferenceBindingService
 from app.application.services.inference_model_service import InferenceModelService
 from app.domain.errors import BadRequestError, ServerRequestsError
@@ -26,8 +30,10 @@ class EmbeddingService:
         models: InferenceModelService | None = None,
         *,
         cache_max_size: int = _EMBEDDING_CACHE_MAX_SIZE,
+        physical_dispatch=None,
     ) -> None:
         self._bindings = bindings
+        self._physical_dispatch = physical_dispatch
         self._models = models
         self._embedding_factory = embedding_factory
         self._cache_max_size = cache_max_size
@@ -41,7 +47,6 @@ class EmbeddingService:
         purpose_context: str = "unspecified",
         model_id: str | None = None,
     ) -> list[list[float]]:
-        del purpose_context
         if not contents:
             return []
         if model_id is None:
@@ -60,14 +65,6 @@ class EmbeddingService:
                 error_key="inference.errors.bindingKindMismatch",
             )
 
-        try:
-            adapter = self._embedding_factory.create_embedding(resolved)
-        except ValueError as exc:
-            raise BadRequestError(
-                "当前 Provider 不支持 Embedding",
-                error_key="inference.errors.unsupportedProviderKind",
-                error_params={"provider": resolved.provider.value, "kind": "embedding"},
-            ) from exc
         results: list[list[float] | None] = [None] * len(contents)
         missing_texts: list[str] = []
         missing_indices: list[int] = []
@@ -85,21 +82,38 @@ class EmbeddingService:
             missing_texts.append(content)
             missing_indices.append(index)
 
-        batch_size = settings.max_batch_size
-        for start in range(0, len(missing_texts), batch_size):
-            batch = missing_texts[start : start + batch_size]
-            batch_indices = missing_indices[start : start + batch_size]
-            vectors = await adapter.embed_batch(batch)
-            if len(vectors) != len(batch):
-                raise ServerRequestsError(
-                    "Embedding 响应数量与请求数量不一致",
-                    error_key="inference.errors.embeddingCardinalityMismatch",
-                )
-            for content, index, vector in zip(batch, batch_indices, vectors, strict=True):
-                self._validate_vector(vector)
-                normalized = [float(value) for value in vector]
-                self._cache_set((resolved.id, content), normalized)
-                results[index] = normalized
+        if missing_texts:
+            try:
+                adapter = self._embedding_factory.create_embedding(resolved)
+            except ValueError as exc:
+                raise BadRequestError(
+                    "当前 Provider 不支持 Embedding",
+                    error_key="inference.errors.unsupportedProviderKind",
+                    error_params={"provider": resolved.provider.value, "kind": "embedding"},
+                ) from exc
+            try:
+                with physical_request_context(
+                    self._physical_dispatch, scope, purpose_context, resolved
+                ):
+                    batch_size = settings.max_batch_size
+                    for start in range(0, len(missing_texts), batch_size):
+                        batch = missing_texts[start : start + batch_size]
+                        batch_indices = missing_indices[start : start + batch_size]
+                        vectors = await adapter.embed_batch(batch)
+                        if len(vectors) != len(batch):
+                            raise ServerRequestsError(
+                                "Embedding 响应数量与请求数量不一致",
+                                error_key="inference.errors.embeddingCardinalityMismatch",
+                            )
+                        for content, index, vector in zip(
+                            batch, batch_indices, vectors, strict=True
+                        ):
+                            self._validate_vector(vector)
+                            normalized = [float(value) for value in vector]
+                            self._cache_set((resolved.id, content), normalized)
+                            results[index] = normalized
+            finally:
+                await close_inference_adapter(adapter)
 
         return [vector if vector is not None else [] for vector in results]
 

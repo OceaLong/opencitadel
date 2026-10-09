@@ -6,42 +6,45 @@ Ops Collector 是为 Ops Patrol 独立部署的只读 MCP 服务。它仅暴露�
 
 ## 操作
 
-| Tool | 上游访问 | 有界输入 |
-|------|----------|----------|
-| `get_capabilities` | 无 | 返回 Tool/Schema/Capability Hash |
-| `k8s_workload_summary` | Kubernetes 只读 API | 白名单 Namespace 与 Workload |
-| `k8s_recent_events` | Kubernetes 只读 API | 白名单 Namespace、时间窗与数量 |
-| `k8s_pod_logs` | Kubernetes Pod Log | 白名单 Namespace、有界 Tail/时间窗 |
-| `prom_query` | Prometheus HTTP API | 仅已注册 Query ID |
-| `http_probe` | HTTP | 仅已注册 Probe ID |
-| `certificate_status` | TLS | 仅已注册 HTTPS Probe ID |
-| `backup_status` | 备份状态 Endpoint | 仅已注册 Backup ID；不读取备份内容 |
-| `dependency_status` | TCP 连通性 | 仅已注册 Dependency ID |
+| Tool                   | 上游访问            | 有界输入                           |
+| ---------------------- | ------------------- | ---------------------------------- |
+| `get_capabilities`     | 无                  | 返回 Tool/Schema/Capability Hash   |
+| `k8s_workload_summary` | Kubernetes 只读 API | 白名单 Namespace 与 Workload       |
+| `k8s_recent_events`    | Kubernetes 只读 API | 白名单 Namespace、时间窗与数量     |
+| `k8s_pod_logs`         | Kubernetes Pod Log  | 白名单 Namespace、有界 Tail/时间窗 |
+| `prom_query`           | Prometheus HTTP API | 仅已注册 Query ID                  |
+| `http_probe`           | HTTP                | 仅已注册 Probe ID                  |
+| `certificate_status`   | TLS                 | 仅已注册 HTTPS Probe ID            |
+| `backup_status`        | 备份状态 Endpoint   | 仅已注册 Backup ID；不读取备份内容 |
+| `dependency_status`    | TCP 连通性          | 仅已注册 Dependency ID             |
 
-每个操作均声明为只读、非破坏、幂等且 Closed-world。响应使用统一 Envelope，包含 `target_ref`、状态、耗时、有界数据、证据引用、警告和稳定错误码。
+每个操作均声明为只读、非破坏、幂等且 Closed-world。八个探针响应使用统一 Envelope，包含 `target_ref`、状态、耗时、有界数据、证据引用、警告和稳定错误码。
+
+`get_capabilities` 返回独立的能力 Manifest，包含 Tool/Schema Hash。
 
 ## 配置参考
 
 配置仅来自环境变量，统一使用 `OPS_COLLECTOR_` 前缀；结构化值使用 JSON。
 
-| 变量 | 默认值 / 范围 | 作用 |
-|------|---------------|------|
-| `TARGET_REF` | `opencitadel-local` | 与 Pack 匹配的稳定目标身份 |
-| `ALLOWED_NAMESPACES` | `["opencitadel"]` | 非空 Namespace 白名单 |
-| `ALLOWED_WORKLOADS` | `{}` | Namespace 到 Workload ID 白名单的 JSON Map；空 List 表示允许该 Namespace 内所有 Workload |
-| `PROMETHEUS_QUERIES` | `{}` | Query ID 到 `base_url`、固定 `promql` 与可选超时的 Map |
-| `HTTP_PROBES` | `{}` | Probe ID 到 `url`、期望状态码列表与可选超时的 Map |
-| `CERTIFICATE_PROBES` | `{}` | Probe ID 到 HTTPS `url` 与可选超时的 Map |
-| `BACKUPS` | `{}` | Backup ID 到 `status_url` 与可选超时的 Map |
-| `DEPENDENCIES` | `{}` | ID 到单个或一组 `{kind,host,port,timeout_seconds}` 目标 |
-| `TRANSPORT` | `streamable-http` | `streamable-http` 或仅开发使用的 `stdio` |
-| `ALLOW_STDIO` | `false` | 启动 stdio 前还必须显式设为 true |
-| `HOST` / `PORT` | `0.0.0.0` / `8090` | Streamable HTTP 监听地址（`/mcp`） |
-| `CONCURRENCY` | `4`，范围 1–8 | 最大并发探针数 |
-| `MAX_OUTPUT_BYTES` | `65536`，最大 1 MiB | 序列化响应上限 |
-| `MAX_ROWS` | `200`，最大 1000 | 表格/采样行上限 |
-| `MAX_ARRAY_ITEMS` | `200`，最大 1000 | 单个数组元素上限 |
-| `MAX_STRING_CHARS` | `32768`，最大 131072 | 单个字符串上限 |
+| 变量                 | 默认值 / 范围              | 作用                                                                                     |
+| -------------------- | -------------------------- | ---------------------------------------------------------------------------------------- |
+| `TARGET_REF`         | `opencitadel-local`        | 与 Pack 匹配的稳定目标身份                                                               |
+| `ALLOWED_NAMESPACES` | `["opencitadel"]`          | 非空 Namespace 白名单                                                                    |
+| `ALLOWED_WORKLOADS`  | `{}`                       | Namespace 到 Workload ID 白名单的 JSON Map；空 List 表示允许该 Namespace 内所有 Workload |
+| `PROMETHEUS_QUERIES` | `{}`                       | Query ID 到 `base_url`、固定 `promql` 与可选超时的 Map                                   |
+| `HTTP_PROBES`        | `{}`                       | Probe ID 到 `url`、期望状态码列表与可选超时的 Map                                        |
+| `CERTIFICATE_PROBES` | `{}`                       | Probe ID 到 HTTPS `url` 与可选超时的 Map                                                 |
+| `BACKUPS`            | `{}`                       | Backup ID 到 `status_url` 与可选超时的 Map                                               |
+| `DEPENDENCIES`       | `{}`                       | ID 到单个或一组 `{kind,host,port,timeout_seconds}` 目标                                  |
+| `TOKEN`              | 无默认有效值；至少 32 字符 | Streamable HTTP 必填；每个请求必须携带 `Authorization: Bearer <token>`                   |
+| `TRANSPORT`          | `streamable-http`          | `streamable-http` 或仅开发使用的 `stdio`                                                 |
+| `ALLOW_STDIO`        | `false`                    | 启动 stdio 前还必须显式设为 true                                                         |
+| `HOST` / `PORT`      | `0.0.0.0` / `8090`         | Streamable HTTP 监听地址（`/mcp`）                                                       |
+| `CONCURRENCY`        | `4`，范围 1–8              | 最大并发探针数                                                                           |
+| `MAX_OUTPUT_BYTES`   | `65536`，最大 1 MiB        | 序列化响应上限                                                                           |
+| `MAX_ROWS`           | `200`，最大 1000           | 表格/采样行上限                                                                          |
+| `MAX_ARRAY_ITEMS`    | `200`，最大 1000           | 单个数组元素上限                                                                         |
+| `MAX_STRING_CHARS`   | `32768`，最大 131072       | 单个字符串上限                                                                           |
 
 完整变量名为前缀加表中名称，例如 `OPS_COLLECTOR_HTTP_PROBES`。
 
@@ -70,8 +73,8 @@ opsCollector:
       status_url: https://backup-status.example.internal/latest
   registeredDependencies:
     primary-dependencies:
-      - {kind: postgres, host: postgres.database.svc, port: 5432}
-      - {kind: redis, host: redis.cache.svc, port: 6379}
+      - { kind: postgres, host: postgres.database.svc, port: 5432 }
+      - { kind: redis, host: redis.cache.svc, port: 6379 }
 ```
 
 内置 Kubernetes Baseline 会引用 `pvc-utilization`、`app-5xx-ratio`、`primary-tls`、`primary-database`、`primary-dependencies` 与 `primary-endpoint`。UI 向导会启用全部 Baseline 检查，因此验证前必须注册每个 ID；自定义 API 客户端也可以提交禁用部分检查的完整 Pack Config。
@@ -85,6 +88,8 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 ```
 
 Compose Profile 适合验证传输、配置和非 Kubernetes 注册探针；它不会挂载宿主机 kubeconfig。真实 Kubernetes 观察应使用 Helm/Kustomize ServiceAccount 部署，不应增加高权限宿主凭据挂载。
+
+先在 `.env` 设置强 `OPS_COLLECTOR_TOKEN`。Compose 仅传入 Namespace、HTTP 探针和依赖注册项；Prometheus、证书、备份及 Workload 注册表需要 Compose 覆盖文件或 Helm/Kustomize。Collector 同时加入应用网和 Ops 网以访问本地探针，未发布宿主端口；Bearer 认证是其主要访问边界。
 
 仅开发使用的 stdio：
 
@@ -104,6 +109,8 @@ OPS_COLLECTOR_ALLOW_STDIO=true uv run opencitadel-ops-collector --transport stdi
 
 容器使用 UID/GID 10001、只读根文件系统、删除全部 Linux Capability、`RuntimeDefault` seccomp，并仅提供有界可写 `/tmp`。
 
+HTTP 进程会在 Token 缺失或不足 32 字符时拒绝启动。Helm 使用 `opsCollector.token`；Kustomize Base 的 Secret 为空，应用前必须填充。集成配置中的加密 Headers 应设置 `Authorization: Bearer <token>`。TCP 健康探针只说明监听端口可达，不保证 Kubernetes/注册目标或认证调用成功。`RuntimeDefault` Seccomp 由 Kubernetes 清单设置；Compose 设置非 Root、只读根目录、Capability Drop 和 `no-new-privileges`。
+
 ## 认证与数据处理
 
 Kubernetes 访问使用 Pod ServiceAccount，该凭据不会成为 Tool 参数或响应字段。Developer Preview 不接受注册 Prometheus/HTTP/备份探针的任意 Authorization Header。应使用不需要应用凭据、仅返回最少数据的内网 Status Endpoint，或禁用对应检查；严禁把凭据写入注册 URL。
@@ -113,6 +120,7 @@ Collector 会在应用输出上限前脱敏 Authorization 形态值、密码、A
 ## 开发与验证
 
 ```bash
+cd ops-collector
 uv sync --frozen
 uv run pytest -q
 ```

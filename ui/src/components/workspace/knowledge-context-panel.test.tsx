@@ -60,19 +60,24 @@ describe("KnowledgeContextPanel", () => {
       documentId: "doc1",
       page: 3,
       expectedRevisionId: "r9",
+      chunkId: "c4",
     });
 
     act(() => {
       sourceRef.current?.("kbdoc://doc2?version=v8&revision=r10");
     });
-    expect(container.querySelector("[role='alert']")).not.toBeNull();
+    expect(container.querySelector("[role='alert']")).toBeNull();
     expect(mocks.pagerProps).toHaveBeenLastCalledWith({
       knowledgeBaseId: "kb1",
-      versionId: "v7",
-      documentId: "doc1",
-      page: 3,
-      expectedRevisionId: "r9",
+      versionId: "v8",
+      documentId: "doc2",
+      page: undefined,
+      expectedRevisionId: "r10",
+      chunkId: undefined,
     });
+    act(() => sourceRef.current?.("kbdoc://ambiguous"));
+    expect(container.querySelector("[role='alert']")).not.toBeNull();
+    expect(container.textContent).not.toContain("exact document");
     await unmount();
   });
 });

@@ -1,6 +1,8 @@
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.resource_pin import ResourcePinned
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.repositories.team_repository import TeamRepository
 from app.infrastructure.models.team import TeamMemberORM, TeamORM
@@ -76,7 +78,16 @@ class DBTeamRepository(TeamRepository):
         await self.db_session.flush()
 
     async def delete_by_id(self, team_id: str) -> None:
-        await self.db_session.execute(delete(TeamORM).where(TeamORM.id == team_id))
+        try:
+            await self.db_session.execute(delete(TeamORM).where(TeamORM.id == team_id))
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == "23503" and "resource is pinned" in str(
+                error.orig
+            ):
+                raise ResourcePinned(
+                    "resource is pinned", resource_kind="team", resource_id=team_id
+                ) from error
+            raise
 
     async def transfer_resources_to_owner(self, team_id: str, owner_user_id: str) -> int:
         moved = 0

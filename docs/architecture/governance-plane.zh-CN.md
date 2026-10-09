@@ -6,32 +6,7 @@
 
 ## 端到端路径
 
-```mermaid
-sequenceDiagram
-  participant Model
-  participant Catalog as Admitted Tool Catalog
-  participant Run as Agent Run Decision
-  participant Approval as Approval Projection
-  participant Human
-  participant Activity as Tool Activity
-  participant Provider as Sandbox / MCP / A2A / Actuator
-  participant Evidence
-
-  Catalog->>Model: Narrowed Tool Schema + Policy Metadata
-  Model->>Run: Tool Intent
-  Run->>Run: Validate Name, Argument, Policy Result
-  alt Approval Required
-    Run->>Approval: ApprovalRequested Event
-    Human->>Approval: Dedicated Approve/Reject Command
-    Approval->>Run: Persisted Decision
-  end
-  Run->>Activity: Persist Request and Invocation Identity
-  Activity->>Activity: Persist Claim + Call-Start
-  Activity->>Provider: Invoke Admitted Tool
-  Provider-->>Activity: Result or Unknown Outcome
-  Activity->>Run: Completion/Failure Command
-  Run->>Evidence: Formal Event and Projection
-```
+![governance sequence](../assets/diagrams/governance-sequence.png)
 
 ## 能力收窄
 
@@ -61,17 +36,21 @@ Endpoint 记录 Actor、Status、Time 与 Feedback。Reject、Expiry、Cancellat
 审批是闭环，而非无限等待：
 
 - **收件箱。** `GET /api/approvals?status=pending` 列出调用方的待审批（也可选
-  `approved`/`rejected`/`cancelled`/`expired`），审阅者可在一个队列中找到跨 Run 的全部请求。
+  `approved`/`rejected`/`cancelled`/`expired`），范围限定于当前个人/团队工作区。省略 `status`
+  返回全部状态；分页使用 `limit`（默认 50、最大 200）与 `offset`。专用决策入口是
+  `POST /api/approval-batches/{approval_id}/commands/decide`。
 - **通知。** Run 触发 `ApprovalRequested` 时，正式投影器发送持久通知，审阅者无需轮询即被提醒。
 - **超时。** 请求审批时会调度一个持久的自取消超时命令。触发后审批进入终态 `expired`
   （`ApprovalExpired` Event），Run 离开等待状态，且绝不调用 Provider。窗口由 Operations
-  Policy 的 `approval.ttl_minutes` 字段（默认一天）控制，而非环境变量。
+  Policy 的 `approval.ttl_minutes` 字段（默认一天）控制，而非环境变量。到期以
+  `approval_expired` 原因取消 Run。
 
 ## Invocation 安全
 
 每个 Tool Request 都有唯一 Activity/Invocation Identity。两次有意的同参调用不会合并为一个
 Invocation。Claim Generation 隔离过期 Worker。外部 Effect 不确定的调用在 Crash 后不会盲目
-重试，而进入显式 Unknown-Outcome Resolution。
+重试，而进入显式 Unknown-Outcome Resolution。物理容量的 Unknown Outcome Hold 在
+Reconciliation 确认结算前持续保留；UI 超时不能释放它。
 
 Argument 与大 Result 使用 Object Reference/Digest。Public Event 只包含有界脱敏 Summary。
 Workspace Write 位于 Session Sandbox；External Write 在 Provider 支持时仍使用其 Idempotency Key。

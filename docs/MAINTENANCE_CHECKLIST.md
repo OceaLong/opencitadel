@@ -6,13 +6,14 @@ Use this checklist when changing features, routes, configuration, deployment, or
 
 **Related governance docs**
 
-| Document | Role |
-|----------|------|
+| Document                                              | Role                                                        |
+| ----------------------------------------------------- | ----------------------------------------------------------- |
 | [Documentation inventory](DOCUMENTATION_INVENTORY.md) | Authoritative list of all docs, authority level, stale risk |
-| This checklist | Actionable PR steps for contributors |
+| This checklist                                        | Actionable PR steps for contributors                        |
 
 ## When to update docs
 
+- [ ] Architecture diagram changed → maintain the shared SVG and PNG under `docs/assets/diagrams/`, update both language references and inventory, and validate geometry, rendering, and the exported image with the `fireworks-tech-graph` skill.
 - [ ] New or changed API route → `api/README.md` + `api/README.zh-CN.md`, relevant `docs/architecture/*.md`
 - [ ] New or changed inference endpoint/model/binding behavior → `inference-control-plane.md` (+ zh), `deployment.md` (+ zh), `ui/README.md` (+ zh)
 - [ ] New or changed UI route or approval component → `ui/README.md` + `ui/README.zh-CN.md`, `frontend-ui.md` (+ zh), `docs/README.md` module guides table (+ zh)
@@ -34,21 +35,21 @@ Use this checklist when changing features, routes, configuration, deployment, or
 
 ## Accuracy checks (manual)
 
-| Area | Verify against |
-|------|----------------|
-| UI routes | `ui/src/app/**/page.tsx` |
-| API routes | `api/app/interfaces/endpoints/routes.py` and route modules |
-| Inference control plane | `inference_routes.py`, `inference-settings.tsx`, Settings endpoint/model/binding flow |
-| Run recovery | `application/execution/`, `execution-kernel.md` (+ zh) |
-| Compose images | `docker-compose.yml`, `.github/workflows/release.yml` |
-| Sandbox boundary | Chromium in sandbox; execution kernel connects through CDP |
-| Integrations UI | Settings modal → Integrations tab (not `/settings/integrations`) |
-| Object storage | `.env.example` defaults; quickstart sets `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for first run |
-| Upload limits | `nginx/nginx.conf`, Execution Policy `knowledge_base.document.max_bytes` |
-| KB ingest / OCR | `knowledge_base/ingestion_runner.py`, `application/execution/activities/resource_build.py`, `knowledge-base-ingestion.md` (+ zh) |
-| Service API Key | `X-Api-Key` header; inbound `/api/a2a` only |
-| Share links | Default TTL 168h; `/share/artifact/[token]` UI route |
-| Ops Patrol | `patrol_routes.py`, Pack/Run services, built-in template, `ops-collector/src/opencitadel_ops_collector/config.py`, Helm/Kustomize manifests |
+| Area                    | Verify against                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| UI routes               | `ui/src/app/**/page.tsx`                                                                                                                    |
+| API routes              | `api/app/interfaces/endpoints/routes.py` and route modules                                                                                  |
+| Inference control plane | `inference_routes.py`, `inference-settings.tsx`, Settings endpoint/model/binding flow                                                       |
+| Run recovery            | `application/execution/`, `execution-kernel.md` (+ zh)                                                                                      |
+| Compose images          | `docker-compose.yml`, `.github/workflows/release.yml`                                                                                       |
+| Sandbox boundary        | Chromium in sandbox; execution kernel connects through CDP                                                                                  |
+| Integrations UI         | Settings modal → Integrations tab (not `/settings/integrations`)                                                                            |
+| Object storage          | `.env.example` defaults; quickstart sets `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for first run                                  |
+| Upload limits           | `nginx/nginx.conf`, Execution Policy `knowledge_base.document.max_bytes`                                                                    |
+| KB ingest / OCR         | `knowledge_base/ingestion_runner.py`, `application/execution/activities/resource_build.py`, `knowledge-base-ingestion.md` (+ zh)            |
+| Service API Key         | `X-Api-Key` header; inbound `/api/a2a` only                                                                                                 |
+| Share links             | Default TTL 168h; `/share/artifact/[token]` UI route                                                                                        |
+| Ops Patrol              | `patrol_routes.py`, Pack/Run services, built-in template, `ops-collector/src/opencitadel_ops_collector/config.py`, Helm/Kustomize manifests |
 
 ## Automated check
 

@@ -9,7 +9,10 @@
 `ResilientLLMClient` 负责一次 Activity 执行内部的有界尝试。它使用
 `model_resilience.max_attempts_per_call` 与 `max_call_budget_seconds`，分类临时传输/
 Provider 错误、记录熔断状态，并可选择符合条件的已配置备用模型。Quota 失败可直接切换到
-下一个 Candidate；除非显式开启，否则不允许跨 Provider Fallback。
+下一个 Candidate。普通 Fallback 默认关闭（`fallback_enabled=false`、
+`allow_cross_provider_fallback=false`）；Quota Fallback 及其跨 Provider 权限默认开启
+（`fallback_on_quota_exceeded=true`、`allow_cross_provider_fallback_on_quota=true`），
+两类控制独立。
 
 流式调用只允许在第一个输出 Chunk 之前重试或换 Provider。一旦开始输出，再次请求可能制造
 可见重复，因此当前调用直接失败，由 Activity 协议处理。
@@ -34,7 +37,7 @@ call-start、Heartbeat 与 Result。Activity Retry 是工作流决策，必须�
 
 ## 配置
 
-活动 Execution Policy 的 `model_resilience` Section 控制：
+Run 冻结的 Execution Policy `model_resilience` Section 控制：
 
 - 有界尝试次数与墙钟预算；
 - 熔断 Window、Threshold、Open TTL、Half-Open Probe Timeout；

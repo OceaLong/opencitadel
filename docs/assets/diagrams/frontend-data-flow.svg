@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1020" viewBox="0 0 1440 1020" data-generator="fireworks-tech-graph" data-quality-profile="showcase" role="img" aria-labelledby="title desc">
+<title id="title">OpenCitadel · Frontend data flow</title>
+<desc id="desc">The browser owns presentation and request state; server projections own execution meaning. Workspace / identity changes invalidate prior generations. Late responses cannot populate the new scope. Analysis and export preserve server capture identities. Feed cursors are not parsed or used as playback cuts.</desc>
+<style>text { font-family: Helvetica, Arial, sans-serif; fill: #111827; } .secondary { fill: #6b7280; }</style>
+<defs>
+<marker id="arrow-request" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+<marker id="arrow-hint" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/></marker>
+</defs>
+<rect width="1440" height="1020" fill="#ffffff" data-graph-role="background"/>
+<text x="60" y="65" font-size="30" font-weight="600" data-graph-role="label">OpenCitadel · Frontend data flow</text>
+<text x="60" y="99" font-size="16" class="secondary" data-graph-role="label">The browser owns presentation and request state; server projections own execution meaning.</text>
+<path id="edge-0" data-edge-id="edge-0" data-graph-role="edge" data-source="pages" data-target="hooks" d="M 360,230 L 480,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-1" data-edge-id="edge-1" data-graph-role="edge" data-source="hooks" data-target="clients" d="M 780,230 L 900,230" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-2" data-edge-id="edge-2" data-graph-role="edge" data-source="clients" data-target="refresh" d="M 1110,280 L 1110,450" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<path id="edge-3" data-edge-id="edge-3" data-graph-role="edge" data-source="refresh" data-target="cache" d="M 900,500 L 780,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-4" data-edge-id="edge-4" data-graph-role="edge" data-source="cache" data-target="render" d="M 480,500 L 360,500" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<path id="edge-5" data-edge-id="edge-5" data-graph-role="edge" data-source="notice" data-target="refresh" d="M 1110,720 L 1110,550" fill="none" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<g id="pages" data-node-id="pages" data-graph-role="node" data-bounds="60,180,360,280">
+<rect x="60" y="180" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="197" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,203 H 94" stroke="#2563eb"/>
+<text x="104" y="213" font-size="20" font-weight="600">Product pages</text>
+<text x="78" y="240" font-size="15" class="secondary">Sessions · Runs · Analysis · Evaluations</text>
+<text x="78" y="262" font-size="14" class="secondary">Display state and collect user intent</text>
+</g>
+<g id="hooks" data-node-id="hooks" data-graph-role="node" data-bounds="480,180,780,280">
+<rect x="480" y="180" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="213" font-size="20" font-weight="600">Domain hooks</text>
+<text x="498" y="240" font-size="15" class="secondary">Selection · request generation · cursors</text>
+<text x="498" y="262" font-size="14" class="secondary">Stale request / scope cancellation</text>
+</g>
+<g id="clients" data-node-id="clients" data-graph-role="node" data-bounds="900,180,1320,280">
+<rect x="900" y="180" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="198" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="213" font-size="20" font-weight="600">Typed API clients</text>
+<text x="918" y="240" font-size="15" class="secondary">Commands + projection read contracts</text>
+<text x="918" y="262" font-size="14" class="secondary">FastAPI remains authorization authority</text>
+</g>
+<g id="render" data-node-id="render" data-graph-role="node" data-bounds="60,450,360,550">
+<rect x="60" y="450" width="300" height="100" rx="8" fill="#eff6ff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="72" y="467" width="22" height="20" rx="3" fill="none" stroke="#2563eb"/>
+<path d="M 72,473 H 94" stroke="#2563eb"/>
+<text x="104" y="483" font-size="20" font-weight="600">Rendering / interaction</text>
+<text x="78" y="510" font-size="15" class="secondary">Timeline · chart · comparison · preview</text>
+<text x="78" y="532" font-size="14" class="secondary">Approval uses dedicated command API</text>
+</g>
+<g id="cache" data-node-id="cache" data-graph-role="node" data-bounds="480,450,780,550">
+<rect x="480" y="450" width="300" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="492" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="524" y="483" font-size="20" font-weight="600">Scoped hook state</text>
+<text x="498" y="510" font-size="15" class="secondary">Scope from ClientDataProvider</text>
+<text x="498" y="532" font-size="14" class="secondary">Hook owns projection / body responses</text>
+</g>
+<g id="refresh" data-node-id="refresh" data-graph-role="node" data-bounds="900,450,1320,550">
+<rect x="900" y="450" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="468" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="483" font-size="20" font-weight="600">Projection refresh</text>
+<text x="918" y="510" font-size="15" class="secondary">Bounded pages and frozen source captures</text>
+<text x="918" y="532" font-size="14" class="secondary">Feed notifications trigger formal rereads</text>
+</g>
+<g id="notice" data-node-id="notice" data-graph-role="node" data-bounds="900,720,1320,820">
+<rect x="900" y="720" width="420" height="100" rx="8" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+<rect x="912" y="738" width="20" height="20" rx="4" fill="#dbeafe"/>
+<text x="944" y="753" font-size="20" font-weight="600">Public SSE notification</text>
+<text x="918" y="780" font-size="15" class="secondary">Sanitized event; opaque feed cursor</text>
+<text x="918" y="802" font-size="14" class="secondary">Live / replay; does not decide lifecycle</text>
+</g>
+<text x="420" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-0">intent</text>
+<text x="840" y="218" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-1">request</text>
+<text x="1145" y="370" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-2">read</text>
+<text x="840" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-3">scope check</text>
+<text x="420" y="488" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-4">display</text>
+<text x="1156" y="640" font-size="14" class="secondary" text-anchor="middle" data-graph-role="label" data-owner="edge-5">invalidate</text>
+<g data-graph-role="legend">
+<line x1="60" y1="892" x2="96" y2="892" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-request)"/>
+<text x="108" y="897" font-size="14" class="secondary">Command / query / refresh</text>
+<line x1="500" y1="892" x2="536" y2="892" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-data)"/>
+<text x="548" y="897" font-size="14" class="secondary">Durable facts / derived data</text>
+<line x1="940" y1="892" x2="976" y2="892" stroke="#9333ea" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-hint)"/>
+<text x="988" y="897" font-size="14" class="secondary">Non-authoritative telemetry</text>
+</g>
+<text x="60" y="940" font-size="15" class="secondary" data-graph-role="label">Workspace / identity changes invalidate prior generations. Late responses cannot populate the new scope.</text>
+<text x="60" y="964" font-size="15" class="secondary" data-graph-role="label">Analysis and export preserve server capture identities. Feed cursors are not parsed or used as playback cuts.</text>
+</svg>
