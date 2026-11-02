@@ -15,11 +15,18 @@ class DBExecutionContentRepository:
     async def get_snapshot(
         self, scope, content_id, run_id, step_id, formal_position, *, include_body=True
     ):
+        # Check and hold resource authority before retrieving copied body bytes.
+        if include_body:
+            metadata = await self.get_snapshot(
+                scope, content_id, run_id, step_id, formal_position, include_body=False
+            )
+            if metadata is None:
+                return None
         columns = "c.body," if include_body else ""
-        return (
+        row = (
             (
                 await self.db_session.execute(
-                    text(f"""SELECT c.content_id,{columns}c.content_digest,c.byte_length,c.redacted,c.citation_refs
+                    text(f"""SELECT c.content_id,c.run_id,{columns}c.content_digest,c.byte_length,c.redacted,c.citation_refs,c.context_dependencies
           FROM execution_public_content c JOIN execution_content_bindings b USING(content_id)
           WHERE c.content_id=:id AND b.run_id=:run AND b.step_id=:step AND b.formal_position<=:position
           AND c.scope_key=:scope AND b.scope_key=:scope"""),
@@ -35,6 +42,26 @@ class DBExecutionContentRepository:
             .mappings()
             .one_or_none()
         )
+
+        if row is not None and not include_body:
+            from app.infrastructure.execution.context_capture_dependencies import (
+                validate_captured_dependencies,
+            )
+            from app.infrastructure.execution.execution_object_lifecycle import (
+                guard_object_reference,
+            )
+
+            try:
+                await guard_object_reference(
+                    self.db_session, scope_params(scope)["scope"], row["run_id"]
+                )
+            except ValueError:
+                return None
+
+            await validate_captured_dependencies(
+                self.db_session, scope, row["context_dependencies"]
+            )
+        return row
 
     async def has_citation(self, scope, citation):
         return bool(

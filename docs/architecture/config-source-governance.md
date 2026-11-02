@@ -17,6 +17,33 @@ fallback for policy fields. Migration creates a typed Execution Policy revision,
 a typed Operations Policy revision, and one atomic head that activates both.
 Later changes are immutable revisions created through the admin API/UI.
 
+New installations seed basic knowledge processing: text extraction and keyword
+search, with vector search, reranking, GraphRAG, and OCR off. Optional inference
+bindings and policy switches enable enhancements later. Existing policy heads
+and frozen Runs keep their stored settings during upgrades.
+
+## Simple deployment inputs
+
+A local install starts with `make quickstart`; `make configure` prepares it
+without starting containers. The six choices in [`.env.example`](../../.env.example)
+are the basic entry point. The grouped [complete reference](../../deploy/config/.env.reference)
+contains optional overrides, not another runtime configuration file. Only `.env`
+is loaded by default, with explicit environment overrides taking precedence.
+An existing custom `OPENCITADEL_ENV_FILE` remains supported. Compose and
+Helm derive their own internal service addresses, sandbox network/namespace,
+OAuth defaults and cookie security from deployment inputs.
+
+Credentials are generated once, independently, and saved in private `.env` or
+role-specific Kubernetes Secrets. Restarts and Helm upgrades reuse them.
+Existing valid variable names remain supported; existing signing-key fallbacks
+remain compatible. Never regenerate keys when recovering an existing database.
+The isolated `.env.e2e` remains an acceptance fixture, not a copy of every default.
+
+Helm production needs a real HTTPS `publicUrl` (or an explicit enabled Ingress
+host); local chart evaluation uses an explicit `env.ENV=development`. TLS,
+external-service credentials and trusted proxy exceptions describe the actual
+infrastructure and cannot be inferred from a sample domain.
+
 ## Runtime Policy boundaries
 
 - Execution Policy is frozen into every admitted Run. In-flight Runs keep their
@@ -61,8 +88,9 @@ and Patrol retention remain Operations Policy.
 
 - Add a policy field only in the typed model, initial seed, admin form, OpenAPI
   contract, tests, and Runtime Policy architecture/operations documentation.
-- Add a deployment setting only in `core/config.py`, `.env.example`, Compose,
-  Helm, validation schemas, and deployment documentation.
+- Add a deployment setting in `core/config.py`, `deploy/config/.env.reference`,
+  the relevant Compose/Helm adapter, validation schemas and documentation. Add it
+  to `.env.example` only if it belongs to basic startup choices.
 - Never copy a value between these authorities or introduce a fallback path.
 - Never place secrets in Runtime Policy revisions, Run public projections, or
   UI event payloads.

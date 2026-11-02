@@ -11,108 +11,176 @@
   "properties": {
     "replicaCount": {
       "type": "object",
-      "not": { "required": ["worker"] }
+      "not": {
+        "required": [
+          "worker"
+        ]
+      }
     },
     "image": {
       "type": "object",
-      "not": { "required": ["worker"] }
+      "not": {
+        "required": [
+          "worker"
+        ]
+      }
     },
     "executionKernel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["replicas", "databaseUser", "metricsPort"],
+      "required": [
+        "replicas",
+        "databaseUser",
+        "metricsPort"
+      ],
       "properties": {
-        "replicas": { "type": "integer", "minimum": 1, "maximum": 20 },
-        "databaseUser": { "type": "string", "minLength": 1 },
-        "metricsPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "databaseUser": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metricsPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
       }
     },
     "shutdown": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["timeoutSeconds", "terminationGracePeriodSeconds"],
+      "required": [
+        "timeoutSeconds",
+        "terminationGracePeriodSeconds"
+      ],
       "properties": {
-        "timeoutSeconds": { "type": "integer", "minimum": 1 },
-        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 2 }
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 2
+        }
       }
     },
     "opsCollector": {
       "type": "object",
-      "required": ["enabled", "targetRef", "allowedNamespaces"],
+      "required": [
+        "enabled",
+        "targetRef",
+        "allowedNamespaces"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "targetRef": { "type": "string", "minLength": 1 },
+        "enabled": {
+          "type": "boolean"
+        },
+        "targetRef": {
+          "type": "string",
+          "minLength": 1
+        },
         "allowedNamespaces": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
-        "token": { "type": "string" },
+        "token": {
+          "type": "string",
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
+        },
         "serviceAccount": {
           "type": "object",
-          "required": ["create", "name"],
+          "required": [
+            "create",
+            "name"
+          ],
           "properties": {
-            "create": { "type": "boolean" },
-            "name": { "type": "string" }
-          }
-        }
-      },
-      "if": {
-        "required": ["enabled"],
-        "properties": { "enabled": { "const": true } }
-      },
-      "then": {
-        "required": ["token"],
-        "properties": {
-          "token": {
-            "type": "string",
-            "minLength": 32,
-            "$ref": "#/$defs/noPlaceholder"
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            }
           }
         }
       }
     },
     "opsActuator": {
       "type": "object",
-      "required": ["enabled", "targetRef", "allowedNamespaces"],
+      "required": [
+        "enabled",
+        "targetRef",
+        "allowedNamespaces"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "targetRef": { "type": "string", "minLength": 1 },
+        "enabled": {
+          "type": "boolean"
+        },
+        "targetRef": {
+          "type": "string",
+          "minLength": 1
+        },
         "allowedNamespaces": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
-        "token": { "type": "string" },
+        "token": {
+          "type": "string",
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
+        },
         "serviceAccount": {
           "type": "object",
-          "required": ["create", "name"],
+          "required": [
+            "create",
+            "name"
+          ],
           "properties": {
-            "create": { "type": "boolean" },
-            "name": { "type": "string" }
-          }
-        }
-      },
-      "if": {
-        "required": ["enabled"],
-        "properties": { "enabled": { "const": true } }
-      },
-      "then": {
-        "required": ["token"],
-        "properties": {
-          "token": {
-            "type": "string",
-            "minLength": 32,
-            "$ref": "#/$defs/noPlaceholder"
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            }
           }
         }
       }
     },
     "autoscaling": {
       "type": "object",
-      "not": { "required": ["worker"] }
+      "not": {
+        "required": [
+          "worker"
+        ]
+      }
     },
     "env": {
       "type": "object",
@@ -127,9 +195,14 @@
     },
     "securityHeaders": {
       "type": "object",
-      "required": ["contentSecurityPolicy"],
+      "required": [
+        "contentSecurityPolicy"
+      ],
       "properties": {
-        "contentSecurityPolicy": { "type": "string", "minLength": 1 }
+        "contentSecurityPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "monitoring": {
@@ -137,94 +210,233 @@
       "properties": {
         "serviceMonitor": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "properties": {
-            "enabled": { "type": "boolean" },
-            "interval": { "type": "string", "minLength": 1 },
-            "scrapeTimeout": { "type": "string", "minLength": 1 },
-            "labels": { "type": "object" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "minLength": 1
+            },
+            "labels": {
+              "type": "object"
+            }
           }
         }
       }
     },
     "secrets": {
       "type": "object",
-      "required": [
-        "apiKeySecret",
-        "auditSigningKey",
-        "jwtSecret",
-        "sessionSecret",
-        "sandboxTokenSeed",
-        "bootstrapAdminPassword",
-        "postgresAdminPassword",
-        "postgresMigrationPassword",
-        "postgresPassword",
-        "executionKernelPostgresPassword",
-        "redisPassword"
-      ],
       "properties": {
         "apiKeySecret": {
           "type": "string",
-          "minLength": 32,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
         },
         "auditSigningKey": {
           "type": "string",
-          "minLength": 32,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
         },
         "jwtSecret": {
           "type": "string",
-          "minLength": 32,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
         },
         "sessionSecret": {
           "type": "string",
-          "minLength": 32,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
         },
         "sandboxTokenSeed": {
           "type": "string",
-          "minLength": 32,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ]
         },
         "bootstrapAdminPassword": {
           "type": "string",
-          "minLength": 12,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 12
+            }
+          ]
         },
         "postgresAdminPassword": {
           "type": "string",
-          "minLength": 16,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 16
+            }
+          ]
         },
         "postgresMigrationPassword": {
           "type": "string",
-          "minLength": 16,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 16
+            }
+          ]
         },
         "postgresPassword": {
           "type": "string",
-          "minLength": 16,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 16
+            }
+          ]
         },
         "executionKernelPostgresPassword": {
           "type": "string",
-          "minLength": 16,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 16
+            }
+          ]
         },
         "redisPassword": {
           "type": "string",
-          "minLength": 16,
-          "$ref": "#/$defs/noPlaceholder"
+          "$ref": "#/$defs/noPlaceholder",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 16
+            }
+          ]
         },
         "metricsToken": {
           "type": "string",
           "$ref": "#/$defs/noPlaceholder",
           "anyOf": [
-            { "const": "" },
-            { "minLength": 32 }
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
           ]
+        },
+        "databaseAuthorizationSigningSecret": {
+          "type": "string",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ],
+          "$ref": "#/$defs/noPlaceholder"
+        },
+        "publicCursorSecret": {
+          "type": "string",
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "minLength": 32
+            }
+          ],
+          "$ref": "#/$defs/noPlaceholder"
+        }
+      }
+    },
+    "publicUrl": {
+      "type": "string",
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "pattern": "^https?://[^/]+/?$"
+        }
+      ]
+    },
+    "existingSecrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "postgresBootstrap": {
+          "type": "string"
+        },
+        "migration": {
+          "type": "string"
+        },
+        "executionKernel": {
+          "type": "string"
+        },
+        "opsCollector": {
+          "type": "string"
+        },
+        "opsActuator": {
+          "type": "string"
         }
       }
     }

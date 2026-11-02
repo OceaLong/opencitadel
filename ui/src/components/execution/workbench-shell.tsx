@@ -30,6 +30,7 @@ export type WorkbenchShellProps = {
   detailOpen?: boolean;
   onCloseDetail?: () => void;
   notice?: ReactNode;
+  effects?: ReactNode;
 };
 export function WorkbenchShell({
   selection,
@@ -53,6 +54,7 @@ export function WorkbenchShell({
   ),
   onCloseDetail,
   notice,
+  effects,
 }: WorkbenchShellProps) {
   const t = useTranslations("executionWorkbench");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -282,6 +284,7 @@ export function WorkbenchShell({
             </fieldset>
           )}
           {notice}
+          {effects}
         </header>
         <div
           data-workspace

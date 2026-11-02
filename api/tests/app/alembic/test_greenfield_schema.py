@@ -23,7 +23,7 @@ def test_greenfield_schema_is_the_single_root() -> None:
     assert revision is not None
     assert revision.down_revision is None
     assert script.get_bases() == ["0001greenfield"]
-    assert script.get_heads() == ["0030evaluation_judge_history"]
+    assert script.get_heads() == ["0045execution_object_retention"]
     chain = list(script.walk_revisions())
     assert chain[-1].revision == "0001greenfield"
     assert all(newer.down_revision == older.revision for newer, older in pairwise(chain))
@@ -61,6 +61,21 @@ def test_greenfield_schema_is_the_single_root() -> None:
         "0028analysis_scoped_jit.py",
         "0029analysis_team_sessions.py",
         "0030evaluation_judge_history.py",
+        "0031phase1_embedding_space.py",
+        "0032activity_lease_proof.py",
+        "0033patrol_effect_identity.py",
+        "0034execution_effect_operations.py",
+        "0035tool_intent_reads.py",
+        "0036execution_definitions.py",
+        "0037context_sources.py",
+        "0038context_summary.py",
+        "0039context_checkpoint.py",
+        "0040context_cut_checkpoint.py",
+        "0041definition_availability.py",
+        "0042context_request_lookup.py",
+        "0043context_content_dependencies.py",
+        "0044definition_management.py",
+        "0045execution_object_retention.py",
     ]
 
 

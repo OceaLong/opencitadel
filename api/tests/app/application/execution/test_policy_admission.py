@@ -24,7 +24,7 @@ class _Objects:
     def __init__(self) -> None:
         self.payloads = []
 
-    async def put_input(self, run_id, payload):
+    async def put_input(self, run_id, payload, **_ownership):
         del run_id
         self.payloads.append(payload)
         return "object://input", "sha256:" + "1" * 64
@@ -81,6 +81,49 @@ def _active_execution() -> ActiveExecutionPolicy:
             created_at=NOW,
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_input_strategy_uses_the_same_pinned_definition_as_configuration_and_createrun():
+    from tests.app.application.execution.test_context_decisions import state_for
+
+    definition = state_for(RunFamily.AGENT).definition_manifest
+    order, commands, objects = [], _Commands(), _Objects()
+
+    async def resolve(**_kwargs):
+        order.append("pin")
+        return definition.pin, definition
+
+    async def adapt(payload, selected):
+        order.append("input")
+        assert selected is definition
+        return {**payload, "conversation": [], "strategy": selected.digest}
+
+    async def configuration(_scope, _run, _policy, payload, _purpose, **_kwargs):
+        order.append("configuration")
+        assert payload["strategy"] == definition.digest
+        assert payload["_execution_definition"] == definition.pin.model_dump(mode="json")
+
+    admission = RunAdmissionService(
+        command_ingress=commands,
+        activity_objects=objects,
+        policy_heads=_PolicyHeads(_active_execution()),
+        definition_resolver=resolve,
+        configuration_resolver=configuration,
+        clock=lambda: NOW,
+    )
+    await admission.admit(
+        family=RunFamily.AGENT,
+        source_entity_type="session",
+        source_entity_id="session-1",
+        owner_scope=OwnerScope.personal("user-1"),
+        private_input={"message": "question"},
+        public_input={"message": "question"},
+        input_adapter=adapt,
+    )
+    assert order == ["pin", "input", "configuration"]
+    assert commands.commands[0].payload["definition_pin"] == definition.pin.model_dump(mode="json")
+    assert objects.payloads[0]["strategy"] == definition.digest
 
 
 @pytest.mark.asyncio

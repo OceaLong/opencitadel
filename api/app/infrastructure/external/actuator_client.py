@@ -17,6 +17,7 @@ value).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from typing import Any
 
@@ -94,12 +95,88 @@ class MCPActuatorClient:
         timeout_seconds: int = 15,
     ) -> dict[str, Any]:
         manager, names = await self._connect(server, policy=policy)
-        return await self._invoke(
+        manifest = await self._invoke(
             manager,
             names,
             "get_capabilities",
             {},
             timeout_seconds=timeout_seconds,
+        )
+        effect = manifest.get("effect_contract") or {}
+        if (
+            manifest.get("schema_version") != 2
+            or effect.get("version") != 2
+            or effect.get("execute") is not True
+            or effect.get("resolve") != "get_operation"
+            or effect.get("target_identity") != "get_target"
+            or not isinstance(manifest.get("target_ref"), str)
+            or not manifest["target_ref"]
+        ):
+            raise ValueError("Actuator durable effect capabilities unavailable")
+        core = {key: value for key, value in manifest.items() if key != "overall_capability_hash"}
+        expected = hashlib.sha256(
+            json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if manifest.get("overall_capability_hash") != expected:
+            raise ValueError("Actuator capability manifest digest mismatch")
+        required_tools = ACTUATOR_ACTION_TOOLS | {"get_target", "get_operation"}
+        if (
+            not required_tools <= set(manifest.get("enabled_tools", []))
+            or not required_tools <= names.keys()
+        ):
+            raise ValueError("Actuator durable tools are not advertised")
+        for source in manager.tools.get(server.name, []):
+            required = {
+                "get_target": {"namespace", "workload", "kind"},
+                "get_operation": {"operation_id"},
+            }.get(source.name)
+            if source.name in ACTUATOR_ACTION_TOOLS:
+                required = {
+                    "namespace",
+                    "workload",
+                    "kind",
+                    "idempotency_key",
+                    "operation_id",
+                    "payload_digest",
+                    "target_uid",
+                }
+                if source.name == "scale_workload":
+                    required.add("replicas")
+            if required is not None and not required <= set(source.inputSchema.get("required", [])):
+                raise ValueError("Actuator tool schema omits required durable identity")
+        return manifest
+
+    async def get_target(
+        self,
+        server: MCPServerRecord,
+        *,
+        namespace: str,
+        workload: str,
+        kind: str,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 15,
+    ) -> dict[str, Any]:
+        manager, names = await self._connect(server, policy=policy)
+        return await self._invoke(
+            manager,
+            names,
+            "get_target",
+            {"namespace": namespace, "workload": workload, "kind": kind},
+            timeout_seconds,
+        )
+
+    async def get_operation(
+        self,
+        server: MCPServerRecord,
+        operation_id: str,
+        *,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 15,
+    ) -> dict[str, Any]:
+        """Query the original provider journal; never invokes an action tool."""
+        manager, names = await self._connect(server, policy=policy)
+        return await self._invoke(
+            manager, names, "get_operation", {"operation_id": operation_id}, timeout_seconds
         )
 
     async def execute_action(

@@ -20,6 +20,9 @@ TEST_SETTINGS = DeploymentSettings(
     env="test",
     policy_head_refresh_interval_seconds=5,
     policy_max_staleness_seconds=30,
+    # These tests own idle listeners, not in-flight provider calls. The drain
+    # semantics are tested with controlled tasks in test_task_supervisor.py.
+    shutdown_timeout_seconds=0.05,
 )
 
 
@@ -165,6 +168,17 @@ async def test_api_runtime_builds_complete_graph_without_kernel_workers(physical
         assert isinstance(runtime.auth_service._throttle_store, RedisAuthThrottleStore)
         assert runtime.auth_service._throttle_store._redis is runtime.resources.general_redis
         assert runtime.session_service._uow_factory is runtime.uow_factory
+        from types import SimpleNamespace
+
+        from app.infrastructure.execution.postgres_context_sources import PostgresContextSources
+
+        admission_session = object()
+        sources = runtime.agent_service._context_sources_factory(
+            SimpleNamespace(db_session=admission_session)
+        )
+        assert isinstance(sources, PostgresContextSources)
+        assert sources.session is admission_session
+        assert sources.secret == TEST_SETTINGS.database_authorization_signing_secret.encode()
         assert runtime.uow_factory()._secret_cipher is runtime.secret_cipher
         assert runtime.inference_endpoint_service._cipher is runtime.secret_cipher
         assert runtime.sandbox_factory._operations is runtime.runtime_policy_reader

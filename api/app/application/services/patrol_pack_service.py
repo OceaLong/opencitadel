@@ -266,6 +266,7 @@ class PatrolPackService:
                     idempotency_key=f"patrol-pack-validation:{pack.id}:{validation_run_id}",
                     run_id=validation_run_id,
                     command_sink=uow.execution_commands,
+                    inference_read_context=uow,
                 )
             pack.updated_at = datetime.now(UTC)
             await uow.patrol.save_pack(pack)

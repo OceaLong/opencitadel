@@ -198,6 +198,16 @@ class KBRetrievalMixin:
         result = await self.db_session.execute(
             text(
                 """
+                WITH parsed_query AS MATERIALIZED (
+                    SELECT plainto_tsquery('simple', :query) AS all_terms,
+                           tsvector_to_array(to_tsvector('simple', :query)) AS terms
+                ), search_query AS MATERIALIZED (
+                    SELECT to_tsquery(
+                             'simple', replace(all_terms::text, ' & ', ' | ')
+                           ) AS any_terms,
+                           terms
+                    FROM parsed_query
+                )
                 SELECT c.id, c.kb_id, c.doc_id, c.version_id,
                        c.parent_id, c.level, c.content,
                        c.page_no, c.heading_path, c.ordinal,
@@ -205,11 +215,14 @@ class KBRetrievalMixin:
                        d.page_count, d.status, d.error, d.warning,
                        d.created_at, d.updated_at,
                        manifest.document_revision_id,
-                       ts_rank(
-                         c.content_tsv,
-                         plainto_tsquery('simple', :query)
-                       ) AS score
+                       ts_rank(c.content_tsv, search_query.any_terms) AS score,
+                       (
+                         SELECT count(*)
+                         FROM unnest(search_query.terms) AS term
+                         WHERE term = ANY(tsvector_to_array(c.content_tsv))
+                       ) AS matched_term_count
                 FROM knowledge_chunks c
+                CROSS JOIN search_query
                 JOIN knowledge_base_versions version
                   ON version.id = c.version_id
                  AND version.knowledge_base_id = c.kb_id
@@ -231,8 +244,8 @@ class KBRetrievalMixin:
                   AND c.version_id = :version_id
                   AND c.level = 'child'
                   AND c.content_tsv
-                      @@ plainto_tsquery('simple', :query)
-                ORDER BY score DESC, c.ordinal ASC, c.id ASC
+                      @@ search_query.any_terms
+                ORDER BY matched_term_count DESC, score DESC, c.ordinal ASC, c.id ASC
                 LIMIT :limit
                 """
             ),

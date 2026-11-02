@@ -45,7 +45,10 @@ def scrub_secret_patterns(value: Any) -> str:
     rendered = str(value)
     rendered = _SECRET_PATTERNS[0].sub(r"\1***REDACTED***", rendered)
     rendered = _SECRET_PATTERNS[1].sub(r"\1=***REDACTED***", rendered)
-    rendered = _SECRET_PATTERNS[2].sub(r"\1***REDACTED***\2", rendered)
+    # A credential URI requires this delimiter. Avoid attempting the unanchored
+    # scheme match at every byte of large delimiter-free tool output.
+    if "://" in rendered:
+        rendered = _SECRET_PATTERNS[2].sub(r"\1***REDACTED***\2", rendered)
     return _SECRET_PATTERNS[3].sub("***REDACTED***", rendered)
 
 

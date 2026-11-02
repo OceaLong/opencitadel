@@ -372,6 +372,10 @@ def get_execution_event_service(
     return runtime.execution_event_factory(get_authorization_context())
 
 
+def get_effect_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    return runtime.effect_service
+
+
 def get_dataset_service(runtime: ApiRuntime = Depends(require_api_runtime)):
     from app.application.security.authorization_context import get_authorization_context
 
@@ -446,3 +450,9 @@ async def get_execution_export_service(runtime: ApiRuntime = Depends(require_api
 
     ctx = get_authorization_context()
     return await runtime.export_factory(ctx.scope, ctx.principal)
+
+
+def get_definition_management_service(runtime: ApiRuntime = Depends(require_api_runtime)):
+    from app.application.security.authorization_context import get_authorization_context
+
+    return runtime.definition_management_factory(get_authorization_context())

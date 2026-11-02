@@ -36,6 +36,10 @@ class CorruptEventStreamError(ExecutionStoreError):
         super().__init__(f"corrupt event stream at version {stream_version}: {reason}")
 
 
+class SnapshotAnchorMismatchError(ExecutionStoreError):
+    """The disposable snapshot does not identify a valid stored anchor."""
+
+
 class StreamOwnerScopeMismatchError(ExecutionStoreError):
     def __init__(
         self,

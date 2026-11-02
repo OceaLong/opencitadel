@@ -45,6 +45,42 @@ spec:
 
     - name: opencitadel.execution
       rules:
+        - alert: OpencitadelExternalWriteUnknown
+          expr: max(execution_effect_oldest_age_seconds{state="unknown"}) > 900
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "外部写操作结果待核验"
+            description: "仍有 unknown 操作，其创建年龄超过 15m。通过原 operation 查询或有证据的人工结算处理，不能重发原写入。该告警不代表业务失败。"
+
+        - alert: OpencitadelEffectIntegrityConflict
+          expr: max(execution_effect_integrity_conflict_rows) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "外部操作回执存在矛盾"
+            description: "操作已隔离，需核查原始证据。后续匹配旧结论的回执不能解除隔离或恢复执行；不得重发原写入。"
+
+        - alert: OpencitadelEffectVerificationUnavailable
+          expr: max(delta(execution_effect_resolution_unavailable_rows[15m])) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "外部操作核验基础设施不可用"
+            description: "过去 15m 新增核验基础设施失败。检查 resolver、网络与权限；原写结果仍待确认，失败查询不是 not_applied 证明。"
+
+        - alert: OpencitadelActivityLeaseFailures
+          expr: sum(increase(execution_activity_lease_events_total{event=~"lease_lost|settlement_rejected|cancellation_timeout"}[10m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Activity 租约失效或过期提交持续增加"
+            description: "过去 10m 发生 {{`{{ $value }}`}} 次租约失效、过期提交拒绝或取消超时，请检查数据库延迟与 worker 健康状态。"
+
         # outbox 投递滞后：最老未投递 wakeup 的堆积时长。
         # 指标由 execution_outbox_lag_seconds（execution-kernel）落地。
         - alert: OpencitadelExecutionOutboxLagHigh

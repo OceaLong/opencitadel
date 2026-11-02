@@ -1,3 +1,5 @@
+{{- include "opencitadel.validateExistingSecrets" . }}
+{{- $env := include "opencitadel.deploymentEnv" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +26,7 @@ spec:
             matchLabels:
               {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "api") | nindent 14 }}
       {{- end }}
-      {{- $secretName := printf "%s-secret" (include "opencitadel.fullname" .) }}
+      {{- $secretName := include "opencitadel.secretName" (dict "root" . "group" "application") }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -44,7 +46,7 @@ spec:
             - secretRef:
                 name: {{ $secretName }}
           env:
-            {{- range $key, $value := .Values.env }}
+            {{- range $key, $value := $env }}
             {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_IMAGE") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -63,7 +65,7 @@ spec:
             - name: POSTGRES_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-migration-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "migration") }}
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: tmp
@@ -98,9 +100,7 @@ spec:
             - secretRef:
                 name: {{ $secretName }}
           env:
-            - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
-              value: {{ .Values.shutdown.timeoutSeconds | quote }}
-            {{- range $key, $value := .Values.env }}
+            {{- range $key, $value := $env }}
             {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") (ne $key "SANDBOX_IMAGE") }}
             - name: {{ $key }}
               value: {{ $value | quote }}

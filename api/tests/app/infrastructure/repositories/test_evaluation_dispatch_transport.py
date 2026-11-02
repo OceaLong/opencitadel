@@ -155,7 +155,7 @@ async def test_actual_model_handler_installs_bound_candidates_and_payload_guard(
                 "_execution_usage": {"purpose": "production"},
             }
 
-        async def put_result(self, *args):
+        async def put_result(self, *args, **_ownership):
             return "fake-result"
 
     class CheckedAdapter(OpenAILLM):
@@ -499,7 +499,9 @@ async def ordinary_activity(
                     "generation": 0,
                     "claim_generation": claim.claim_generation,
                 },
-            ).model_copy(update={"command_schema_version": 2})
+            ).model_copy(
+                update={"command_schema_version": 2, "activity_lease_proof": claim.lease_proof}
+            )
         )
     ).status == "accepted"
     context = ActivityContext(

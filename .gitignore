@@ -1,8 +1,9 @@
-# Env files (deployment inputs; .env.example / .env.e2e are the tracked schemas)
+# Private deployment inputs; basic, advanced and E2E references remain tracked.
 .env
 .env.*
 !.env.example
 !.env.e2e
+!deploy/config/.env.reference
 
 # OS / editor / IDE
 .DS_Store

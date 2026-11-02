@@ -8,9 +8,33 @@ retrieval outage.
 
 ## 1. Create the logical knowledge base
 
-Open **Knowledge** and create a library with a durable name such as
-“Engineering Handbook.” Choose its owner workspace and configure chunking,
-retrieval, OCR, and GraphRAG settings as needed.
+Open **Knowledge** in the intended workspace and create a library with a durable
+name such as “Engineering Handbook.” New installations use text extraction and
+keyword search. Uploading and indexing text documents needs no inference model;
+Ask and Agent answers still require a configured chat model.
+
+Chunking and retrieval behavior follow the current system Execution Policy,
+managed by an administrator under **Settings → Runtime policy**. Upgrades retain
+existing policy revisions and running tasks; the new installation defaults do
+not overwrite them.
+
+To enable optional capabilities, configure their models under **Settings →
+Inference**, then enable the corresponding Knowledge Base fields in Execution
+Policy:
+
+| Capability | Required configuration | When it takes effect |
+| ---------- | ---------------------- | -------------------- |
+| Vector search | 1536-dimensional embedding model and `embedding` binding; `vector_enabled=true` | New builds; rebuild existing libraries to add vectors |
+| Reranking | Ask/Agent's selected chat model, or the effective `chat` binding when no model is selected; `rerank.enabled=true` | New Ask/Agent Runs |
+| GraphRAG | Effective `chat` binding; `graphrag.enabled=true` | New builds; rebuild existing libraries to add graph data |
+| Scanned PDF OCR | Vision-capable chat model and `chat` binding; `ocr.mode=vision_llm` | Parsing new or previously failed document revisions |
+
+OCR is off initially. Use PDFs with extractable text or enable OCR before
+importing scans. Policy changes do not alter published versions or in-flight
+Runs. Previously extracted document text is reused during rebuilds.
+
+Knowledge-base reranking currently uses the task's chat model; it does not
+consume a separate `rerank` binding.
 
 At this point the knowledge base may have no active version. A document count or
 `ready_doc_count` alone is not enough to start production Q&A; a published
@@ -44,22 +68,29 @@ publish progress. Interpret status as follows:
 | ---------- | ----------------------------------------------------------------------------------------------- |
 | `building` | Candidate is incomplete and cannot be used by Ask or Agent                                      |
 | `ready`    | Published with all configured capabilities                                                      |
-| `degraded` | Published; mandatory keyword/source reads work, and disabled optional capabilities are explicit |
+| `degraded` | Published; indexed documents remain searchable, with failed documents or optional stages reported |
 | `failed`   | Candidate was not published; the previous active version remains readable                       |
 
 A revision at `parsed` is still not searchable. Wait for the candidate version
 to publish; do not use `ready_doc_count` as a shortcut.
 
+A successful basic build is `ready` with `keyword_search=true`,
+`vector_search=false`, and `graph_search=false`. Intentionally disabled
+capabilities do not make a build degraded.
+
 ## 4. Handle degraded builds
 
-A vector or GraphRAG outage may produce a truthful `degraded` publication.
+A partial document parse failure or an enabled vector/GraphRAG outage may
+produce a truthful `degraded` publication.
 Inspect the version/build capabilities and `degraded_reasons`:
 
 - `vector_search=false` means retrieval continues with keyword search.
 - `graph_search=false` means graph exploration is unavailable and returns no
   partial graph.
-- Mandatory parse, chunk, keyword, validation, or publish failures produce a
-  failed candidate and leave the active version unchanged.
+- `DOCUMENT_PARTIAL` means some documents failed to parse while successfully
+  indexed documents remain searchable.
+- If all documents fail to parse, or a mandatory chunk, keyword, validation, or
+  publish stage fails, the candidate fails and the active version is unchanged.
 
 The Graph endpoint itself expresses unavailability as `capability=false` with
 empty nodes and edges. The detailed reason remains on the version/build status

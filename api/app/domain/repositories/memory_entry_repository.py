@@ -41,7 +41,9 @@ class MemoryEntryRepository(ABC):
     async def touch_used(self, entry_ids: list[str]) -> None: ...
 
     @abstractmethod
-    async def update_embedding(self, entry_id: str, embedding: list[float]) -> None: ...
+    async def update_embedding(
+        self, entry_id: str, embedding: list[float] | None, *, embedding_space_digest: str | None
+    ) -> None: ...
 
     @abstractmethod
     async def vector_search_entries(
@@ -49,4 +51,6 @@ class MemoryEntryRepository(ABC):
         query_embedding: list[float],
         session_id: str | None = None,
         limit: int = 20,
+        *,
+        embedding_space_digest: str,
     ) -> list[MemoryEntry]: ...

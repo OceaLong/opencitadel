@@ -94,7 +94,7 @@ class _Objects:
     async def load_input(self, *, key, expected_digest):
         return {"session_id": "session-1", "mode": "agent"}
 
-    async def put_result(self, activity_id, payload):
+    async def put_result(self, activity_id, payload, **_ownership):
         self.written.append((activity_id, payload))
         return f"result://{activity_id}"
 

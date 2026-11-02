@@ -21,6 +21,177 @@ class DBExecutionUsageRepository:
     def __init__(self, session, *, signing_secret=None):
         self.session, self.signing_secret = session, signing_secret
 
+    async def tool_intent_refresh_target(self, scope, run_id, activity_id, subject_digest):
+        from app.domain.errors import ConflictError, NotFoundError
+
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+            SELECT * FROM public.opencitadel_tool_intent_state(:scope,:run,:activity)
+        """),
+                    {**scope_params(scope), "run": str(run_id), "activity": activity_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise NotFoundError("Tool intent not found")
+        if row["subject_digest"] != subject_digest:
+            raise ConflictError("Tool intent subject changed")
+        if row["status"] != "failed" or row["failure_code"] not in {
+            "TOOL_CONTRACT_CHANGED",
+            "TOOL_AUTHORIZATION_CHANGED",
+            "TOOL_INTENT_REFRESH_FAILED",
+        }:
+            raise ConflictError("Tool intent is not eligible for renewal")
+
+    async def tool_intent_refresh_status(self, scope, run_id, activity_id, command_id):
+        from app.domain.errors import NotFoundError
+
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+            SELECT status,rejection_code FROM execution_command_inbox
+            WHERE command_id=:command AND command_type='RefreshToolIntent' AND stream_type='run'
+              AND stream_id=:run AND payload->>'activity_id'=:activity
+              AND ((CAST(:team AS text) IS NOT NULL AND team_id=:team)
+                   OR (CAST(:team AS text) IS NULL AND owner_user_id=:owner AND team_id IS NULL))
+        """),
+                    {
+                        **scope_params(scope),
+                        "run": str(run_id),
+                        "activity": str(activity_id),
+                        "command": command_id,
+                    },
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise NotFoundError("Refresh request not found")
+        return {
+            "command_id": command_id,
+            "status": "rejected"
+            if row["rejection_code"] or row["status"] == "dead_lettered"
+            else "applied"
+            if row["status"] == "accepted"
+            else "pending",
+        }
+
+    async def approval_subject(self, scope, run_id, approval_id):
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+            SELECT * FROM public.opencitadel_approval_subject(:scope,:run,:approval)
+        """),
+                    {**scope_params(scope), "run": str(run_id), "approval": str(approval_id)},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise ValueError("approval is unavailable")
+        return row["subject_digest"]
+
+    async def invocation_authority(self, scope, run_id, *, lock=False):
+        """Reuse signed admission provenance and the current principal predicate."""
+        from app.domain.evaluation.configuration import digest
+        from app.domain.models.scope import OwnerScope, Principal
+        from app.infrastructure.repositories.db_physical_requester_repository import (
+            DBPhysicalRequesterRepository,
+        )
+
+        admitted = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT body FROM execution_configurations WHERE scope_key=:scope AND run_id=:run "
+                        "AND body->>'stage'='admission' ORDER BY created_at,id LIMIT 1"
+                    ),
+                    {**scope_params(scope), "run": run_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        requester = DBPhysicalRequesterRepository(self.session, signing_secret=self.signing_secret)
+        if admitted is None or "physical_requester" not in admitted["body"]:
+            raise PermissionError("invocation_requester_proof_required")
+        try:
+            proof = requester.verify(
+                admitted["body"]["physical_requester"], scope=scope, run_id=run_id
+            )
+        except (ValueError, TypeError, KeyError) as error:
+            raise PermissionError("invocation_requester_proof_invalid") from error
+        if proof["kind"] == "user":
+            principal = Principal.model_validate(proof["principal"])
+            scope = (
+                OwnerScope.team(principal.user_id, scope.team_id)
+                if scope.team_id
+                else OwnerScope.personal(principal.user_id)
+            )
+            await self.authorize_principal(scope, principal, lock=lock)
+        elif proof["kind"] != "system" or not proof.get("actor"):
+            raise PermissionError("invocation_requester_proof_invalid")
+        return {"scope": scope.model_dump(mode="json"), "authorization_epoch": digest(proof)}
+
+    async def authorize_principal(self, scope, principal, *, lock=False):
+        from app.infrastructure.repositories.db_evaluation_dataset_repository import (
+            DBEvaluationDatasetRepository,
+        )
+
+        if lock:
+            await self.session.execute(
+                text("SELECT id FROM users WHERE id=:id FOR SHARE"), {"id": principal.user_id}
+            )
+            if scope.team_id:
+                await self.session.execute(
+                    text(
+                        "SELECT user_id FROM team_members WHERE team_id=:team AND user_id=:user FOR SHARE"
+                    ),
+                    {"team": scope.team_id, "user": principal.user_id},
+                )
+        await DBEvaluationDatasetRepository(self.session).authorize(scope, principal, write=True)
+
+    async def authorize_tool(self, scope, *, skill_id, name, pack, connector_ids, lock=False):
+        from app.domain.services.tools.tool_names import is_tool_allowed
+
+        if skill_id is None:
+            return
+        row = (
+            (
+                await self.session.execute(
+                    text(
+                        "SELECT enabled,allowed_tools,mcp_server_refs,a2a_server_refs FROM skills WHERE id=:id "
+                        "AND (visibility='global' OR (CAST(:team AS text) IS NOT NULL AND team_id=:team) "
+                        "OR (CAST(:team AS text) IS NULL AND owner_user_id=:owner AND team_id IS NULL))"
+                        + (" FOR SHARE" if lock else "")
+                    ),
+                    {**scope_params(scope), "id": skill_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            row is None
+            or not row["enabled"]
+            or (
+                row["allowed_tools"] is not None and not is_tool_allowed(name, row["allowed_tools"])
+            )
+        ):
+            raise PermissionError("tool_skill_authorization_changed")
+        if pack in {"mcp", "a2a"} and not set(connector_ids).issubset(
+            row[pack + "_server_refs"] or []
+        ):
+            raise PermissionError("tool_connector_authorization_changed")
+
     async def capture_requester(self, scope, authorization, *, run_id):
         from app.infrastructure.repositories.db_physical_requester_repository import (
             DBPhysicalRequesterRepository,
@@ -107,6 +278,7 @@ class DBExecutionUsageRepository:
             activity_types.TOOL_CALL,
             activity_types.RETRIEVAL_SEARCH,
             activity_types.KNOWLEDGE_BUILD,
+            activity_types.CONTEXT_COMPACT,
         }:
             raise ValueError("physical dispatch activity unsupported")
         attempt = attempt_key(str(activity_id), generation, claim_generation)

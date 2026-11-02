@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 MAX_ACTIVE_SHELLS = 50
 MAX_SHELL_OUTPUT_BYTES = 5 * 1024 * 1024
 SHELL_SESSION_TTL_SECONDS = 3600
+_EXEC_WAIT_SECONDS = 5
+_READER_CANCEL_TIMEOUT_SECONDS = 1
 
 
 class ShellService:
@@ -41,6 +43,7 @@ class ShellService:
         self.active_shells = {}
         self._session_last_active: dict[str, float] = {}
         self._reader_tasks: set[asyncio.Task[None]] = set()
+        self._output_readers: dict[asyncio.subprocess.Process, asyncio.Task[None]] = {}
 
     def _start_reader_task(
         self,
@@ -49,14 +52,25 @@ class ShellService:
     ) -> None:
         task = asyncio.create_task(self._start_output_reader(session_id, process))
         self._reader_tasks.add(task)
+        self._output_readers[process] = task
         task.add_done_callback(self._reader_task_done)
 
     def _reader_task_done(self, task: asyncio.Task[None]) -> None:
         self._reader_tasks.discard(task)
+        # Keep the current command's completed reader, including its failure,
+        # until session replacement/removal. At most one is retained per shell.
         if task.cancelled():
             return
         if error := task.exception():
             logger.error("Shell output reader failed: %r", error)
+
+    async def _cancel_reader(self, process: asyncio.subprocess.Process) -> None:
+        task = self._output_readers.pop(process, None)
+        if task is not None and not task.done():
+            task.cancel()
+            # A pipe held by a descendant must not make session replacement or
+            # removal wait forever. The process guard also blocks late writes.
+            await asyncio.wait({task}, timeout=_READER_CANCEL_TIMEOUT_SECONDS)
 
     @classmethod
     def _get_display_path(cls, path: str) -> str:
@@ -106,6 +120,9 @@ class ShellService:
         # 2.创建增量编码器（解决字符被切断的问题）
         decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
         shell = self.active_shells.get(session_id)
+        if shell is None or shell.process is not process:
+            return
+        console_record = shell.console_records[-1] if shell.console_records else None
 
         while True:
             # 3.判断子进程是否有标准输出管道
@@ -120,15 +137,19 @@ class ShellService:
                     output = decoder.decode(buffer, final=False)
 
                     # 6.判断会话是否存在
-                    if shell:
-                        # 7.更新会话输出和控制台记录
-                        shell.output += output
-                        if shell.console_records:
-                            shell.console_records[-1].output += output
-                        self._truncate_shell_output(shell)
+                    if (
+                        self.active_shells.get(session_id) is not shell
+                        or shell.process is not process
+                    ):
+                        return
+                    # 7.更新本次命令的会话输出和控制台记录
+                    shell.output += output
+                    if console_record is not None:
+                        console_record.output += output
+                    self._truncate_shell_output(shell)
                 except (OSError, RuntimeError, ValueError) as e:
                     logger.error("读取进程输出时错误: %s", e)
-                    break
+                    raise AppException("Shell output collection failed") from e
             else:
                 break
 
@@ -168,12 +189,15 @@ class ShellService:
         if shell is None:
             return
         process = shell.process
-        if process.returncode is None:
-            try:
-                process.terminate()
-                await asyncio.wait_for(process.wait(), timeout=1)
-            except (OSError, RuntimeError, ValueError):
-                process.kill()
+        try:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=1)
+                except (OSError, RuntimeError, ValueError):
+                    process.kill()
+        finally:
+            await self._cancel_reader(process)
 
     async def _ensure_session_capacity(self) -> None:
         await self._cleanup_expired_sessions()
@@ -224,15 +248,31 @@ class ShellService:
         # 2.获取会话和子进程
         shell = self.active_shells[session_id]
         process = shell.process
+        reader = self._output_readers.get(process)
 
         try:
             # 3.判断是否设置seconds
             seconds = 60 if seconds is None or seconds <= 0 else seconds
-            await asyncio.wait_for(process.wait(), timeout=seconds)
+            async with asyncio.timeout(seconds):
+                await process.wait()
+                if reader is not None:
+                    # Waiting for the process alone does not mean its stdout
+                    # reader has published every byte. Keep one total budget,
+                    # and leave collection alive after timeout/caller cancel.
+                    await asyncio.shield(reader)
+
+            if self.active_shells.get(session_id) is not shell or shell.process is not process:
+                raise AppException("Shell command was replaced while waiting")
 
             # 4.记录日志并返回等待结果
             logger.info("进程已完成, 返回代码为: %s", process.returncode)
             return ShellWaitResult(returncode=process.returncode)
+        except asyncio.CancelledError as exc:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
+            # Retiring this command cancels its reader, not the HTTP caller.
+            raise AppException("Shell command output reader was replaced") from exc
         except TimeoutError as exc:
             # 记录日志并抛出BadRequest异常
             logger.warning("Shell会话进程等待超时: %ss", seconds)
@@ -319,6 +359,7 @@ class ShellService:
                         # 9.结束旧进程出现错误并记录日志调用kill强制关闭进程
                         logger.warning("强制终止Shell会话中的进程 %s 失败: %s", session_id, e)
                         old_process.kill()
+                await self._cancel_reader(old_process)
 
                 # 10.关闭之后创建一个新的进程
                 process = await self._create_process(exec_dir, command)
@@ -335,7 +376,7 @@ class ShellService:
             try:
                 # 13.尝试等待子进程执行(最多等待5s)
                 logger.debug("正在等待会话中的进程完成: %s", session_id)
-                wait_result = await self.wait_process(session_id, seconds=5)
+                wait_result = await self.wait_process(session_id, seconds=_EXEC_WAIT_SECONDS)
 
                 # 14.判断返回代码是否非空(已结束)则同步返回执行结果
                 if wait_result.returncode is not None:

@@ -50,7 +50,7 @@ def test_migrate_main_applies_schema_before_runtime_policy_seed(monkeypatch):
     assert calls == ["lock-enter", "schema", "seed", "lock-exit"]
 
 
-def test_data_step_only_seeds_runtime_policy(monkeypatch):
+def test_data_step_seeds_policy_then_definitions(monkeypatch):
     calls: list[str] = []
 
     settings = DeploymentSettings(env="test")
@@ -62,8 +62,15 @@ def test_data_step_only_seeds_runtime_policy(monkeypatch):
 
     monkeypatch.setattr("app.migrate.seed_runtime_policy_heads", _seed)
 
+    async def _definitions(resolved_settings):
+        assert resolved_settings is settings
+        calls.append("definitions")
+        return 6
+
+    monkeypatch.setattr("app.migrate.seed_execution_definition_heads", _definitions)
+
     from app.migrate import run_data_migrations
 
     asyncio.run(run_data_migrations(settings))
 
-    assert calls == ["seed"]
+    assert calls == ["seed", "definitions"]

@@ -7,6 +7,7 @@ const evidenceDir =
 
 export default defineConfig({
   testDir: ".",
+  testIgnore: "**/tmp/**",
   timeout: 120_000,
   forbidOnly: true,
   fullyParallel: true,
@@ -56,6 +57,7 @@ export default defineConfig({
         /evaluations\.spec\.ts/,
         /execution-analysis\.spec\.ts/,
         /evaluation-governance\.spec\.ts/,
+        /long-running-context\.spec\.ts/,
       ],
     },
     {

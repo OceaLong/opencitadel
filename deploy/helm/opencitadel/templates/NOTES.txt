@@ -1,0 +1,16 @@
+OpenCitadel site: {{ include "opencitadel.publicUrl" . }}
+
+First-login credentials are stored in the application Secret. Retrieve them locally:
+
+  kubectl --namespace {{ .Release.Namespace }} get secret {{ include "opencitadel.secretName" (dict "root" . "group" "application") }} -o jsonpath='{.data.BOOTSTRAP_ADMIN_EMAIL}' | base64 --decode; echo
+  kubectl --namespace {{ .Release.Namespace }} get secret {{ include "opencitadel.secretName" (dict "root" . "group" "application") }} -o jsonpath='{.data.BOOTSTRAP_ADMIN_PASSWORD}' | base64 --decode; echo
+
+Credentials are generated only on installation and reused from existing Secrets.
+Keep the release Secrets with the database volumes; do not delete them during upgrades.
+The stored bootstrap password is for first login and does not reflect later password changes.
+After login, configure the endpoint, model, and chat binding in Settings → Inference.
+{{- if not .Values.ingress.enabled }}
+
+Ingress is disabled. Route /api to {{ include "opencitadel.fullname" . }}-api:8000
+and / to {{ include "opencitadel.fullname" . }}-ui:3000 at the configured public origin.
+{{- end }}

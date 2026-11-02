@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-PATROL_ROOT = REPOSITORY_ROOT / "deploy/patrol-demo"
+PATROL_ROOT = REPOSITORY_ROOT / "demo/patrol"
 
 
 def _documents(relative: str) -> list[dict]:
@@ -145,16 +145,30 @@ def test_real_actuator_is_bound_only_in_demo_namespace_by_fixture_rbac() -> None
     documents = _documents("manifests/actuator-rbac.yaml")
     assert not any(doc["kind"] == "ClusterRoleBinding" for doc in documents)
     bindings = [doc for doc in documents if doc["kind"] == "RoleBinding"]
-    assert len(bindings) == 1
-    binding = bindings[0]
-    assert binding["metadata"]["namespace"] == "opencitadel-patrol-demo"
-    assert {
-        "kind": "ServiceAccount",
-        "name": "opencitadel-ops-actuator",
-        "namespace": "opencitadel",
-    } in binding["subjects"]
-    role = next(doc for doc in documents if doc["kind"] == binding["roleRef"]["kind"])
-    assert role["metadata"]["name"] == binding["roleRef"]["name"]
-    for rule in role["rules"]:
-        assert set(rule["verbs"]) <= {"get", "list", "watch", "patch"}
-        assert set(rule["resources"]) <= {"deployments", "statefulsets", "replicasets"}
+    assert {binding["roleRef"]["name"] for binding in bindings} == {
+        "opencitadel-patrol-demo-actuator-write",
+        "patrol-actuator-journal",
+    }
+    for binding in bindings:
+        assert binding["metadata"]["namespace"] == "opencitadel-patrol-demo"
+        assert {
+            "kind": "ServiceAccount",
+            "name": "opencitadel-ops-actuator",
+            "namespace": "opencitadel",
+        } in binding["subjects"]
+        role = next(
+            doc
+            for doc in documents
+            if doc["kind"] == binding["roleRef"]["kind"]
+            and doc["metadata"]["name"] == binding["roleRef"]["name"]
+        )
+        for rule in role["rules"]:
+            if role["metadata"]["name"] == "patrol-actuator-journal":
+                assert role["kind"] == "Role"
+                assert role["metadata"]["namespace"] == "opencitadel-patrol-demo"
+                assert rule["apiGroups"] == [""]
+                assert set(rule["verbs"]) == {"get", "create", "update"}
+                assert rule["resources"] == ["configmaps"]
+            else:
+                assert set(rule["verbs"]) <= {"get", "list", "watch", "patch"}
+                assert set(rule["resources"]) <= {"deployments", "statefulsets", "replicasets"}

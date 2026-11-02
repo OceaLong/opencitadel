@@ -162,6 +162,35 @@ def test_configured_fixture_prices_survive_candidate_freezing_and_reject_drift()
     assert candidate["money"] == "0.270336"
     frozen = FrozenBudgetCandidates(inventory, proof)
     assert frozen.primary(model).id == model.id
+    assert frozen.for_context_model(output_tokens=4096) is frozen
+    for invalid_output in (True, 4096.0, "4096", 255, 32769):
+        with pytest.raises(ValueError, match="CONTEXT_MODEL_OUTPUT_INVALID"):
+            frozen.for_context_model(output_tokens=invalid_output)
+    capped = frozen.for_context_model(output_tokens=2048)
+    assert capped.proof["context_subpurpose"] == "model"
+    assert capped.proof["parent_candidate_proof_digest"] == digest(frozen.proof)
+    assert capped.primary(model).model.settings.max_output_tokens == 2048
+    assert capped.proof["candidates"][0]["identity"] == candidate["identity"]
+    assert capped.proof["candidates"][0]["base_settings"] == candidate["base_settings"]
+    assert frozen.proof["candidates"][0]["output"] == 4096
+    with pytest.raises(ValueError, match="CONTEXT_OUTPUT_PROFILE_UNSUPPORTED"):
+        frozen.for_context_model(output_tokens=8192)
+    from app.domain.evaluation.context_profile import context_profiles
+
+    main_profiles = context_profiles(frozen, output_tokens=4096)
+    assert main_profiles[0].output_cap == 4096
+    summary = frozen.for_context_summary(output_tokens=1024)
+    assert summary.proof["parent_candidate_proof_digest"] == digest(frozen.proof)
+    assert summary.proof["context_subpurpose"] == "summary"
+    assert summary.proof["candidates"][0]["output"] == 1024
+    assert frozen.proof["candidates"][0]["output"] == 4096
+    assert summary.primary(model).model.settings.max_output_tokens == 1024
+    assert (
+        context_profiles(summary, output_tokens=1024)[0].identity_digest
+        == main_profiles[0].identity_digest
+    )
+    with pytest.raises(ValueError, match="OUTPUT_PROFILE_UNSUPPORTED"):
+        context_profiles(frozen, output_tokens=1024)
     tampered = deepcopy(proof)
     tampered["candidates"][0]["price"]["input"] = 0
     with pytest.raises(ValueError, match="budget_configuration_proof_unavailable"):

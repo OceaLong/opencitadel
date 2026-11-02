@@ -532,6 +532,7 @@ class ScheduledJobService:
                     },
                     idempotency_key=f"scheduled:{job.id}:{firing_id}",
                     command_sink=uow.execution_commands,
+                    inference_read_context=uow,
                 )
                 job.last_execution_run_id = execution_run_id
                 await uow.scheduled_job.save(job)

@@ -48,10 +48,13 @@ Prettier、生成 API 契约、严格 i18n、TypeScript 与 ESLint。`ui/message
 ### 全栈（本地）
 
 ```bash
-cp .env.example .env
-# 编辑 .env：设置管理员密码；登录后再配置推理 Credential
-docker compose --profile local up --build
+make quickstart
+# 自动生成的凭据保存在 .env；登录后再配置推理
 ```
+
+`.env.example` 只列六项基础选择；凭据首次自动生成并持久保存在私有 `.env`。
+只准备配置可运行 `make configure`，高级覆盖分类见
+[`deploy/config/.env.reference`](../deploy/config/.env.reference)。
 
 ## Pull Request 流程
 

@@ -1,4 +1,64 @@
 {
+  "executionEffects": {
+    "requestStates": {
+      "pending": "Queued",
+      "running": "Verifying",
+      "completed": "Processed",
+      "failed": "Request failed",
+      "paused": "Paused: authorization required",
+      "revoked": "Authority revoked"
+    },
+    "title": "External operation verification",
+    "accessRevoked": "Access is no longer available.",
+    "loadFailed": "Unable to refresh verification state. Actions are paused.",
+    "refresh": "Refresh",
+    "operation": "Original operation",
+    "businessState": "Business result",
+    "waitReason": "Waiting reason",
+    "evidenceConflict": "Conflicting receipts; execution is quarantined pending evidence review.",
+    "accounting": "Billing and reservations",
+    "independentAccounting": "Tracked separately. Verifying or abandoning this operation does not settle unknown usage or release reservations.",
+    "lastFact": "Last confirmed fact",
+    "capabilities": "Recovery capabilities",
+    "contractDrift": "The approved intent changed. Review the new schema, target or permissions; the old approval cannot be reused.",
+    "query": "Query original operation",
+    "resolve": "Submit verification evidence",
+    "supplyResult": "Supply result material",
+    "abandon": "Stop waiting",
+    "humanEvidence": "Upload an original audit log or record (JSON/text, up to 1 MiB). Identify its source and how it proves this specific operation. The server verifies ownership and integrity; you attest to the business conclusion.",
+    "decision": "Verified conclusion",
+    "evidenceFile": "Audit evidence file",
+    "resultFile": "Tool result JSON (required to resume when result material is missing)",
+    "evidenceAttached": "Audit evidence attached",
+    "resultAttached": "Result material attached",
+    "source": "Evidence source / audit record identifier",
+    "occurredAt": "Time the operation occurred",
+    "method": "Verification method and operation association",
+    "reason": "Reason",
+    "noAutomaticRetry": "Confirming not applied does not retry the operation. A new attempt needs a new operation and authorization.",
+    "abandonWarning": "Stop this Run from waiting. The external outcome can remain unknown and billing reservations remain independent. This does not undo the remote operation.",
+    "submit": "Submit for verification",
+    "cancel": "Cancel",
+    "requests": "Verification requests",
+    "conflict": "This operation changed. Refreshed its state; review before submitting again.",
+    "invalidEvidence": "Evidence could not be verified. Check ownership, original-operation association, integrity and result format.",
+    "requestFailed": "Request failed or its response is unknown. Refresh to check; repeating the unchanged request uses the same request key.",
+    "states": {
+      "prepared": "Prepared",
+      "sending": "Send permitted",
+      "pending": "Provider processing",
+      "unknown": "Outcome unknown",
+      "applied": "Applied",
+      "not_applied": "Not applied"
+    },
+    "refreshIntent": "Refresh intent and request approval",
+    "refreshIntentHelp": "Keep the original arguments, load the current tool contract and permissions, and request a new approval. Earlier completed work is preserved.",
+    "refreshReason": "Reason for refreshing this intent",
+    "refreshQueued": "Refresh queued. No tool call has been sent.",
+    "refreshApplied": "Refresh accepted. A new approval will appear after the intent is prepared.",
+    "refreshRejected": "This intent can no longer be refreshed. Reload its current state.",
+    "refreshError": "The refresh could not be confirmed. Retry to check the same request."
+  },
   "metadata": {
     "title": "OpenCitadel",
     "description": "OpenCitadel is an action engine that goes beyond answers—it executes tasks, automates workflows, and extends your capabilities."
@@ -213,6 +273,8 @@
       "embeddingCardinalityMismatch": "The embedding response count does not match the request.",
       "embeddingDimensionMismatch": "The embedding vector dimension does not match the configured model.",
       "embeddingInvalidVector": "The inference provider returned an invalid embedding vector.",
+      "embeddingSpaceMismatch": "The embedding configuration differs from this index. Rebuild and publish a new knowledge-base version.",
+      "embeddingRevisionUnverified": "The provider cannot prove an immutable model revision. Vector indexing and search are unavailable under the strict policy.",
       "embeddingRequestFailed": "The embedding request failed.",
       "emptyProbeResponse": "The inference provider returned an empty probe response.",
       "endpointInUse": "This inference endpoint is still used by one or more models.",
@@ -268,10 +330,6 @@
     "noModel": "Please configure a model first",
     "secondaryNav": "Knowledge management",
     "title": "OpenCitadel"
-  },
-  "sessionMode": {
-    "ask": "Ask",
-    "agent": "Agent"
   },
   "chatHeader": {
     "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}",
@@ -590,6 +648,19 @@
         "source_access": "Global URL allow and deny rules."
       }
     },
+    "knowledgeSetup": {
+      "basic": "Text parsing and keyword search",
+      "enhanced": "Text parsing and keyword search with optional enhancements",
+      "configured": "Knowledge-base features follow the loaded policy",
+      "enableSteps": "Configure the required models in Settings → Inference, enable the feature, and save the execution policy. Re-index existing knowledge bases to add vector or graph search. Enable OCR before importing scanned documents; previously parsed text is reused. Reranking applies to subsequent tasks.",
+      "vector": "Optional semantic search. Requires an Embedding purpose binding to a model with 1536 dimensions.",
+      "rerank": "Optional result ranking using the task's chat model. No separate Rerank binding is needed.",
+      "graph": "Optional graph extraction and retrieval. Requires a Chat purpose binding.",
+      "ocr": "Text is parsed directly when available. Vision OCR requires a Chat binding to a model with vision enabled. RapidOCR is reserved and is not implemented.",
+      "ocrOff": "Text only (OCR off)",
+      "ocrReserved": "RapidOCR (reserved, not implemented)",
+      "ocrVision": "Vision OCR"
+    },
     "fields": {
       "agent": {
         "max_iterations": "Maximum iterations",
@@ -709,9 +780,6 @@
     }
   },
   "settingsInference": {
-    "embeddingCapabilityUnavailable": "Vector behavior is enabled, but the workspace Embedding binding is missing or unavailable.",
-    "rerankCapabilityUnavailable": "Reranking is enabled, but the workspace Rerank binding is missing or unavailable.",
-    "configureInference": "Configure inference",
     "addEndpoint": "Add endpoint",
     "editEndpoint": "Edit endpoint",
     "endpointDisplayName": "Endpoint name",
@@ -737,9 +805,13 @@
     "inferenceDescription": "Manage provider endpoints, typed chat and embedding models, and explicit purpose bindings.",
     "bindingsTitle": "Purpose bindings",
     "bindingsDescription": "Workspace bindings override global bindings. Missing bindings stay explicitly unconfigured.",
+    "knowledgeBindingsHint": "Text parsing and keyword search need no additional model bindings. Chat is used for conversations. Your administrator controls optional knowledge enhancements in Runtime policy.",
     "purpose_chat": "Chat",
     "purpose_embedding": "Embedding",
     "purpose_rerank": "Rerank",
+    "purposeHint_chat": "Used for conversations, graph extraction and vision OCR when those features are enabled.",
+    "purposeHint_embedding": "Optional. Used when vector indexing or vector memory is enabled.",
+    "purposeHint_rerank": "Optional purpose binding. Knowledge-base reranking currently uses the task's chat model and does not use this binding.",
     "inheritBinding": "Inherit global binding / no override",
     "inheritedGlobal": "Inherited global",
     "credential": "Credential",
@@ -831,18 +903,6 @@
     "memoryCreated": "Memory created"
   },
   "toolPreview": {
-    "computerTitle": "OpenCitadel's computer",
-    "closePreview": "Close preview",
-    "usingTool": "OpenCitadel is using",
-    "toolTerminal": "terminal",
-    "toolBrowser": "browser",
-    "toolSearch": "search",
-    "toolFile": "file",
-    "toolMcp": "MCP service",
-    "toolA2a": "A2A agent",
-    "toolDefault": "tool",
-    "duration": "Duration {duration}",
-    "viewArgs": "View arguments",
     "jumpToLive": "Jump to live",
     "waitingShellOutput": "Waiting for command output...",
     "browserScreenshot": "Browser screenshot",
@@ -859,9 +919,7 @@
     "waitingResult": "Waiting for result...",
     "agentCallInfo": "Agent call info",
     "toolLabel": "Tool:",
-    "instructionLabel": "Instruction:",
-    "artifacts": "Artifacts",
-    "toolPreviewTab": "Tool preview"
+    "instructionLabel": "Instruction:"
   },
   "vnc": {
     "connectionFailed": "Connection failed",
@@ -1033,7 +1091,8 @@
     "audit": "Audit log",
     "governance": "Governance",
     "evidence": "Evidence center",
-    "complianceReport": "Compliance report"
+    "complianceReport": "Compliance report",
+    "executionDefinitions": "Execution versions"
   },
   "teams": {
     "title": "Teams",
@@ -1229,6 +1288,9 @@
     "outcomeCancelled": "Cancelled"
   },
   "knowledge": {
+    "embeddingSpaceUnverified": "This provider uses a model alias that may change. Reproducible vectors are not guaranteed.",
+    "embeddingSpaceStrict": "Require a verified model revision for vectors. Providers without revision verification can only use keyword search.",
+    "embeddingSpaceRebuild": "To change the embedding model or its settings, build and publish a new knowledge-base version.",
     "loadListFailed": "Failed to load knowledge bases",
     "indexFailed": "Indexing failed",
     "ingestStreamFailed": "Indexing stream connection failed",
@@ -1260,7 +1322,8 @@
     },
     "createDialog": {
       "title": "New document knowledge base",
-      "description": "After creation, upload enterprise documents, web pages, or online doc links to build a RAG index",
+      "description": "Upload documents or web pages after creation. Processing follows the system's current knowledge-base policy.",
+      "policyHint": "Text parsing and keyword search need no additional model bindings. An administrator can enable vector indexing, graph retrieval, reranking or OCR as needed.",
       "namePlaceholder": "e.g. Company policy knowledge base",
       "defaultName": "Enterprise document knowledge base",
       "createFailed": "Failed to create knowledge base"
@@ -1508,6 +1571,9 @@
     },
     "nextRun": "Next {value}",
     "remediation": {
+      "operationId": "Operation ID",
+      "targetUid": "Target UID",
+      "unknownExplanation": "Remote outcome is unknown. Query or verify the original operation from its execution Run; do not rerun the action.",
       "action": {
         "restart_workload": "Restart workload",
         "rollback_workload": "Rollback workload",
@@ -1538,6 +1604,7 @@
       "proposeOnlyNotice": "Remediation is in propose-only mode. You can create an approval proposal, but execution remains disabled by policy.",
       "rollbackHintLabel": "Rollback plan",
       "status": {
+        "unknown": "Outcome unknown",
         "cancelled": "Cancelled",
         "executed": "Executed",
         "executing": "Executing",
@@ -1976,8 +2043,6 @@
     "unknownResult": "External result unknown",
     "stepFailure": "Step failed",
     "partialData": "Some execution facts are missing.",
-    "statusLabel": "Status",
-    "unknownTiming": "Timing unavailable",
     "historicalConversation": "Read-only public message summaries recorded at this boundary. Full conversation replay is not shown here. Continue returns to the current run; sending a message starts a new execution turn.",
     "continueLive": "Continue in live context",
     "openApproval": "Open approval actions",
@@ -2742,5 +2807,78 @@
     "returnContextSaveFailed": "Navigation context could not be saved in this tab. Your current selection is unchanged. Retry saving, then repeat the navigation action.",
     "retrySaveContext": "Retry saving context",
     "startNewAnalysis": "Start a new analysis and clear selection"
+  },
+  "executionUsage": {
+    "amountUsd": "{amount} USD",
+    "title": "Inference usage",
+    "knownOnly": "Costs show known subtotals at this point in the task. Unsettled or unpriced calls remain unknown.",
+    "group": "Call group",
+    "calls": "Calls",
+    "knownCost": "Known cost",
+    "unknownCost": "Unknown-cost calls",
+    "purpose": {
+      "production": "Production",
+      "evaluation_subject": "Evaluation subject",
+      "evaluation_judge": "Evaluation judge",
+      "unknown": "Unspecified purpose"
+    },
+    "kind": {
+      "main_answer": "Main responses",
+      "context_summary": "Context summaries",
+      "other": "Other or unclassified inference"
+    }
+  },
+  "executionContext": {
+    "versionUnavailable": "Waiting for a compatible worker",
+    "versionRecovery": "This task will resume automatically when its execution version is available.",
+    "waitingVersion": "Required version: {version}",
+    "availabilityFailed": "Unable to check execution version availability. Retrying…",
+    "title": "Context",
+    "preparationStep": "Prepare context",
+    "summaryStep": "Summarize context",
+    "selectedSources": "Selected sources",
+    "originalSources": "Original sources",
+    "inputEstimate": "Estimated input tokens",
+    "inputBudget": "Input token budget",
+    "outputBudget": "Output token budget",
+    "summaryChunks": "Summary chunks",
+    "details": "Advanced details",
+    "definitionVersion": "Definition version",
+    "definitionDigest": "Definition digest",
+    "contextDigest": "Context digest",
+    "state": {
+      "preparing": "Preparing context",
+      "compacting": "Summarizing earlier context",
+      "ready": "Context ready",
+      "needs_compaction": "Summary required",
+      "compacted": "Summary completed",
+      "unavailable": "Context unavailable"
+    }
+  },
+  "executionDefinitions": {
+    "title": "Execution versions",
+    "description": "Publishing changes future runs. Retirement waits for existing runs, approvals and external operations to settle.",
+    "refresh": "Refresh",
+    "failed": "Unable to load execution versions.",
+    "completed": "Change completed.",
+    "pending": "Request accepted; waiting for kernel confirmation.",
+    "reason": "Reason for change",
+    "definitions": "Definitions",
+    "loading": "Loading…",
+    "empty": "No definitions registered.",
+    "version": "{family} · version {version}",
+    "retired": "Retired",
+    "current": "Current head",
+    "retained": "Retained",
+    "publish": "Publish for new runs",
+    "retire": "Retire",
+    "previous": "Previous",
+    "next": "Next",
+    "workers": "Workers",
+    "noWorkers": "No worker capabilities registered.",
+    "available": "Available",
+    "expired": "Expired",
+    "blocked": "Retirement is blocked by unfinished runs or external operations.",
+    "blockingRun": "View blocking run"
   }
 }

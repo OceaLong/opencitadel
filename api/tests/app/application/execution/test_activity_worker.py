@@ -1,5 +1,6 @@
 """Crash-boundary contracts for the only durable Activity worker."""
 
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -11,10 +12,11 @@ from app.application.execution.orchestrator import CommandResult
 from app.domain.execution.activity import (
     ActivityClaim,
     ActivityContext,
+    ActivityLeaseConfirmation,
     ActivityOutcome,
     ActivityRequest,
 )
-from app.domain.execution.run import RunFamily, RunState, RunStatus
+from app.domain.execution.run import RunAggregate, RunFamily, RunState, RunStatus
 from tests.app.execution_test_support import (
     run_execution_context_for,
     run_policy_snapshot_json,
@@ -43,6 +45,9 @@ def claim(
             input_digest="a" * 64,
         ),
         claim_generation=3,
+        worker_id="worker-1",
+        server_now=NOW,
+        lease_deadline=NOW + timedelta(seconds=30),
         owner_user_id="user-1",
         team_id=None,
         recovered_after_call_started=recovered,
@@ -56,11 +61,35 @@ class FakeStore:
         self.deferred: list[tuple[ActivityClaim, timedelta]] = []
         self.allow_start = True
         self.allow_heartbeat = True
+        self.clock_origin = None
+        self.server_origin = NOW
+        self.claim_limits = []
+        self.heartbeat_calls = 0
+        self.consume_attempts = []
 
     async def claim(self, **kwargs):
-        del kwargs
-        result, self.claims = self.claims, ()
-        return result
+        self.claim_limits.append(kwargs["limit"])
+        if self.clock_origin is None:
+            self.clock_origin = time.monotonic()
+            self.server_origin = kwargs["now"]
+            server_now = self.server_origin
+        else:
+            server_now = self._server_now()
+        result, self.claims = self.claims[: kwargs["limit"]], self.claims[kwargs["limit"] :]
+        return tuple(
+            item.model_copy(
+                update={
+                    "worker_id": kwargs["worker_id"],
+                    "server_now": server_now,
+                    "lease_deadline": server_now + kwargs["claim_ttl"],
+                }
+            )
+            for item in result
+        )
+
+    def _server_now(self):
+        assert self.clock_origin is not None
+        return self.server_origin + timedelta(seconds=time.monotonic() - self.clock_origin)
 
     async def mark_call_started(self, candidate, **kwargs):
         del kwargs
@@ -68,12 +97,19 @@ class FakeStore:
         return self.allow_start
 
     async def heartbeat(self, candidate, **kwargs):
-        del candidate, kwargs
-        return self.allow_heartbeat
+        del candidate
+        self.heartbeat_calls += 1
+        if not self.allow_heartbeat:
+            return None
+        server_now = self._server_now()
+        return ActivityLeaseConfirmation(
+            server_now=server_now, lease_deadline=server_now + kwargs["claim_ttl"]
+        )
 
-    async def defer(self, candidate, *, now, retry_after):
+    async def defer(self, candidate, *, now, retry_after, consume_attempt=False):
         del now
         self.deferred.append((candidate, retry_after))
+        self.consume_attempts.append(consume_attempt)
         return True
 
 
@@ -152,6 +188,51 @@ class UnexpectedFailureHandler(Handler):
     async def execute(self, request, context):
         self.calls.append((request, context))
         raise LookupError("unexpected adapter failure")
+
+
+@pytest.mark.asyncio
+async def test_contract_drift_survives_worker_settlement_and_versioned_event():
+    from app.application.execution.view_facts import to_view_fact
+    from tests.app.application.execution.test_view_facts import event
+
+    drift = {"reason": "contract_changed", "subject_digest": "b" * 64, "tool_name": "write"}
+
+    class DriftHandler(Handler):
+        async def execute(self, request, context):
+            return ActivityOutcome(
+                status="failed",
+                failure_code="TOOL_CONTRACT_CHANGED",
+                public_data={"status": "not_sent", "contract_drift": drift},
+            )
+
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    registry.register(DriftHandler(idempotent=True))
+    worker = ActivityWorker(
+        store=FakeStore((claim(),)),
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="drift-test",
+    )
+    assert (await worker.run_once(now=NOW, limit=1)).failed == 1
+    command = service.commands[-1][0]
+    assert command.command_schema_version == 3
+    aggregate = RunAggregate()
+    version, payload = aggregate.command_registry.upcast(
+        command.command_type, command.command_schema_version, command.payload
+    )
+    state = RunState(
+        run_id=RUN_ID,
+        active_activity_ids=(ACTIVITY_ID,),
+        activity_generations=((ACTIVITY_ID, 0),),
+        started_activity_claims=((ACTIVITY_ID, 0, 3),),
+    )
+    parsed = aggregate.command_registry.latest(command.command_type).model.model_validate(payload)
+    fact_event = aggregate._decide_FailActivity(state, parsed).events[0]
+    assert fact_event.event_schema_version == version == 3
+    fact = to_view_fact(event("ActivityFailed", fact_event.public_payload, version=version))
+    assert fact.playback_patch()["patch"]["contract_drift"] == drift
 
 
 class ProgressHandler(Handler):
@@ -439,7 +520,7 @@ async def test_stale_claim_never_invokes_handler() -> None:
 
 
 @pytest.mark.asyncio
-async def test_activity_past_its_deadline_fails_without_calling_provider() -> None:
+async def test_activity_past_its_deadline_leaves_settlement_to_trusted_timer() -> None:
     store = FakeStore((claim(timeout_at=NOW - timedelta(seconds=1)),))
     service = FakeRunService()
     registry = ActivityRegistry()
@@ -456,13 +537,12 @@ async def test_activity_past_its_deadline_fails_without_calling_provider() -> No
     stats = await worker.run_once(now=NOW, limit=10)
 
     assert handler.calls == []
-    assert [item[0].command_type for item in service.commands] == ["FailActivity"]
-    assert service.commands[0][0].payload["failure_code"] == "ACTIVITY_TIMEOUT"
-    assert stats.failed == 1
+    assert service.commands == []
+    assert stats.stale == 1
 
 
 @pytest.mark.asyncio
-async def test_activity_crossing_deadline_is_cancelled_and_failed() -> None:
+async def test_activity_crossing_deadline_is_cancelled_without_worker_settlement() -> None:
     store = FakeStore((claim(timeout_at=NOW + timedelta(milliseconds=30)),))
     service = FakeRunService()
     registry = ActivityRegistry()
@@ -484,10 +564,8 @@ async def test_activity_crossing_deadline_is_cancelled_and_failed() -> None:
     assert len(handler.calls) == 1
     assert [item[0].command_type for item in service.commands] == [
         "MarkActivityCallStarted",
-        "FailActivity",
     ]
-    assert service.commands[-1][0].payload["failure_code"] == "ACTIVITY_TIMEOUT"
-    assert stats.failed == 1
+    assert stats.stale == 1
 
 
 @pytest.mark.asyncio
@@ -679,7 +757,7 @@ class ThrottleHandler(Handler):
 
 
 @pytest.mark.asyncio
-async def test_semaphore_bounds_concurrent_claim_execution_to_configured_ceiling() -> None:
+async def test_slots_bound_claims_before_they_are_leased() -> None:
     import asyncio
 
     max_concurrency = 2
@@ -707,9 +785,11 @@ async def test_semaphore_bounds_concurrent_claim_execution_to_configured_ceiling
         await asyncio.sleep(0)
         if handler.active >= max_concurrency:
             break
-    # The Semaphore must hold execution at the ceiling even though 5 were claimed.
+    # Only two leases may exist locally; the remaining three stay in the store.
     assert handler.active == max_concurrency
     assert handler.started == max_concurrency
+    assert len(store.claims) == 3
+    assert store.claim_limits == [max_concurrency]
     release.set()
     stats = await running
 
@@ -772,7 +852,7 @@ async def test_run_context_unavailable_during_rebuild_defers_instead_of_failing(
 
 
 @pytest.mark.asyncio
-async def test_actual_claim_start_ids_change_but_settlement_identity_is_preserved():
+async def test_submission_ids_are_stable_per_claim_but_change_after_transfer():
     from uuid import NAMESPACE_URL, uuid5
 
     service = FakeRunService()
@@ -793,9 +873,11 @@ async def test_actual_claim_start_ids_change_but_settlement_identity_is_preserve
     assert [c.payload["claim_generation"] for c in starts] == [3, 4, 4]
     assert all(c.command_schema_version == 2 for c in starts + outcomes)
     assert starts[0].command_id != starts[1].command_id == starts[2].command_id
-    assert {c.command_id for c in outcomes} == {
-        uuid5(NAMESPACE_URL, f"opencitadel:{ACTIVITY_ID}:CompleteActivity")
-    }
+    assert outcomes[0].command_id != outcomes[1].command_id == outcomes[2].command_id
+    assert outcomes[0].command_id == uuid5(
+        NAMESPACE_URL, f"opencitadel:{ACTIVITY_ID}:CompleteActivity:0:3"
+    )
+    assert all(context.activity_lease_proof is not None for _, context in service.commands)
 
 
 @pytest.mark.asyncio
@@ -827,9 +909,7 @@ async def test_execution_gate_defers_before_call_started_or_handler():
 
 
 @pytest.mark.asyncio
-async def test_non_idempotent_post_start_timeout_cannot_schedule_retry() -> None:
-    from app.application.execution.decisions.base import fail_for_activity
-
+async def test_non_idempotent_post_start_timeout_cannot_submit_or_schedule_retry() -> None:
     store = FakeStore((claim(timeout_at=NOW + timedelta(milliseconds=30)),))
     service = FakeRunService()
     registry = ActivityRegistry()
@@ -844,20 +924,9 @@ async def test_non_idempotent_post_start_timeout_cannot_schedule_retry() -> None
     )
     stats = await worker.run_once(now=NOW, limit=1)
     assert len(handler.calls) == 1
-    assert stats.unknown == 1
-    outcome = service.commands[-1][0]
-    assert outcome.command_type == "MarkActivityOutcomeUnknown"
-    assert outcome.payload["failure_code"] == "NON_IDEMPOTENT_OUTCOME_UNKNOWN"
-    state = RunState(
-        run_id=RUN_ID,
-        family=RunFamily.AGENT,
-        status=RunStatus.RUNNING,
-        stream_version=4,
-        policy_snapshot=run_policy_snapshot_json("agent"),
-        activity_failure_codes=((ACTIVITY_ID, 0, outcome.payload["failure_code"]),),
-    )
-    decision = fail_for_activity(state, "unknown", activity_id=ACTIVITY_ID, max_retries=3)
-    assert decision.payload["retryable"] is False
+    assert stats.stale == 1
+    assert [command.command_type for command, _ in service.commands] == ["MarkActivityCallStarted"]
+    assert not store.deferred
 
 
 @pytest.mark.asyncio
@@ -919,9 +988,6 @@ async def test_httpx_read_loss_uses_unknown_not_infrastructure_defer_or_blind_re
         policy_snapshot=run_policy_snapshot_json("agent"),
         activity_failure_codes=((ACTIVITY_ID, 0, outcome.payload["failure_code"]),),
     )
-    assert (
-        fail_for_activity(state, "unknown", activity_id=ACTIVITY_ID, max_retries=3).payload[
-            "retryable"
-        ]
-        is False
-    )
+    # Unknown is held for trusted reconciliation, never converted to FailRun
+    # (even non-retryable failure would falsely claim a terminal business fact).
+    assert fail_for_activity(state, "unknown", activity_id=ACTIVITY_ID, max_retries=3) is None

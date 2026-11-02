@@ -1,6 +1,7 @@
 """Resource candidates execute through one durable Activity protocol."""
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import pytest
@@ -22,6 +23,10 @@ from app.domain.runtime_policy import (
     ExecutionPolicy,
     KnowledgeBaseExecutionPolicy,
     KnowledgeChunkPolicy,
+    KnowledgeGraphRagPolicy,
+    KnowledgeOcrMode,
+    KnowledgeOcrPolicy,
+    initial_execution_policy,
 )
 from tests.app.execution_test_support import run_execution_context_for
 
@@ -37,9 +42,10 @@ class Objects:
             "build_id": "build-1",
             "embedding_model_id": "embedding-1",
             "embedding_dimensions": 1536,
+            "embedding_space_digest": "a" * 64,
         }
 
-    async def put_result(self, activity_id: UUID, payload: dict) -> str:
+    async def put_result(self, activity_id: UUID, payload: dict, **_ownership) -> str:
         self.results.append((activity_id, payload))
         return "result://published"
 
@@ -61,6 +67,7 @@ class Pipeline:
         policy: KnowledgeBaseExecutionPolicy,
         embedding_model_id: str | None,
         embedding_dimensions: int | None,
+        embedding_space_digest: str | None,
         graph_llm=None,
         ocr_llm=None,
     ):
@@ -154,6 +161,9 @@ async def test_resource_build_preserves_pipeline_failure_code() -> None:
 
 
 class _VisionModels:
+    def __init__(self, *, vision=True):
+        self.vision = vision
+
     async def resolve_chat(self, model_id=None, *, scope):
         return ResolvedInferenceModel(
             model=InferenceModel(
@@ -162,7 +172,7 @@ class _VisionModels:
                 display_name="chat",
                 model_name="provider-model",
                 settings=ChatModelSettings(),
-                capabilities=InferenceCapabilities(vision=True),
+                capabilities=InferenceCapabilities(vision=self.vision),
             ),
             endpoint=InferenceEndpoint(
                 id="endpoint-1",
@@ -185,8 +195,84 @@ async def test_knowledge_build_wires_chat_llm_for_graph_and_ocr() -> None:
         pipeline=pipeline,
         models=_VisionModels(),
         client_factory=lambda model, **kwargs: sentinel,
-    ).execute(request("knowledge.build"), context([], family="kb_ingest"))
+    ).execute(
+        request("knowledge.build"),
+        context(
+            [],
+            family="kb_ingest",
+            policy=ExecutionPolicy(
+                knowledge_base=KnowledgeBaseExecutionPolicy(
+                    vector_enabled=False,
+                    graphrag=KnowledgeGraphRagPolicy(enabled=True),
+                    ocr=KnowledgeOcrPolicy(mode=KnowledgeOcrMode.VISION_LLM),
+                )
+            ),
+        ),
+    )
 
     assert outcome.status == "succeeded"
     assert pipeline.graph_llms == [sentinel]
     assert pipeline.ocr_llms == [sentinel]
+
+
+@pytest.mark.asyncio
+async def test_basic_build_never_resolves_chat_or_creates_enhancement_clients():
+    objects = Objects()
+    objects.load_input = AsyncMock(
+        return_value={
+            "build_id": "build-1",
+            "embedding_model_id": None,
+            "embedding_dimensions": None,
+        }
+    )
+    models = Mock(
+        resolve_chat=AsyncMock(side_effect=AssertionError("no enhancement binding needed"))
+    )
+    factory = Mock(side_effect=AssertionError("no enhancement client needed"))
+    pipeline = Pipeline([build_done()])
+    policy = initial_execution_policy()
+
+    outcome = await KnowledgeBuildActivityHandler(
+        objects=objects,
+        pipeline=pipeline,
+        models=models,
+        client_factory=factory,
+    ).execute(request("knowledge.build"), context([], family="kb_ingest", policy=policy))
+
+    assert outcome.status == "succeeded"
+    assert pipeline.policies == [policy.knowledge_base]
+    assert pipeline.embedding_snapshots == [(None, None)]
+    assert pipeline.graph_llms == [None]
+    assert pipeline.ocr_llms == [None]
+    models.resolve_chat.assert_not_awaited()
+    factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_enabled_vision_ocr_rejects_nonvision_chat_client():
+    sentinel = object()
+    pipeline = Pipeline([build_done()])
+    initial = initial_execution_policy()
+    policy = initial.model_copy(
+        update={
+            "knowledge_base": initial.knowledge_base.model_copy(
+                update={"ocr": KnowledgeOcrPolicy(mode=KnowledgeOcrMode.VISION_LLM)}
+            )
+        }
+    )
+    models = _VisionModels(vision=False)
+    models.resolve_chat = AsyncMock(wraps=models.resolve_chat)
+    factory = Mock(return_value=sentinel)
+
+    outcome = await KnowledgeBuildActivityHandler(
+        objects=Objects(),
+        pipeline=pipeline,
+        models=models,
+        client_factory=factory,
+    ).execute(request("knowledge.build"), context([], family="kb_ingest", policy=policy))
+
+    assert outcome.status == "succeeded"
+    assert pipeline.graph_llms == [None]
+    assert pipeline.ocr_llms == [None]
+    models.resolve_chat.assert_awaited_once()
+    factory.assert_called_once()

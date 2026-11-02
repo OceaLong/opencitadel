@@ -47,6 +47,7 @@ export function TraceRow({
 }: Props) {
   const t = useTranslations("executionTrace");
   const status = useTranslations("executionWorkbench");
+  const context = useTranslations("executionContext");
   const warning = row.cycle ? "cycle" : row.parentState !== "none" ? row.parentState : null;
   const width = interval ? spanWidth(interval.start, interval.end, range) : null;
   const timing = interval
@@ -55,7 +56,11 @@ export function TraceRow({
         duration: ((interval.end - interval.start) / 1000).toFixed(3),
       })
     : t("unknownTiming");
-  const label = row.step.public_summary || row.step.tool_name || row.step.step_id;
+  const label = row.step.context
+    ? row.step.context.stage === "prepare"
+      ? context("preparationStep")
+      : context("summaryStep")
+    : row.step.public_summary || row.step.tool_name || row.step.step_id;
   const tone =
     row.step.status === "failed"
       ? "bg-destructive"

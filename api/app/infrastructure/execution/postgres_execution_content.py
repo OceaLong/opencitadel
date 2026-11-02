@@ -4,13 +4,15 @@ import hashlib
 import json
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
 from app.application.dto.execution_view import CitationReference, ContentReference
 from app.application.execution.content_sanitization import sanitize_content
 from app.application.execution.view_facts import ProjectionFact, attempt_key
+from app.domain.execution.commands import ActivityLeaseProof
 from app.domain.models.artifact_provenance import ArtifactProducer
 from app.domain.models.resource_pin import ResourceUnavailable
+from app.infrastructure.execution.models import ExecutionActivityTaskORM
 from app.infrastructure.repositories.db_resource_pin_repository import scope_params
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
@@ -31,12 +33,17 @@ class ExecutionContentWriter:
         self.authorization = authorization
         self.objects = objects
 
-    async def record(self, producer, *, command_id, phase, value, citations=(), attachment_ids=()):
-        sanitized = sanitize_content(value)
-        body = json.dumps(
-            sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-        )
-        digest = hashlib.sha256(body.encode()).hexdigest()
+    async def record(
+        self,
+        producer,
+        *,
+        command_id,
+        phase,
+        value,
+        citations=(),
+        attachment_ids=(),
+        lease_proof: ActivityLeaseProof | None = None,
+    ):
         p = {
             **scope_params(producer.scope),
             "content": uuid4(),
@@ -46,23 +53,74 @@ class ExecutionContentWriter:
             "generation": producer.generation,
             "claim": producer.claim_generation,
             "phase": phase,
-            "body": body,
-            "digest": digest,
-            "length": len(body.encode()),
-            "redacted": sanitized != value,
             "citations": "[]",
         }
         async with self.sessions() as session:
             await configure_session_authorization(session, self.authorization)
             # Actual persisted claim authority, never model-supplied activity IDs.
-            valid = await session.scalar(
-                text("""SELECT 1 FROM execution_activity_tasks
-              WHERE activity_id=:activity AND aggregate_id=CAST(CAST(:run AS uuid) AS text) AND request_generation=:generation
-              AND claim_generation=:claim AND owner_user_id IS NOT DISTINCT FROM :owner AND team_id IS NOT DISTINCT FROM :team"""),
-                p,
+            task = await session.scalar(
+                select(ExecutionActivityTaskORM)
+                .where(
+                    ExecutionActivityTaskORM.activity_id == producer.activity_id,
+                    ExecutionActivityTaskORM.aggregate_type == "run",
+                    ExecutionActivityTaskORM.aggregate_id == str(producer.run_id),
+                    ExecutionActivityTaskORM.request_generation == producer.generation,
+                    ExecutionActivityTaskORM.claim_generation == producer.claim_generation,
+                    ExecutionActivityTaskORM.owner_user_id == p["owner"],
+                    ExecutionActivityTaskORM.team_id == p["team"],
+                )
+                .with_for_update()
             )
-            if not valid:
+            now = await session.scalar(select(func.clock_timestamp()))
+            if (
+                task is None
+                or task.status not in {"claimed", "call_started"}
+                or task.claimed_by is None
+                or task.claim_deadline is None
+                or task.claim_deadline <= now
+                or task.timeout_at <= now
+                or (
+                    lease_proof is not None
+                    and (
+                        lease_proof.activity_id != producer.activity_id
+                        or lease_proof.request_generation != producer.generation
+                        or lease_proof.claim_generation != producer.claim_generation
+                        or lease_proof.worker_id != task.claimed_by
+                    )
+                )
+            ):
                 raise ResourceUnavailable("snapshot claim unavailable")
+            from app.infrastructure.execution.context_capture_dispatches import (
+                context_dispatch_evidence,
+            )
+
+            captured = value
+            if phase == "output":
+                from app.infrastructure.execution.context_summary_capture import (
+                    summary_capture_evidence,
+                )
+
+                summary = await summary_capture_evidence(task, value, self.objects)
+                physical = await context_dispatch_evidence(
+                    session, task, scope_key=p["scope"], summary=summary
+                )
+                if physical is not None:
+                    captured = {**captured, "_context_dispatches": physical}
+                if summary is not None:
+                    captured = {**captured, "_context_replay": summary}
+            sanitized = sanitize_content(captured)
+            body = json.dumps(
+                sanitized,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            digest = hashlib.sha256(body.encode()).hexdigest()
+            p.update(
+                body=body, digest=digest, length=len(body.encode()), redacted=sanitized != captured
+            )
+            deadline = min(task.claim_deadline, task.timeout_at)
             from app.domain.models.knowledge_citation import (
                 KnowledgeCitation,
                 deduplicate_citations,
@@ -101,12 +159,15 @@ class ExecutionContentWriter:
                         **citation.model_dump(),
                     ).model_dump(mode="json")
                 )
+            from app.infrastructure.execution.context_capture_dependencies import (
+                ContextCaptureUnavailable,
+            )
             from app.infrastructure.repositories.db_file_repository import DBFileRepository
 
             for file_id in dict.fromkeys(attachment_ids):
                 file = await DBFileRepository(session).get_by_id(file_id, scope=producer.scope)
                 if file is None or not file.content_available:
-                    raise ResourceUnavailable("attachment unavailable")
+                    raise ContextCaptureUnavailable("attachment unavailable")
                 refs.append(
                     CitationReference(
                         citation_id=str(uuid5(NAMESPACE_URL, str(command_id) + ":file:" + file.id)),
@@ -119,10 +180,18 @@ class ExecutionContentWriter:
                         else "unavailable",
                     ).model_dump(mode="json")
                 )
+            from app.infrastructure.execution.context_capture_dependencies import (
+                capture_context_dependencies,
+            )
+
+            dependencies = await capture_context_dependencies(
+                session, task, value, phase=phase, objects=self.objects, scope=producer.scope
+            )
+            p["dependencies"] = json.dumps(dependencies)
             p["citations"] = json.dumps(refs)
             await session.execute(
-                text("""INSERT INTO execution_public_content(content_id,command_id,run_id,activity_id,generation,claim_generation,phase,body,content_digest,byte_length,redacted,citation_refs,owner_user_id,team_id,created_by)
-                VALUES (:content,:command,:run,:activity,:generation,:claim,:phase,:body,:digest,:length,:redacted,CAST(:citations AS jsonb),:owner,:team,'execution-worker')
+                text("""INSERT INTO execution_public_content(content_id,command_id,run_id,activity_id,generation,claim_generation,phase,body,content_digest,byte_length,redacted,citation_refs,context_dependencies,owner_user_id,team_id,created_by)
+                VALUES (:content,:command,:run,:activity,:generation,:claim,:phase,:body,:digest,:length,:redacted,CAST(:citations AS jsonb),CAST(:dependencies AS jsonb),:owner,:team,'execution-worker')
                 ON CONFLICT(scope_key,command_id,phase) DO NOTHING"""),
                 p,
             )
@@ -144,8 +213,11 @@ class ExecutionContentWriter:
                 or row["activity_id"] != producer.activity_id
                 or row["claim_generation"] != producer.claim_generation
                 or row["citation_refs"] != refs
+                or row["context_dependencies"] != dependencies
             ):
                 raise ResourceUnavailable("immutable content capture differs")
+            if deadline <= await session.scalar(select(func.clock_timestamp())):
+                raise ResourceUnavailable("snapshot claim expired during capture")
             await session.commit()
             return content_reference(row)
 
@@ -186,14 +258,25 @@ class ExecutionContentWriter:
             for item in attachments
             if isinstance(item, dict) and isinstance(item.get("file_id"), str)
         ]
-        await self.record(
-            producer,
-            command_id=command_id,
-            phase=phase,
-            value=value,
-            citations=citations,
-            attachment_ids=attachment_ids,
+        from app.infrastructure.execution.context_capture_dependencies import (
+            ContextCaptureUnavailable,
         )
+
+        try:
+            await self.record(
+                producer,
+                command_id=command_id,
+                phase=phase,
+                value=value,
+                citations=citations,
+                attachment_ids=attachment_ids,
+                lease_proof=claim.lease_proof,
+            )
+        except ContextCaptureUnavailable:
+            # No public body is published. The handler/dispatch still independently
+            # checks live authority and can settle a known failure instead of an
+            # endless capture retry. Claim loss and transport errors still propagate.
+            return
 
 
 async def bind_new_content_events(session, events):

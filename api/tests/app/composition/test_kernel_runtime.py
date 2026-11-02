@@ -8,6 +8,7 @@ import pytest
 from app.execution_kernel import ExecutionKernelRuntime
 from app.infrastructure.external.sandbox.factory import SandboxFactory
 from app.runtime_role import ProcessRole
+from core.config import DeploymentSettings
 from tests.app.composition.test_api_runtime import (
     TEST_SETTINGS,
     _PolicyRepository,
@@ -16,9 +17,9 @@ from tests.app.composition.test_api_runtime import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("observe_storage", [False, True])
+@pytest.mark.parametrize(("observe_storage", "activity_concurrency"), [(False, 8), (True, 10)])
 async def test_kernel_runtime_contains_execution_services_only(
-    monkeypatch, observe_storage
+    monkeypatch, observe_storage, activity_concurrency
 ) -> None:
     import app.infrastructure.security.cookie as cookie_module
     import app.infrastructure.security.csrf as csrf_module
@@ -54,6 +55,22 @@ async def test_kernel_runtime_contains_execution_services_only(
         "app.composition.environment_capacity.initialize_environment_capacity", environment_start
     )
     maintenance_actions = []
+    capability_starts = []
+
+    async def publish_capabilities(publisher):
+        capability_starts.append(publisher)
+
+    async def serve_capabilities(publisher, stop):
+        await stop.wait()
+
+    monkeypatch.setattr(
+        "app.application.execution.definition_capabilities.DefinitionCapabilityPublisher.run_once",
+        publish_capabilities,
+    )
+    monkeypatch.setattr(
+        "app.application.execution.definition_capabilities.DefinitionCapabilityPublisher.serve",
+        serve_capabilities,
+    )
 
     async def idle_lane(*args, stop_event, **kwargs):
         if args and callable(args[0]):
@@ -84,16 +101,22 @@ async def test_kernel_runtime_contains_execution_services_only(
         observed_storage.append(storage)
         return storage
 
+    settings = TEST_SETTINGS.model_copy(
+        update={"execution_activity_max_concurrency": activity_concurrency}
+    )
     async with open_kernel_runtime(
-        TEST_SETTINGS,
+        settings,
         factories=_resource_factories(events),
         runtime_policy_repository_factory=lambda _resources: _PolicyRepository(),
         object_storage_wrapper=observer if observe_storage else None,
     ) as runtime:
         assert len(observed_storage) == int(observe_storage)
-        assert physical_starts == [TEST_SETTINGS]
-        assert environment_starts == [TEST_SETTINGS]
+        assert physical_starts == [settings]
+        assert environment_starts == [settings]
         assert isinstance(runtime.execution, ExecutionKernelRuntime)
+        assert len(capability_starts) == 1
+        publisher = capability_starts[0]
+        assert runtime.execution._activities._definitions is publisher.definitions
         assert (
             runtime.execution.activity_registry.resolve(
                 "model.call"
@@ -108,6 +131,8 @@ async def test_kernel_runtime_contains_execution_services_only(
         assert runtime.scheduler_service._policy_reader is runtime.policy_reader
         assert runtime.execution.activity_registry.registered_types == (
             "child_run.start",
+            "context.compact",
+            "context.prepare",
             "knowledge.build",
             "model.call",
             "patrol.execute",
@@ -115,7 +140,16 @@ async def test_kernel_runtime_contains_execution_services_only(
             "remediation.execute",
             "retrieval.search",
             "tool.call",
+            "tool.intent_refresh",
         )
+        model_handler = runtime.execution.activity_registry.resolve("model.call")
+        compact_handler = runtime.execution.activity_registry.resolve("context.compact")
+        prepare_handler = runtime.execution.activity_registry.resolve("context.prepare")
+        dispatch = model_handler._execution_usage.physical_dispatch
+        assert dispatch.model_validator.sources is compact_handler.sources
+        assert dispatch.summary_validator.sources is compact_handler.sources
+        assert model_handler._context_validation.sources is compact_handler.sources
+        assert prepare_handler.preparation.sources is compact_handler.sources
         assert not hasattr(runtime, "auth_service")
         assert not hasattr(runtime, "oauth_registry")
         assert runtime.readiness.ready is True
@@ -136,19 +170,23 @@ async def test_kernel_runtime_contains_execution_services_only(
         assert isinstance(cleanup[0].__self__, PostgresExecutionView)
         assert cleanup[0].__self__.authorization == AuthorizationContext.system("execution-kernel")
         assert runtime.supervisor.pending_names == (
+            "execution-definition-capabilities",
             "evaluation-scheduler",
             "evaluation-reconciler",
             "evaluation-scoring",
             "evaluation-cleanup",
             "scheduler",
+            "execution-definitions",
             "execution-export",
             "execution-export-cleanup",
             "comparison-artifact-diff",
             "notification-delivery",
             "patrol-recheck",
             "execution-recovery",
+            "execution-effects",
             "artifact-provenance",
             "execution-usage",
+            "execution-object-retention",
             "execution-view-cache",
             "sandbox-pool",
             "sandbox-maintenance",
@@ -157,6 +195,24 @@ async def test_kernel_runtime_contains_execution_services_only(
     assert runtime.readiness.ready is False
     assert runtime.supervisor.pending_names == ()
     assert events[-3:] == ["storage:stop", "redis:stop", "postgres:stop"]
+
+
+@pytest.mark.asyncio
+async def test_kernel_rejects_activity_concurrency_above_pool_capacity_before_opening_resources():
+    from app.composition.kernel import open_kernel_runtime
+
+    settings = DeploymentSettings(
+        _env_file=None,
+        env="test",
+        postgres_pool_size=1,
+        postgres_max_overflow=0,
+        execution_activity_max_concurrency=2,
+    )
+    events = []
+    with pytest.raises(ValueError, match=r"execution_activity_max_concurrency.*postgres_pool_size"):
+        async with open_kernel_runtime(settings, factories=_resource_factories(events)):
+            pytest.fail("invalid worker capacity must fail before the runtime is available")
+    assert events == []
 
 
 def test_kernel_module_cold_import_does_not_load_settings(monkeypatch) -> None:
@@ -190,3 +246,24 @@ def test_evaluation_execution_guard_is_shared_by_command_and_activity_boundaries
     )
     assert runtime._activities._execution_gate is sentinel
     assert runtime._command_handler._evaluation_execution is sentinel
+
+
+def test_inbox_keeps_stable_cancellation_when_no_planner_definition_is_available():
+    from app.application.execution.activity_registry import ActivityRegistry
+    from app.application.execution.definition_registry import DefinitionRegistry
+    from app.composition.kernel_runtime import build_execution_kernel_runtime
+    from app.domain.execution.run import RunAggregate
+    from app.domain.models.authorization import AuthorizationContext
+
+    runtime = build_execution_kernel_runtime(
+        session_factory=object(),
+        redis=object(),
+        authorization=AuthorizationContext.system("execution-kernel"),
+        activity_registry=ActivityRegistry(),
+        definitions=DefinitionRegistry(),
+    )
+    schemas = runtime._inbox._source._supported_schemas
+    assert len(schemas) == 1
+    assert schemas[0].name == "CancelRun"
+    assert schemas[0].minimum == 1
+    assert schemas[0].maximum == RunAggregate().command_registry.latest_version("CancelRun")

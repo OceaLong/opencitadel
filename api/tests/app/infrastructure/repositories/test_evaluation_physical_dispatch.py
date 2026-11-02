@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
+from app.domain.execution.commands import ActivityLeaseProof
 from tests.app.alembic.test_execution_view_migration import isolated_database
 from tests.app.application.services.test_execution_usage_postgres import fresh_f07_database
 from tests.app.infrastructure.repositories.test_evaluation_budget_binding import (
@@ -115,7 +116,9 @@ async def ready_dispatch(budget_binding_fixture, monkeypatch):
                     "generation": 0,
                     "claim_generation": claim.claim_generation,
                 },
-            ).model_copy(update={"command_schema_version": 2})
+            ).model_copy(
+                update={"command_schema_version": 2, "activity_lease_proof": claim.lease_proof}
+            )
         )
     ).status == "accepted"
     async with uow(auth) as work:
@@ -393,9 +396,11 @@ async def test_logical_cap_survives_reclaimed_worker_claim_and_keeps_all_receipt
             "generation": 0,
             "claim_generation": claim.claim_generation,
         },
-    ).model_copy(update={"command_schema_version": 2})
+    ).model_copy(update={"command_schema_version": 2, "activity_lease_proof": claim.lease_proof})
     assert (await handler.handle(command)).status == "accepted"
-    recovered = context.model_copy(update={"claim_generation": claim.claim_generation})
+    recovered = context.model_copy(
+        update={"claim_generation": claim.claim_generation, "worker_id": claim.worker_id}
+    )
     identity = (await dispatch.before_send(scope, request, recovered, model, payload)).consume()
     await dispatch.after_send(scope, identity, empty, model.model_name)
     with pytest.raises(ValueError, match="budget_logical_attempts_exhausted"):
@@ -671,7 +676,17 @@ async def test_second_run_for_same_work_unit_requires_explicit_predecessor_and_a
             "claim_generation": context.claim_generation,
             "failure_code": "PROVIDER_UNAVAILABLE",
         },
-    ).model_copy(update={"command_schema_version": 2})
+    ).model_copy(
+        update={
+            "command_schema_version": 2,
+            "activity_lease_proof": ActivityLeaseProof(
+                activity_id=request.activity_id,
+                request_generation=request.generation,
+                claim_generation=context.claim_generation,
+                worker_id=context.worker_id,
+            ),
+        }
+    )
     assert (await handler.handle(failed)).status == "accepted"
     assert (
         await handler.handle(
@@ -746,7 +761,17 @@ async def test_replacement_under_original_scoped_authority_cannot_ignore_unknown
             "claim_generation": context.claim_generation,
             "failure_code": "PROVIDER_UNAVAILABLE",
         },
-    ).model_copy(update={"command_schema_version": 2})
+    ).model_copy(
+        update={
+            "command_schema_version": 2,
+            "activity_lease_proof": ActivityLeaseProof(
+                activity_id=request.activity_id,
+                request_generation=request.generation,
+                claim_generation=context.claim_generation,
+                worker_id=context.worker_id,
+            ),
+        }
+    )
     assert (await handler.handle(failed)).status == "accepted"
     assert (
         await handler.handle(
@@ -815,7 +840,17 @@ async def test_replacement_inherits_exhausted_physical_round_counter(ready_dispa
             "claim_generation": context.claim_generation,
             "failure_code": "PROVIDER_UNAVAILABLE",
         },
-    ).model_copy(update={"command_schema_version": 2})
+    ).model_copy(
+        update={
+            "command_schema_version": 2,
+            "activity_lease_proof": ActivityLeaseProof(
+                activity_id=request.activity_id,
+                request_generation=request.generation,
+                claim_generation=context.claim_generation,
+                worker_id=context.worker_id,
+            ),
+        }
+    )
     assert (await handler.handle(failed)).status == "accepted"
     assert (
         await handler.handle(
@@ -888,7 +923,9 @@ async def test_replacement_inherits_exhausted_physical_round_counter(ready_dispa
                     "generation": 0,
                     "claim_generation": claim.claim_generation,
                 },
-            ).model_copy(update={"command_schema_version": 2})
+            ).model_copy(
+                update={"command_schema_version": 2, "activity_lease_proof": claim.lease_proof}
+            )
         )
     ).status == "accepted"
     async with uow() as work:

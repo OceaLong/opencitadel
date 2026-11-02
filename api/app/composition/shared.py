@@ -73,6 +73,11 @@ from app.application.services.skill_service import SkillService
 from app.application.services.status_service import StatusService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageStatsService
+from app.composition.context_runtime import (
+    ContextRuntimeServices,
+    build_context_runtime,
+    context_admission_sources,
+)
 from app.composition.tasks import TaskSupervisor
 from app.composition.types import ResourceBundle
 from app.composition.uow import DBUnitOfWorkDependencies, create_uow_factory
@@ -200,6 +205,7 @@ class SharedServices:
     memory_service: MemoryService
     llm_token_usage_service: LLMTokenUsageService
     execution_usage_service: ExecutionUsageService
+    context_runtime: ContextRuntimeServices
     status_service: StatusService
     file_service: FileService
     session_service: SessionService
@@ -463,7 +469,6 @@ def build_shared_services(
     )
     object_storage = _object_storage(resources, wrapper=object_storage_wrapper)
     file_storage = _file_storage(resources, uow_factory=uow_factory)
-    activity_objects = ActivityObjectStore(object_storage)
     # Dual-process identity (D14/P2-16①): the execution kernel graph carries an
     # explicit system authorization for its execution-store adapters — no
     # ``None`` → request-contextvar fallback may ever enter the kernel graph
@@ -474,6 +479,20 @@ def build_shared_services(
         if resources.role is ProcessRole.EXECUTION_KERNEL
         else None
     )
+    from app.infrastructure.execution.execution_object_lifecycle import (
+        ExecutionObjectLifecycle,
+        RetainedExecutionStorage,
+    )
+
+    object_storage = RetainedExecutionStorage(
+        ExecutionObjectLifecycle(
+            resources.postgres.upload_intent_session_factory,
+            object_storage,
+            authorization=execution_authorization,
+            signing_secret=settings.database_authorization_signing_secret,
+        )
+    )
+    activity_objects = ActivityObjectStore(object_storage)
     command_ingress = CommandIngress(
         writer=SqlAlchemyCommandEnvelopeWriter(
             session_factory=resources.postgres.session_factory,
@@ -642,22 +661,38 @@ def build_shared_services(
             )
             await session.commit()
 
+    context_runtime = build_context_runtime(
+        uow_factory=uow_factory,
+        objects=activity_objects,
+        storage=object_storage,
+        signing_secret=settings.database_authorization_signing_secret,
+    )
     physical_dispatch = DurableBudgetDispatchService(
         uow_factory=uow_factory,
         inventory=budget_authority.inventory if budget_authority else None,
         physical_policy=configured_physical_policy(settings),
         execution_policy=configured_execution_policy(settings),
+        summary_validator=context_runtime.summary_validator,
+        model_validator=context_runtime.model_validator,
     )
     execution_usage_service = ExecutionUsageService(
         repository_context=usage_repositories,
         physical_dispatch=physical_dispatch,
         admission_authorization=execution_authorization,
     )
+    from app.infrastructure.execution.admission_definition_resolver import (
+        AdmissionDefinitionResolver,
+    )
+    from app.infrastructure.execution.context_file_authority import ContextInputResourceResolver
+
     run_admission_service = RunAdmissionService(
         command_ingress=command_ingress,
         configuration_resolver=execution_usage_service.admission_resolver(inference_model_service),
         activity_objects=activity_objects,
         policy_heads=runtime_policy_reader,
+        context_resource_resolver=ContextInputResourceResolver(activity_objects),
+        definition_resolver=AdmissionDefinitionResolver(),
+        transaction_factory=lambda: uow_factory(execution_authorization),
         # Hard per-scope root admission ceiling including pending commands (0 disables).
         max_active_runs_per_scope=settings.execution_max_active_runs_per_scope,
     )
@@ -781,6 +816,9 @@ def build_shared_services(
         command_ingress=command_ingress,
         public_projection=public_projection,
         run_projection=run_projection,
+        context_sources_factory=context_admission_sources(
+            signing_secret=settings.database_authorization_signing_secret
+        ),
         # Event-driven chat SSE wakeup: subscribe to the same execution:wakeup
         # stream the kernel OutboxDispatcher publishes to, instead of fixed DB
         # polling. Requires the API's general_redis to point at the same Redis
@@ -842,6 +880,7 @@ def build_shared_services(
         memory_service=memory_service,
         llm_token_usage_service=llm_token_usage_service,
         execution_usage_service=execution_usage_service,
+        context_runtime=context_runtime,
         status_service=status_service,
         file_service=file_service,
         session_service=session_service,

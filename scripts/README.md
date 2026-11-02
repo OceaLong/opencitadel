@@ -10,6 +10,7 @@ Operational and documentation maintenance scripts at the repository root.
 | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`backup.sh`](backup.sh) / [`backup_tool.py`](backup_tool.py)                                                                | Quiesced Compose database + object backup with integrity manifest                                                                                |
 | [`verify-backup.sh`](verify-backup.sh) / [`restore.sh`](restore.sh)                                                          | Offline checks and a fresh-volume recovery drill; see the [runbook](../docs/operations/deployment.md#local-compose-backup-and-isolated-recovery) |
+| [`configure-local.sh`](configure-local.sh) | Generate and persist first-install credentials without starting containers (`make configure`) |
 | [`quickstart.sh`](quickstart.sh)                                                                                             | First-run onboarding: create `.env`, build `opencitadel-sandbox`, start Compose stack                                                            |
 | [`check-docs.sh`](check-docs.sh)                                                                                             | CI documentation checks: bilingual pairs, index coverage, stale content guards                                                                   |
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh)                                                                             | Own an isolated full-stack acceptance run, evidence manifest, and exact-label cleanup                                                            |
@@ -22,12 +23,23 @@ Operational and documentation maintenance scripts at the repository root.
 
 ## Usage
 
+`acceptance/` holds the Python orchestration behind the E2E runner;
+`execution_capacity/` holds capacity source and proof tooling. Capacity tests
+live in `execution_capacity/tests/` and run with `make test-capacity` from the
+repository root, using the API dependency environment. This includes large
+local proof fixtures and is separate from the default API test collection.
+Passing these helper tests does not establish full AC21 acceptance.
+
+Quickstart requires a running Docker daemon (`docker info` must succeed). It
+checks this before creating configuration or building images. `make configure`
+can still prepare configuration without Docker.
+
 ```bash
 # Recommended first run (also: make quickstart)
 bash scripts/quickstart.sh
 
-# Non-interactive (CI / no TTY)
-QUICKSTART_NONINTERACTIVE=1 bash scripts/quickstart.sh
+# Prepare only; no Docker startup and no interactive input
+make configure
 
 # Documentation consistency (run before docs PRs)
 ./scripts/check-docs.sh
@@ -61,4 +73,4 @@ before interpreting a product-test result as a passing release gate.
 - [Documentation maintenance checklist](../docs/MAINTENANCE_CHECKLIST.md)
 - [Deterministic full-stack acceptance](../e2e/README.md)
 - [Deploy scripts](../deploy/scripts/README.md) — production host tuning
-- [Ops Patrol fault lab](../deploy/patrol-demo/README.md)
+- [Ops Patrol fault lab](../demo/patrol/README.md)

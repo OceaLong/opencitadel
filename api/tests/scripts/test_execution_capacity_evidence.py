@@ -3,9 +3,9 @@
 Coverage boundary: the synthetic transcript below is a sizing/field oracle, not
 an acceptance report. A strict positive original-replay, private-copy, and fresh
 destination check lives in
-``scripts/execution_capacity/test_facade_connection.py``. Public package and
+``scripts/execution_capacity/tests/test_facade_connection.py``. Public package and
 role validation live in ``test_capacity_package.py`` and
-``scripts/execution_capacity/test_public_package.py``; fixed-slot frame selection
+``scripts/execution_capacity/tests/test_public_package.py``; fixed-slot frame selection
 lives in ``test_capacity_live_resource.py``. None is a full-population or
 reference-machine capacity acceptance run.
 """

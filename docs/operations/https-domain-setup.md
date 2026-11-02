@@ -4,7 +4,12 @@
 
 > **Prerequisite**: Base deployment is complete and the app is reachable at `http://YOUR_SERVER_IP:8088`.
 
-Nginx site configuration is generated automatically at container startup from `.env`. **Do not manually edit** `nginx/conf.d/` or `docker-compose.yml`.
+`make quickstart` derives Nginx hostname, TLS mode and host ports from
+`FRONTEND_BASE_URL`. OAuth redirects and secure cookies follow the same origin.
+The container then renders its Nginx site configuration. Explicit advanced
+overrides remain supported; use this launcher after changing the origin so the
+derived environment reaches Compose. **Do not manually edit**
+`/etc/nginx/conf.d/` or `docker-compose.yml`.
 
 ---
 
@@ -12,7 +17,7 @@ Nginx site configuration is generated automatically at container startup from `.
 
 - [ ] Domain A record points to the server IP
 - [ ] SSL certificate is ready (Let's Encrypt or commercial; paths below)
-- [ ] Firewall allows `8088/tcp` (HTTP) and `443/tcp` (HTTPS)
+- [ ] Firewall allows the selected HTTP port (`8088` for local HTTP, `80` with HTTPS) and `443/tcp` (HTTPS)
 
 ---
 
@@ -26,15 +31,13 @@ vim .env
 ```
 
 ```ini
-OPENCITADEL_DOMAIN=your-domain.com
-HTTPS_ENABLED=false
-NGINX_PORT=8088
+FRONTEND_BASE_URL=http://your-domain.com:8088
 ```
 
 Restart Nginx:
 
 ```bash
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
 Visit: `http://your-domain.com:8088`
@@ -64,22 +67,16 @@ sudo certbot certonly --standalone \
 
 Certificate renewal is your responsibility; after renewal run `docker compose restart opencitadel-nginx`.
 
-Standalone HTTP-01 validation requires public access to host `80/tcp` with no other listener; exposing only `8088/tcp` does not satisfy Certbot validation. Compose otherwise mounts the empty repository directory `nginx/letsencrypt`; set `LETSENCRYPT_DIR` below to mount host certificates. Rendering configuration does not obtain certificates.
+Standalone HTTP-01 validation requires public access to host `80/tcp` with no other listener; exposing only `8088/tcp` does not satisfy Certbot validation. Compose otherwise mounts the empty repository directory `deploy/nginx/letsencrypt`; set `LETSENCRYPT_DIR` below to mount host certificates. Rendering configuration does not obtain certificates.
 
 ### 2. Update .env
 
 ```ini
-OPENCITADEL_DOMAIN=your-domain.com
-HTTPS_ENABLED=true
-NGINX_PORT=8088
-NGINX_HTTPS_PORT=443
 LETSENCRYPT_DIR=/etc/letsencrypt
 
 # Required when ENV=production (API startup validation)
 ENV=production
-COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
-OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
 ```
 
 For **local HTTP quickstart** only (`make quickstart`), use `ENV=development` with `COOKIE_SECURE=false` and `FRONTEND_BASE_URL=http://localhost:8088` instead.
@@ -87,18 +84,17 @@ For **local HTTP quickstart** only (`make quickstart`), use `ENV=development` wi
 ### 3. Restart Nginx
 
 ```bash
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
-If you changed `ENV`, cookie settings, or frontend/OAuth URLs, recreate API and kernel containers to reload their `env_file`:
-
-```bash
-docker compose up -d --force-recreate opencitadel-api opencitadel-execution-kernel
-```
+This also recreates services whose deployment environment changed. The
+certificates must already exist. Remove old explicit `COOKIE_SECURE`,
+`OAUTH_REDIRECT_BASE`, `HTTPS_ENABLED`, domain or port overrides if you want
+them to follow the new origin automatically.
 
 With HTTPS enabled:
 
-- HTTP: `http://your-domain.com:8088` → redirects to `https://your-domain.com`
+- HTTP: `http://your-domain.com` → redirects to `https://your-domain.com`
 - HTTPS: `https://your-domain.com`
 
 ---
@@ -106,8 +102,8 @@ With HTTPS enabled:
 ## 3. Verification
 
 ```bash
-# HTTP redirect (port 8088)
-curl -I http://your-domain.com:8088
+# HTTP redirect (port 80)
+curl -I http://your-domain.com
 
 # HTTPS
 curl -I https://your-domain.com
@@ -119,7 +115,9 @@ docker compose exec opencitadel-nginx nginx -t
 
 ---
 
-The HTTPS template redirects HTTP to standard port 443. A nonstandard host `NGINX_HTTPS_PORT` needs a matching public entrypoint/template.
+The HTTPS template redirects to `FRONTEND_BASE_URL`, including an explicit
+nonstandard HTTPS port. When no origin is supplied, legacy domain/HTTPS-port
+overrides remain supported.
 
 ## 4. Rollback
 
@@ -127,10 +125,11 @@ Return to HTTP-only access:
 
 ```bash
 # In .env
-HTTPS_ENABLED=false
-# For local HTTP development, also set ENV=development, COOKIE_SECURE=false, and frontend/OAuth URLs.
+ENV=development
+FRONTEND_BASE_URL=http://your-domain.com:8088
+# Remove old explicit TLS, cookie, OAuth and port overrides to follow the origin.
 
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
 ---
@@ -144,7 +143,7 @@ Confirm `OPENCITADEL_DOMAIN` matches the certificate directory name and files ex
 ### Firewall
 
 ```bash
-sudo ufw allow 8088/tcp
+sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 ```
@@ -155,5 +154,5 @@ Templates include `Upgrade` / `Connection` headers and long timeouts; extra Ngin
 
 ---
 
-**Last updated**: 2026-10-08
+**Last updated**: 2026-10-10
 **Applies to**: OpenCitadel v1.0

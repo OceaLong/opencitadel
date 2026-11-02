@@ -18,6 +18,9 @@ from app.application.execution.activities.resource_build import (
 )
 from app.application.execution.activities.retrieval import RetrievalActivityHandler
 from app.application.execution.activities.tool_call import ToolCallActivityHandler
+from app.application.execution.activities.tool_intent_refresh import (
+    ToolIntentRefreshActivityHandler,
+)
 
 __all__ = [
     "ChildRunActivityHandler",
@@ -28,4 +31,5 @@ __all__ = [
     "RemediationActivityHandler",
     "RetrievalActivityHandler",
     "ToolCallActivityHandler",
+    "ToolIntentRefreshActivityHandler",
 ]

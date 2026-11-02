@@ -28,3 +28,29 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: opencitadel-ops-actuator-write
+---
+# Operation journals and target gates live only in the Actuator namespace.
+# No delete grant: retained receipts are the permanent idempotency tombstones.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencitadel-ops-actuator-journal
+  namespace: opencitadel
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencitadel-ops-actuator-journal
+  namespace: opencitadel
+subjects:
+  - kind: ServiceAccount
+    name: opencitadel-ops-actuator
+    namespace: opencitadel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opencitadel-ops-actuator-journal

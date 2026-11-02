@@ -24,6 +24,7 @@ from app.domain.models.build_progress import (
     build_message,
     build_step,
 )
+from app.domain.models.embedding_space import EmbeddingRevisionUnverified, EmbeddingSpaceMismatch
 from app.domain.models.error_codes import (
     DOCUMENT_PARSE_FAILED,
     EMBEDDING_UNAVAILABLE,
@@ -123,6 +124,7 @@ class KBIngestionRunner:
         policy: KnowledgeBaseExecutionPolicy,
         embedding_model_id: str | None = None,
         embedding_dimensions: int | None = None,
+        embedding_space_digest: str | None = None,
         graph_llm: LLM | None = None,
         ocr_llm: LLM | None = None,
     ) -> AsyncGenerator[BuildProgress, None]:
@@ -160,6 +162,16 @@ class KBIngestionRunner:
             kb_id = version.knowledge_base_id
             version_id = version.id
 
+            if policy.vector_enabled:
+                if (
+                    version.embedding_space is None
+                    or version.embedding_space_digest != embedding_space_digest
+                    or version.embedding_space.model_id != embedding_model_id
+                ):
+                    raise EmbeddingSpaceMismatch()
+                if kb.settings.get("embedding_revision_policy") == "verified_only":
+                    version.embedding_space.require_verified()
+
             if embedding_model_id is not None and (
                 embedding_dimensions != PLATFORM_EMBEDDING_DIMENSIONS
             ):
@@ -180,6 +192,7 @@ class KBIngestionRunner:
                     scope=_resource_scope(kb.owner_user_id, kb.team_id),
                     enabled=policy.vector_enabled,
                     model_id=embedding_model_id,
+                    expected_space=version.embedding_space,
                 )
                 if self._embeddings is not None
                 else None
@@ -323,6 +336,8 @@ class KBIngestionRunner:
                         entry,
                         DocumentRevisionState.INDEXED,
                     )
+                except EmbeddingSpaceMismatch:
+                    raise
                 except (OSError, RuntimeError, ValueError) as exc:
                     await self._transition(
                         version,
@@ -690,7 +705,7 @@ class KBIngestionRunner:
             degraded_reasons: list[str] = []
             if metrics["failed_document_count"]:
                 degraded_reasons.append("DOCUMENT_PARTIAL")
-            if not vector_search:
+            if policy.vector_enabled and not vector_search:
                 degraded_reasons.append("EMBEDDING_UNAVAILABLE")
             if graph_failed:
                 degraded_reasons.append(
@@ -746,7 +761,7 @@ class KBIngestionRunner:
                 current.status = KBStatus.READY
                 current.doc_count = metrics["document_count"]
                 current.chunk_count = metrics["child_chunk_count"]
-                current.vector_degraded = not vector_search
+                current.vector_degraded = policy.vector_enabled and not vector_search
                 current.error = ", ".join(degraded_reasons) if degraded_reasons else None
                 current.updated_at = datetime.now(UTC)
                 await uow.knowledge_base.save_kb(current)
@@ -780,6 +795,10 @@ class KBIngestionRunner:
                 return
             await self._fail_candidate(build_id, str(exc))
             code = EMBEDDING_UNAVAILABLE if "embed" in str(exc).lower() else None
+            if isinstance(exc, EmbeddingSpaceMismatch):
+                code = "EMBEDDING_SPACE_MISMATCH"
+            elif isinstance(exc, EmbeddingRevisionUnverified):
+                code = "EMBEDDING_REVISION_UNVERIFIED"
             yield build_error(message=str(exc), failure_code=code)
 
     async def _load_candidate(

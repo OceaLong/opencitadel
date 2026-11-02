@@ -34,6 +34,10 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: OPS_ACTUATOR_JOURNAL_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: OPS_ACTUATOR_TARGET_REF
               value: opencitadel-local
             - name: OPS_ACTUATOR_ALLOWED_NAMESPACES

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.domain.execution.activity import ActivityContext
 from app.domain.execution.commands import JsonValue
+from app.domain.execution.tool_contract import RecordedContract, ToolApprovalSubject
 
 
 class ToolDefinition(BaseModel):
@@ -21,6 +22,8 @@ class ToolDefinition(BaseModel):
     approval_kind: str = "tool_effect"
     approval_prompt_param: str | None = None
     approval_choices_param: str | None = None
+    approval_feedback_param: str | None = None
+    contract: RecordedContract | None = None
 
 
 class CatalogSnapshot(BaseModel):
@@ -35,6 +38,7 @@ class CatalogSnapshot(BaseModel):
 
     definitions: tuple[ToolDefinition, ...]
     fingerprint: str
+    authority: dict | None = None
 
     @property
     def tool_names(self) -> tuple[str, ...]:
@@ -57,6 +61,9 @@ class ExecutionToolCatalog(Protocol):
         arguments: dict[str, JsonValue],
         expected_fingerprint: str | None = None,
         approval_feedback: str | None = None,
+        invocation: ToolApprovalSubject | None = None,
+        contract: RecordedContract | None = None,
+        execute=None,
     ) -> dict[str, JsonValue]: ...
 
     async def retrieve(

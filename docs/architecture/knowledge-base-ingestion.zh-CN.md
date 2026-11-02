@@ -5,6 +5,26 @@ OpenCitadel 将知识库视为一个稳定的逻辑资源，其可读内容则�
 
 所有检索、引用、来源展开、GraphRAG、Ask Run 与 Agent Run 都必须携带明确的已发布 `version_id`。生产环境不存在无版本读写路径。
 
+## 初始策略与增强能力
+
+空数据库首次迁移会写入完整 Execution Policy，默认文本提取与关键词检索，
+`vector_enabled=false`、`rerank.enabled=false`、`graphrag.enabled=false`、`ocr.mode=off`。
+文本摄取与关键词检索不解析推理 Binding；Ask/Agent 生成回答仍需要 Chat 推理。
+
+管理员可先配置推理 Binding，再在 **设置 → 运行时策略** 开启增强能力。新构建在准入时冻结
+策略；已有已发布版本需重建才能补充向量或图数据。新的 Ask/Agent Run 单独冻结检索策略。
+已解析的文档文本会复用，因此开启 OCR 不会重新提取已经索引的修订。
+
+升级只校验并保留已有策略 Head 与 Revision。初始 Seed 与 Schema Version 1 的反序列化
+默认值分开，保证历史策略、Run Snapshot 及其 Digest 继续有效。
+
+成功的纯关键词构建为 `ready`。关闭的向量与图阶段只表现为 Capability 为 false，不产生
+降级原因；已开启阶段失败或部分文档失败才会产生 `degraded` 发布。模型要求与开启步骤见
+[知识库教程](../tutorials/02-internal-knowledge-base.zh-CN.md)。
+
+`rapidocr` 作为兼容 Schema 的预留值保留，本地 RapidOCR 尚未实现；新配置使用 `off` 或
+`vision_llm`。
+
 ## 标识与存储模型
 
 | 概念         | 标识与职责                                                                         |
@@ -80,6 +100,8 @@ Revision Entry 不会成为可检索文档。可选阶段失败不能伪装能�
 Ask 和 Agent 创建会话时都先解析已发布版本，在最终事务边界再次检查，并与会话一起持久化唯一的知识库绑定。派生文档计数只是展示值，不是授权条件。
 
 runner 会再次校验持久绑定，并将同一个 `version_id` 传给 retriever 与知识库工具。缺失、重复、资源不匹配、`building`、`failed` 或未发布绑定都会 fail closed。发布新版本不会静默改变已有会话。
+
+关键词检索会先对问句分词，去除常见中英文问句停用词及独立标点。PostgreSQL 将剩余词作为普通文本解析：分块命中任一关键词即可召回，命中不同关键词更多的分块优先，文本相关度用于同覆盖数时的排序。重复一个关键词不会超过多个不同关键词的覆盖。只有停用词或标点的问句不返回关键词命中。这是词面匹配，不进行同义词或语义扩展。所有候选仍受相同的版本、文档索引状态和租户授权约束，无需额外模型或配置，已有关键词索引也无需重建。
 
 显式升级会话时，系统创建新的 current 绑定，并将被替代绑定保留为历史，从而保证审计和旧事件日志可复现。
 

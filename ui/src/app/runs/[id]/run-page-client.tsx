@@ -5,7 +5,9 @@ import { useTranslations } from "next-intl";
 
 import { AnalysisReturnLink } from "@/components/analysis/return-link";
 import { EvaluationResultEntry } from "@/components/evaluation/result-entry";
+import { ExecutionDefinitionAvailability } from "@/components/execution/definition-availability";
 import { DetailPanel } from "@/components/execution/detail-panel";
+import { ExecutionEffects } from "@/components/execution/effect-resolution-panel";
 import { PlaybackControls } from "@/components/execution/playback-controls";
 import { TaskView } from "@/components/execution/task-view";
 import { TraceView } from "@/components/execution/trace-view";
@@ -65,6 +67,15 @@ export function RunPageClient({ runId }: { runId: string }) {
             : null;
   return (
     <WorkbenchShell
+      effects={
+        page && page.run.run_id === selection.runId ? (
+          <ExecutionEffects
+            runId={selection.runId}
+            revision={page.revision}
+            historical={Boolean(selection.at)}
+          />
+        ) : undefined
+      }
       playback={
         <PlaybackControls
           at={selection.at}
@@ -95,14 +106,22 @@ export function RunPageClient({ runId }: { runId: string }) {
         </div>
       }
       notice={
-        workbench.targetUnavailable ? (
-          <p role="status">
-            {t("targetUnavailable")}
-            <Button variant="ghost" onClick={workbench.dismissTargetNotice}>
-              {t("dismiss")}
-            </Button>
-          </p>
-        ) : undefined
+        <>
+          {selection.runId && (
+            <ExecutionDefinitionAvailability
+              runId={selection.runId}
+              historical={Boolean(selection.at)}
+            />
+          )}
+          {workbench.targetUnavailable ? (
+            <p role="status">
+              {t("targetUnavailable")}
+              <Button variant="ghost" onClick={workbench.dismissTargetNotice}>
+                {t("dismiss")}
+              </Button>
+            </p>
+          ) : undefined}
+        </>
       }
       view={
         run && page ? (

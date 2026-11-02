@@ -35,12 +35,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "application") }}
                   key: MINIO_ACCESS_KEY
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "application") }}
                   key: MINIO_SECRET_KEY
           readinessProbe:
             httpGet:

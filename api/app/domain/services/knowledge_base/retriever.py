@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.domain.external.llm import LLM
+from app.domain.models.embedding_space import EmbeddingSpaceMismatch
 from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.models.knowledge_version import (
@@ -21,7 +22,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.runtime_policy import KnowledgeRetrievalRunPolicy
 from app.domain.services.knowledge_base.rerank_service import RerankService
 from app.domain.services.knowledge_base.vector_service import KBVectorService
-from app.domain.services.knowledge_base.zh_tokenizer import segment_for_bm25
+from app.domain.services.knowledge_base.zh_tokenizer import segment_query_for_bm25
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ class HybridRetriever:
         version_id: str,
         query: str,
         limit: int,
+        *,
+        keyword_only: bool = False,
     ) -> RetrievalResponse:
         if not str(kb_id or "").strip():
             raise ValueError("knowledge base id is required")
@@ -89,11 +92,20 @@ class HybridRetriever:
             raise ValueError("retrieval limit must be positive")
         started = time.perf_counter()
         final_top_k = min(limit, self._policy.retrieval.final_top_k)
+        kb = None
         async with self._uow_factory() as uow:
             version = await uow.knowledge_version.get_version(
                 version_id,
                 knowledge_base_id=kb_id,
             )
+            if (
+                version is not None
+                and self._policy.vector_enabled
+                and not keyword_only
+                and self._vector is not None
+                and version.capabilities.get("vector_search", False)
+            ):
+                kb = await uow.knowledge_base.get_kb(kb_id)
         if (
             version is None
             or version.id != version_id
@@ -115,18 +127,31 @@ class HybridRetriever:
         embedding: list[float] = []
         vector_enabled = bool(
             self._policy.vector_enabled
+            and not keyword_only
             and capabilities["vector_search"]
             and self._vector is not None
         )
-        if not self._policy.vector_enabled:
+        if not self._policy.vector_enabled or keyword_only:
             capabilities["vector_search"] = False
+        if keyword_only:
+            reasons.append("vector_search_unavailable")
         if vector_enabled:
+            if version.embedding_space is None:
+                raise EmbeddingSpaceMismatch("published index has no frozen embedding space")
+            if kb is None:
+                raise EmbeddingSpaceMismatch("knowledge base is unavailable")
+            if kb.settings.get("embedding_revision_policy") == "verified_only":
+                version.embedding_space.require_verified()
             try:
                 assert self._vector is not None
-                raw_embedding = await self._vector.embed(query)
+                raw_embedding = await self._vector.embed(
+                    query, expected_space=version.embedding_space
+                )
                 if not self._valid_embedding(raw_embedding):
                     raise ValueError("embedding is empty or malformed")
                 embedding = [float(item) for item in raw_embedding]
+            except EmbeddingSpaceMismatch:
+                raise
             except (OSError, RuntimeError, ValueError):
                 logger.warning(
                     "KB embedding 失败，降级为 BM25-only kb=%s version=%s",
@@ -137,7 +162,7 @@ class HybridRetriever:
                 capabilities["vector_search"] = False
                 reasons.append("EMBEDDING_UNAVAILABLE")
 
-        segmented_query = segment_for_bm25(query)
+        segmented_query = segment_query_for_bm25(query)
         async with self._uow_factory() as uow:
             bm25_hits = await uow.knowledge_base.bm25_search_chunks_for_version(
                 kb_id,

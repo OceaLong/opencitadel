@@ -39,6 +39,7 @@ def run_command_envelope(
         causation_id=context.causation_id,
         issued_at=context.issued_at,
         payload=command.payload,
+        activity_lease_proof=context.activity_lease_proof,
     )
 
 

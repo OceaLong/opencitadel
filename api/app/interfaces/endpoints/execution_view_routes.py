@@ -1,4 +1,4 @@
-"""Authenticated execution reads; all persistence lives behind injected services."""
+"""Authenticated execution reads and intent renewal through injected services."""
 
 import asyncio
 import json
@@ -11,9 +11,11 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response as BinaryResponse
 from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
 from app.application.dto.execution_view import (
+    DefinitionAvailabilityView,
     RunViewPage,
     StepViewPage,
     TimelineView,
@@ -32,7 +34,7 @@ from app.application.services.execution_view_service import ExecutionViewService
 from app.domain.errors import AppException
 from app.domain.models.resource_pin import ResourceUnavailable
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import enforce_auditor_read_only, get_workspace_context
 from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.execution_view import (
     READ_RESPONSES,
@@ -40,6 +42,7 @@ from app.interfaces.schemas.execution_view import (
     StepDetailResponse,
 )
 from app.interfaces.service_dependencies import (
+    get_agent_service,
     get_execution_content_service,
     get_execution_event_service,
     get_execution_view_service,
@@ -106,6 +109,80 @@ class ExecutionReadRoute(APIRoute):
 router = APIRouter(
     tags=["Execution view"], route_class=ExecutionReadRoute, responses=READ_RESPONSES
 )
+
+
+@router.get(
+    "/execution-runs/{run_id}/definition-availability",
+    response_model=Response[DefinitionAvailabilityView],
+)
+async def definition_availability(
+    run_id: UUID,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ExecutionViewService = Depends(get_execution_view_service),
+):
+    return Response.success(await service.definition_availability(ctx.scope, run_id))
+
+
+class RefreshToolIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    expected_subject_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class RefreshToolIntentResponse(BaseModel):
+    command_id: UUID
+    status: Literal["pending", "applied", "rejected"]
+
+
+@router.post(
+    "/execution-runs/{run_id}/tool-intents/{activity_id}/refresh",
+    status_code=202,
+    response_model=Response[RefreshToolIntentResponse],
+    dependencies=[Depends(enforce_auditor_read_only)],
+)
+async def refresh_tool_intent(
+    run_id: UUID,
+    activity_id: UUID,
+    body: RefreshToolIntentRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service=Depends(get_agent_service),
+):
+    if not idempotency_key.strip():
+        raise read_error(400, "invalid_argument")
+    return Response(
+        code=202,
+        data=await service.refresh_tool_intent(
+            run_id=run_id,
+            activity_id=activity_id,
+            owner_scope=ctx.scope,
+            principal=ctx.principal,
+            idempotency_key=idempotency_key.strip(),
+            **body.model_dump(),
+        ),
+    )
+
+
+@router.get(
+    "/execution-runs/{run_id}/tool-intents/{activity_id}/refresh/{command_id}",
+    response_model=Response[RefreshToolIntentResponse],
+)
+async def tool_intent_refresh_status(
+    run_id: UUID,
+    activity_id: UUID,
+    command_id: UUID,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service=Depends(get_agent_service),
+):
+    return Response.success(
+        await service.tool_intent_refresh_status(
+            run_id=run_id,
+            activity_id=activity_id,
+            command_id=command_id,
+            owner_scope=ctx.scope,
+            principal=ctx.principal,
+        )
+    )
 
 
 @router.get("/execution-runs", response_model=Response[RunViewPage])
@@ -204,6 +281,47 @@ async def get_step(
     if attempt is not None and step.attempt_id != attempt:
         raise ViewNotFound("attempt not present at selected step")
     return Response.success(StepDetailResponse(**step.model_dump(), at=cut.at))
+
+
+@router.get("/execution-runs/{run_id}/contexts", response_model=Response[StepViewPage])
+async def list_contexts(
+    run_id: UUID,
+    at: str | None = None,
+    revision: int | None = None,
+    cursor: str | None = None,
+    limit: int = Query(200, ge=1, le=500),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ExecutionViewService = Depends(get_execution_view_service),
+):
+    """Scan a bounded Activity page; continue its cursor even when no context matches."""
+    page = await service.list_steps(
+        ctx.scope,
+        run_id,
+        at=at,
+        revision=revision,
+        filters={"kind": "activity"},
+        cursor=cursor,
+        limit=limit,
+    )
+    return Response.success(
+        page.model_copy(update={"items": [step for step in page.items if step.context is not None]})
+    )
+
+
+@router.get(
+    "/execution-runs/{run_id}/contexts/{step_id}", response_model=Response[StepDetailResponse]
+)
+async def get_context(
+    run_id: UUID,
+    step_id: str,
+    at: str | None = None,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ExecutionViewService = Depends(get_execution_view_service),
+):
+    cut = await service.get_step_cut(ctx.scope, run_id, step_id, at)
+    if cut.step.context is None:
+        raise ViewNotFound("context not present at selected step")
+    return Response.success(StepDetailResponse(**cut.step.model_dump(), at=cut.at))
 
 
 @router.get("/execution-runs/{run_id}/timeline", response_model=Response[TimelineView])

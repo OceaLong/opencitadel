@@ -24,7 +24,7 @@ class _Objects:
             "actor_user_id": "user-1",
         }
 
-    async def put_result(self, activity_id: UUID, payload: dict) -> str:
+    async def put_result(self, activity_id: UUID, payload: dict, **_ownership) -> str:
         assert payload == {
             "pack_id": "pack-1",
             "pack_version": 1,

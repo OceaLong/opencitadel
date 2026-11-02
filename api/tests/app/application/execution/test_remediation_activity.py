@@ -21,7 +21,7 @@ class _Objects:
     async def load_input(self, *, key: str, expected_digest: str) -> dict:
         return {"remediation_id": "rem-1", "session_id": "session-1"}
 
-    async def put_result(self, activity_id: UUID, payload: dict) -> str:
+    async def put_result(self, activity_id: UUID, payload: dict, **_ownership) -> str:
         return "result://remediation"
 
 
@@ -63,3 +63,49 @@ async def test_current_disabled_policy_denies_before_remediation_executor() -> N
     assert outcome.failure_code == "POLICY_DENIED"
     executor.execute.assert_not_awaited()
     assert reader.operations_calls[0][0] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("unknown", "unknown"),
+        ("executing", "unknown"),
+        ("failed", "failed"),
+        ("executed", "succeeded"),
+    ],
+)
+async def test_activity_does_not_report_success_for_unresolved_provider(status, expected):
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(
+            patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.ENABLED)
+        )
+    )
+    executor = AsyncMock()
+    executor.execute.return_value = {"status": status, "actuator_operation_id": "operation-1"}
+    handler = RemediationActivityHandler(
+        objects=_Objects(), executor=executor, policy_reader=reader
+    )
+    request = ActivityRequest(
+        activity_id=UUID("70000000-0000-0000-0000-000000000009"),
+        activity_type="remediation.execute",
+        aggregate_type="run",
+        aggregate_id="80000000-0000-0000-0000-000000000009",
+        generation=0,
+        timeout_at=datetime(2026, 8, 26, tzinfo=UTC),
+        input_ref="input://remediation",
+        input_digest="a" * 64,
+    )
+    context = ActivityContext(
+        worker_id="worker-1",
+        claim_generation=1,
+        idempotency_key="activity-1",
+        owner_user_id="user-1",
+        team_id=None,
+        run=run_execution_context_for("remediation"),
+    )
+    outcome = await handler.execute(request, context)
+    assert outcome.status == expected
+    assert outcome.result_ref == "result://remediation"
+    if expected == "unknown":
+        assert outcome.public_data["operation_id"] == "operation-1"

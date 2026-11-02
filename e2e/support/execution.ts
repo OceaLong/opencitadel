@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { appApi, expect, test } from "../fixtures/acceptance.fixture";
-import { registerCleanupAction } from "./cleanup-journal";
+import { registerOwnedSession } from "./session-retirement";
 import { pollProjection } from "./poll";
 type StreamEvent = {
   cursor: string;
@@ -69,12 +69,7 @@ export async function createSession(
       ...(modelId ? { model_id: modelId } : {}),
     },
   });
-  registerCleanupAction({
-    action: "delete-resource",
-    resource: "session",
-    resource_id: session.data.session_id,
-    ...(workspaceId ? { workspace_id: workspaceId } : {}),
-  });
+  await registerOwnedSession(page, session.data.session_id, workspaceId);
   return session.data.session_id;
 }
 

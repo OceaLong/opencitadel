@@ -415,7 +415,7 @@ class DBEvaluationDatasetRepository:
                     (
                         await self.db.execute(
                             text(
-                                "SELECT c.content_digest,c.citation_refs FROM execution_public_content c JOIN execution_content_bindings b USING(content_id) WHERE c.scope_key=:scope AND b.scope_key=:scope AND c.content_id=CAST(:id AS uuid) AND b.run_id=:run AND b.step_id=:step"
+                                "SELECT c.content_digest,c.citation_refs,c.context_dependencies FROM execution_public_content c JOIN execution_content_bindings b USING(content_id) WHERE c.scope_key=:scope AND b.scope_key=:scope AND c.content_id=CAST(:id AS uuid) AND b.run_id=:run AND b.step_id=:step"
                             ),
                             params(
                                 scope,
@@ -430,6 +430,21 @@ class DBEvaluationDatasetRepository:
                 )
                 if source is None:
                     raise ResourceUnavailable("source_content_unavailable")
+                from app.infrastructure.execution.context_capture_dependencies import (
+                    validate_captured_dependencies,
+                )
+
+                await validate_captured_dependencies(self.db, scope, source["context_dependencies"])
+                if case.input_status == "edited" and source["context_dependencies"]:
+                    # Authored text keeps the original source authority attached,
+                    # just as its fixed citations remain dependencies.
+                    selected.append(
+                        ResourceIdentity(
+                            resource_kind="execution_content",
+                            resource_id=case.source_content_id,
+                            resource_version=source["content_digest"],
+                        )
+                    )
                 if case.input_status == "edited":
                     # The authored input is independent of a redacted source
                     # body, but its fixed source citations remain dependencies.

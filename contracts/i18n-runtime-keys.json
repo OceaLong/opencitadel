@@ -107,6 +107,8 @@
     "inference.errors.embeddingCardinalityMismatch",
     "inference.errors.embeddingDimensionMismatch",
     "inference.errors.embeddingInvalidVector",
+    "inference.errors.embeddingRevisionUnverified",
+    "inference.errors.embeddingSpaceMismatch",
     "inference.errors.embeddingRequestFailed",
     "inference.errors.emptyProbeResponse",
     "inference.errors.endpointInUse",

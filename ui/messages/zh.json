@@ -1,4 +1,64 @@
 {
+  "executionEffects": {
+    "requestStates": {
+      "pending": "已排队",
+      "running": "核验中",
+      "completed": "已处理",
+      "failed": "请求失败",
+      "paused": "已暂停：需要授权",
+      "revoked": "授权已撤销"
+    },
+    "title": "外部操作结果核验",
+    "accessRevoked": "当前已无权访问这些核验信息。",
+    "loadFailed": "无法刷新核验状态，操作暂不可用。",
+    "refresh": "刷新",
+    "operation": "原操作标识",
+    "businessState": "业务结果",
+    "waitReason": "等待原因",
+    "evidenceConflict": "操作回执存在矛盾，执行已隔离，需核查原始证据。",
+    "accounting": "计费与占用",
+    "independentAccounting": "独立跟踪。核验或放弃此操作不会结算未知用量，也不会释放占用。",
+    "lastFact": "最后确定事实",
+    "capabilities": "恢复能力",
+    "contractDrift": "已批准意图发生变化。请核对新的 schema、目标或权限，旧批准不可复用。",
+    "query": "查询原操作",
+    "resolve": "提交核验证据",
+    "supplyResult": "补充结果材料",
+    "abandon": "放弃等待",
+    "humanEvidence": "上传原始审计日志或记录（JSON/文本，最大 1 MiB），说明来源及其与本次操作的关联。服务端校验归属与完整性，由您对业务结论负责。",
+    "decision": "核验结论",
+    "evidenceFile": "审计证据文件",
+    "resultFile": "工具结果 JSON（缺少结果材料时恢复执行必填）",
+    "evidenceAttached": "已附审计证据",
+    "resultAttached": "已附结果材料",
+    "source": "证据来源 / 审计记录编号",
+    "occurredAt": "操作发生时间",
+    "method": "核验方法与原操作关联",
+    "reason": "处理理由",
+    "noAutomaticRetry": "确认未应用不会重试。新尝试须创建新操作并重新授权。",
+    "abandonWarning": "停止本 Run 等待。外部结果仍可能未知，计费占用独立保留；这不会撤回远端操作。",
+    "submit": "提交核验",
+    "cancel": "取消",
+    "requests": "核验请求",
+    "conflict": "操作状态已改变，已刷新；请重新核对后提交。",
+    "invalidEvidence": "证据未通过校验，请检查归属、原操作关联、完整性及结果格式。",
+    "requestFailed": "请求失败或响应未知。请刷新查看；重复提交未修改的请求会复用原请求标识。",
+    "states": {
+      "prepared": "已准备",
+      "sending": "已许可发送",
+      "pending": "远端处理中",
+      "unknown": "结果未知",
+      "applied": "已应用",
+      "not_applied": "未应用"
+    },
+    "refreshIntent": "刷新意图并重新审批",
+    "refreshIntentHelp": "保留原参数，读取当前工具契约和权限，并申请新的审批。之前已完成的工作将继续保留。",
+    "refreshReason": "刷新这次执行意图的原因",
+    "refreshQueued": "刷新已排队，尚未发送工具调用。",
+    "refreshApplied": "刷新已受理，意图准备完成后会出现新的审批。",
+    "refreshRejected": "这次意图已不能刷新，请重新加载当前状态。",
+    "refreshError": "暂时无法确认刷新结果，可重试查询同一请求。"
+  },
   "metadata": {
     "title": "OpenCitadel",
     "description": "OpenCitadel 是一个行动引擎，它超越了答案的范畴，可以执行任务、自动化工作流程，并扩展您的能力。"
@@ -213,6 +273,8 @@
       "embeddingCardinalityMismatch": "向量响应数量与请求数量不一致",
       "embeddingDimensionMismatch": "向量维度与模型配置不一致",
       "embeddingInvalidVector": "推理提供方返回了无效向量",
+      "embeddingSpaceMismatch": "当前向量模型配置与索引不一致，请重建并发布新的知识库版本。",
+      "embeddingRevisionUnverified": "提供方无法证明模型版本不可变。严格策略下无法进行向量构建和检索。",
       "embeddingRequestFailed": "向量请求失败",
       "emptyProbeResponse": "推理提供方返回了空的探测响应",
       "endpointInUse": "仍有模型正在使用该推理端点",
@@ -268,10 +330,6 @@
     "noModel": "请先配置模型",
     "secondaryNav": "知识管理入口",
     "title": "OpenCitadel"
-  },
-  "sessionMode": {
-    "ask": "Ask",
-    "agent": "Agent"
   },
   "chatHeader": {
     "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}",
@@ -590,6 +648,19 @@
         "source_access": "全局 URL 允许与拒绝规则。"
       }
     },
+    "knowledgeSetup": {
+      "basic": "文本解析与关键词检索",
+      "enhanced": "文本解析与关键词检索（包含增强能力）",
+      "configured": "知识库能力遵循已加载的策略",
+      "enableSteps": "先在设置 → 推理中配置所需模型，再开启对应功能并保存执行策略。已有知识库添加向量或图检索需重新索引；OCR 应在导入扫描件前开启，已解析的文本会复用。重排作用于后续任务。",
+      "vector": "可选语义检索，需将 1536 维向量模型绑定到向量嵌入用途。",
+      "rerank": "可选结果重排，使用任务的对话模型，无需单独绑定重排用途。",
+      "graph": "可选图谱提取与检索，需绑定对话用途模型。",
+      "ocr": "文档有文本时直接解析；视觉 OCR 需绑定已开启视觉能力的对话模型。RapidOCR 仅为预留选项，尚未实现。",
+      "ocrOff": "仅文本解析（关闭 OCR）",
+      "ocrReserved": "RapidOCR（预留，尚未实现）",
+      "ocrVision": "视觉 OCR"
+    },
     "fields": {
       "agent": {
         "max_iterations": "最大迭代次数",
@@ -709,9 +780,6 @@
     }
   },
   "settingsInference": {
-    "embeddingCapabilityUnavailable": "向量行为已启用，但当前工作区的 Embedding 绑定缺失或不可用。",
-    "rerankCapabilityUnavailable": "重排序已启用，但当前工作区的 Rerank 绑定缺失或不可用。",
-    "configureInference": "配置推理能力",
     "addEndpoint": "新增端点",
     "editEndpoint": "编辑端点",
     "endpointDisplayName": "端点名称",
@@ -737,9 +805,13 @@
     "inferenceDescription": "统一管理 Provider 端点、Chat/Embedding 类型模型及用途绑定。",
     "bindingsTitle": "用途绑定",
     "bindingsDescription": "工作区绑定覆盖全局绑定；缺失绑定会明确显示为未配置。",
+    "knowledgeBindingsHint": "文本解析与关键词检索无需额外模型绑定，对话使用对话用途模型。知识库增强能力由管理员在运行策略中按需开启。",
     "purpose_chat": "对话",
     "purpose_embedding": "向量嵌入",
     "purpose_rerank": "重排",
+    "purposeHint_chat": "用于对话，以及开启后的图谱提取和视觉 OCR。",
+    "purposeHint_embedding": "可选，用于已开启的向量索引或向量记忆。",
+    "purposeHint_rerank": "可选用途绑定；当前知识库重排使用任务的对话模型，不使用该绑定。",
     "inheritBinding": "继承全局绑定 / 不覆盖",
     "inheritedGlobal": "继承全局",
     "credential": "凭证",
@@ -831,18 +903,6 @@
     "memoryCreated": "记忆已创建"
   },
   "toolPreview": {
-    "computerTitle": "OpenCitadel 的电脑",
-    "closePreview": "关闭预览",
-    "usingTool": "OpenCitadel 正在使用",
-    "toolTerminal": "终端",
-    "toolBrowser": "浏览器",
-    "toolSearch": "搜索",
-    "toolFile": "文件",
-    "toolMcp": "MCP 服务",
-    "toolA2a": "A2A 智能体",
-    "toolDefault": "工具",
-    "duration": "耗时 {duration}",
-    "viewArgs": "查看参数",
     "jumpToLive": "跳转实时",
     "waitingShellOutput": "等待命令输出...",
     "browserScreenshot": "浏览器截图",
@@ -859,9 +919,7 @@
     "waitingResult": "等待执行结果...",
     "agentCallInfo": "Agent 调用信息",
     "toolLabel": "工具：",
-    "instructionLabel": "指令：",
-    "artifacts": "交付物",
-    "toolPreviewTab": "工具预览"
+    "instructionLabel": "指令："
   },
   "vnc": {
     "connectionFailed": "连接失败",
@@ -1033,7 +1091,8 @@
     "audit": "审计日志",
     "governance": "治理概览",
     "evidence": "证据中心",
-    "complianceReport": "合规报表"
+    "complianceReport": "合规报表",
+    "executionDefinitions": "执行版本"
   },
   "teams": {
     "title": "团队",
@@ -1229,6 +1288,9 @@
     "outcomeCancelled": "已取消"
   },
   "knowledge": {
+    "embeddingSpaceUnverified": "提供方使用的模型别名可能发生变化，无法保证向量结果可复现。",
+    "embeddingSpaceStrict": "向量功能须使用可验证的模型版本；提供方不支持版本验证时，仅可使用关键词检索。",
+    "embeddingSpaceRebuild": "更换向量模型或相关配置后，请重建并发布新的知识库版本。",
     "loadListFailed": "加载知识库失败",
     "indexFailed": "索引失败",
     "ingestStreamFailed": "索引流连接失败",
@@ -1260,7 +1322,8 @@
     },
     "createDialog": {
       "title": "新建文档知识库",
-      "description": "创建后可上传企业文档、网页或在线文档链接并建立 RAG 索引",
+      "description": "创建后上传文档或网页，处理方式遵循系统当前的知识库策略。",
+      "policyHint": "文本解析与关键词检索无需额外模型绑定，管理员可按需开启向量索引、图检索、重排或 OCR。",
       "namePlaceholder": "例如：公司制度知识库",
       "defaultName": "企业文档知识库",
       "createFailed": "创建失败"
@@ -1508,6 +1571,9 @@
     },
     "nextRun": "下次 {value}",
     "remediation": {
+      "operationId": "操作标识",
+      "targetUid": "目标 UID",
+      "unknownExplanation": "远端结果未知。请进入执行 Run 查询或核验原操作，勿重复执行动作。",
       "action": {
         "restart_workload": "重启工作负载",
         "rollback_workload": "回滚工作负载",
@@ -1538,6 +1604,7 @@
       "proposeOnlyNotice": "修复当前处于仅提案模式。可以创建审批提案，但策略仍禁止执行。",
       "rollbackHintLabel": "回滚方案",
       "status": {
+        "unknown": "结果待核验",
         "cancelled": "已取消",
         "executed": "已执行",
         "executing": "执行中",
@@ -1976,8 +2043,6 @@
     "unknownResult": "外部结果未知",
     "stepFailure": "步骤失败",
     "partialData": "部分执行事实缺失。",
-    "statusLabel": "状态",
-    "unknownTiming": "时间未知",
     "historicalConversation": "此处只读显示该边界已记录的公开消息摘要，不展示完整历史对话。继续将返回当前运行；发送消息会创建新一轮执行。",
     "continueLive": "返回实时继续任务",
     "openApproval": "打开审批操作",
@@ -2742,5 +2807,78 @@
     "returnContextSaveFailed": "无法在此标签页保存导航上下文。当前选择未改变。请重试保存，然后再次执行导航操作。",
     "retrySaveContext": "重试保存上下文",
     "startNewAnalysis": "开始新分析并清除选择"
+  },
+  "executionUsage": {
+    "amountUsd": "{amount} USD",
+    "title": "推理用量",
+    "knownOnly": "费用为任务当前查看时点的已知小计。尚未结算或缺少价格的调用仍计为未知。",
+    "group": "调用分组",
+    "calls": "调用次数",
+    "knownCost": "已知费用",
+    "unknownCost": "费用未知次数",
+    "purpose": {
+      "production": "生产任务",
+      "evaluation_subject": "评测对象",
+      "evaluation_judge": "评测裁判",
+      "unknown": "用途未标明"
+    },
+    "kind": {
+      "main_answer": "正文回答",
+      "context_summary": "上下文摘要",
+      "other": "其他或未分类推理"
+    }
+  },
+  "executionContext": {
+    "versionUnavailable": "等待兼容版本的 Worker",
+    "versionRecovery": "所需执行版本恢复可用后，任务会自动继续。",
+    "waitingVersion": "所需版本：{version}",
+    "availabilityFailed": "暂时无法查询执行版本状态，正在重试…",
+    "title": "上下文",
+    "preparationStep": "准备上下文",
+    "summaryStep": "压缩上下文",
+    "selectedSources": "选中来源",
+    "originalSources": "原始来源",
+    "inputEstimate": "预计输入 token",
+    "inputBudget": "输入 token 预算",
+    "outputBudget": "输出 token 预算",
+    "summaryChunks": "摘要分片",
+    "details": "高级详情",
+    "definitionVersion": "定义版本",
+    "definitionDigest": "定义摘要标识",
+    "contextDigest": "上下文摘要标识",
+    "state": {
+      "preparing": "正在准备上下文",
+      "compacting": "正在压缩早期上下文",
+      "ready": "上下文已就绪",
+      "needs_compaction": "需要压缩上下文",
+      "compacted": "摘要已完成",
+      "unavailable": "上下文不可用"
+    }
+  },
+  "executionDefinitions": {
+    "title": "执行版本",
+    "description": "发布仅影响后续任务。旧任务、审批和外部操作完成结算后才可退休。",
+    "refresh": "刷新",
+    "failed": "无法加载执行版本。",
+    "completed": "变更已完成。",
+    "pending": "请求已受理，等待内核确认。",
+    "reason": "变更原因",
+    "definitions": "定义版本",
+    "loading": "加载中…",
+    "empty": "暂无已注册定义。",
+    "version": "{family} · 版本 {version}",
+    "retired": "已退休",
+    "current": "当前版本",
+    "retained": "保留中",
+    "publish": "用于新任务",
+    "retire": "退休",
+    "previous": "上一页",
+    "next": "下一页",
+    "workers": "执行节点",
+    "noWorkers": "暂无已注册执行节点。",
+    "available": "可用",
+    "expired": "已过期",
+    "blocked": "尚有未结束任务或未结算的外部操作，暂不能退休。",
+    "blockingRun": "查看阻塞任务"
   }
 }

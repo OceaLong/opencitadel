@@ -12,7 +12,9 @@ def test_claim_schema_preserves_baseline_and_old_unknown():
         "FailActivity",
         "MarkActivityOutcomeUnknown",
     ):
-        assert aggregate.command_registry.latest_version(name) == 2
+        assert aggregate.command_registry.latest_version(name) == (
+            3 if name == "FailActivity" else 2
+        )
     version, payload = aggregate.event_registry.upcast(
         "ActivityCallStarted",
         1,
@@ -39,9 +41,22 @@ def test_second_claim_start_is_a_fact_and_duplicate_is_not():
     assert not aggregate._decide_MarkActivityCallStarted(state, first).events
 
 
+def test_old_failure_upcasts_without_inventing_drift_evidence():
+    aggregate = RunAggregate()
+    for version in (1, 2):
+        payload = {"activity_id": str(UUID(int=2)), "generation": 0, "failure_code": "FAILED"}
+        if version == 2:
+            payload["claim_generation"] = 1
+        latest, upgraded = aggregate.event_registry.upcast(
+            "ActivityFailed", version, EventPayloads(public=payload, internal={})
+        )
+        assert latest == 3
+        assert upgraded.public["public_data"] == {}
+
+
 def test_request_v2_captures_generation_and_known_parent_without_redefining_v1():
     aggregate = RunAggregate()
-    assert aggregate.command_registry.latest_version("RequestActivity") == 2
+    assert aggregate.command_registry.latest_version("RequestActivity") == 4
     _, old = aggregate.event_registry.upcast(
         "ActivityRequested",
         1,
@@ -58,3 +73,4 @@ def test_request_v2_captures_generation_and_known_parent_without_redefining_v1()
     assert old.public["generation"] is None
     assert old.public["parent_activity_id"] is None
     assert old.public["invocation_id"] is None
+    assert old.public["subject_digest"] is None

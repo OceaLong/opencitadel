@@ -29,22 +29,28 @@ type CreateKBDialogProps = {
 export function CreateKBDialog({ open, onOpenChange, onCreated }: CreateKBDialogProps) {
   const t = useTranslations("knowledge.createDialog");
   const tCommon = useTranslations("common");
+  const tKnowledge = useTranslations("knowledge");
   const [name, setName] = useState("");
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const handleCreate = useCallback(async () => {
     setCreating(true);
     try {
-      const kb = await knowledgeApi.create({ name: name || t("defaultName") });
+      const kb = await knowledgeApi.create({
+        name: name || t("defaultName"),
+        ...(verifiedOnly ? { settings: { embedding_revision_policy: "verified_only" } } : {}),
+      });
       onCreated(kb);
       onOpenChange(false);
       setName("");
+      setVerifiedOnly(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("createFailed"));
     } finally {
       setCreating(false);
     }
-  }, [name, onCreated, onOpenChange, t]);
+  }, [name, verifiedOnly, onCreated, onOpenChange, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,6 +60,7 @@ export function CreateKBDialog({ open, onOpenChange, onCreated }: CreateKBDialog
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
+          <p className="text-muted-foreground text-sm">{t("policyHint")}</p>
           <Label htmlFor="kb-name">{tCommon("name")}</Label>
           <Input
             id="kb-name"
@@ -61,6 +68,15 @@ export function CreateKBDialog({ open, onOpenChange, onCreated }: CreateKBDialog
             onChange={(e) => setName(e.target.value)}
             placeholder={t("namePlaceholder")}
           />
+          <Label htmlFor="kb-verified-embedding" className="flex items-start gap-2 text-sm">
+            <input
+              id="kb-verified-embedding"
+              type="checkbox"
+              checked={verifiedOnly}
+              onChange={(event) => setVerifiedOnly(event.target.checked)}
+            />
+            {tKnowledge("embeddingSpaceStrict")}
+          </Label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

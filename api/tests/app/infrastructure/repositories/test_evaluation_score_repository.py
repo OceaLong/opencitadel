@@ -8,6 +8,7 @@ from sqlalchemy.exc import DBAPIError
 
 from tests.app.alembic.test_execution_view_migration import isolated_database
 from tests.app.application.services.test_execution_usage_postgres import fresh_f07_database
+from tests.app.execution_test_support import with_current_test_claim
 from tests.app.infrastructure.repositories.test_evaluation_batch_repository import (
     actual_handler,
     scheduled_batch,
@@ -82,14 +83,17 @@ async def completed(fixture, *, final_output=None, final_ref=True, before_model=
     async def command(kind, payload, version=1, command_id=None):
         assert (
             await handler.handle(
-                create.model_copy(
-                    update={
-                        "command_id": command_id or uuid4(),
-                        "command_type": kind,
-                        "command_schema_version": version,
-                        "expected_stream_version": None,
-                        "payload": payload,
-                    }
+                await with_current_test_claim(
+                    handler,
+                    create.model_copy(
+                        update={
+                            "command_id": command_id or uuid4(),
+                            "command_type": kind,
+                            "command_schema_version": version,
+                            "expected_stream_version": None,
+                            "payload": payload,
+                        }
+                    ),
                 )
             )
         ).status == "accepted"

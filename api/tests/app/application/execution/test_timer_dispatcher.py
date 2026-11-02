@@ -19,6 +19,8 @@ from app.infrastructure.execution.sqlalchemy_orchestrator import (
 )
 from app.infrastructure.security.db_authorization import configure_session_authorization
 from core.config import load_deployment_settings
+from tests.app.alembic.test_execution_view_migration import isolated_database  # noqa: F401
+from tests.app.execution_database_fixture import isolated_execution_database  # noqa: F401
 from tests.app.execution_test_support import (
     authenticated_session_factory,
     execution_kernel_database_uri,
@@ -81,7 +83,7 @@ async def seed_timer(
 
 
 @pytest.fixture
-async def timer_database(_db_schema):
+async def timer_database(isolated_execution_database):  # noqa: F811
     engine = create_async_engine(execution_kernel_database_uri())
     session_factory = authenticated_session_factory(
         engine,

@@ -109,6 +109,8 @@ async def test_actual_embedding_service_and_probe_each_batch_is_committed_and_cl
     from app.application.security.authorization_context import authorization_scope
     from app.application.services.embedding_service import EmbeddingService
     from app.application.services.inference_model_service import InferenceModelService
+    from app.domain.evaluation.configuration import digest
+    from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
     from app.infrastructure.execution.direct_physical_dispatch import DirectPhysicalDispatchService
     from app.infrastructure.external.inference.embedding import OpenAICompatibleEmbedding
 
@@ -124,6 +126,16 @@ async def test_actual_embedding_service_and_probe_each_batch_is_committed_and_cl
 
     async def send(**payload):
         async with environment_kernel() as work:
+            demand = await work.db_session.scalar(
+                text(
+                    "SELECT demand FROM evaluation_budget_reservations "
+                    "WHERE demand->'direct_request'->>'payload_digest' = :digest"
+                ),
+                {"digest": digest({key: payload[key] for key in ("model", "input")})},
+            )
+            assert demand["direct_request"]["embedding_space_digest"] == (
+                EmbeddingSpaceDescriptor.from_resolved(model).digest
+            )
             assert (
                 await work.db_session.scalar(
                     text("SELECT slots FROM evaluation_budget_buckets WHERE key='0:global'")
@@ -158,8 +170,13 @@ async def test_actual_embedding_service_and_probe_each_batch_is_committed_and_cl
     )
     probe.resolve_model = AsyncMock(return_value=model)
     with authorization_scope(AuthorizationContext.for_principal(principal, scope=scope)):
-        assert len(await embeddings.embed(["a", "b", "c"], scope=scope)) == 3
-        await embeddings.embed(["a", " "], scope=scope)
+        assert (
+            len(
+                await embeddings.embed(["a", "b", "c"], scope=scope, purpose_context="memory.store")
+            )
+            == 3
+        )
+        await embeddings.embed(["a", " "], scope=scope, purpose_context="memory.store")
         result = await probe.probe_model(model.id, scope=scope)
         assert result.status.value == "ok"
     assert len(sends) == 3
@@ -329,6 +346,7 @@ async def test_actual_embedding_cancellation_retains_committed_hold_and_disposes
     embeddings = EmbeddingService(
         SimpleNamespace(resolve=AsyncMock(return_value=_resolved_embedding())),
         SimpleNamespace(create_embedding=OpenAICompatibleEmbedding),
+        SimpleNamespace(resolve_model=AsyncMock(return_value=_resolved_embedding())),
         physical_dispatch=dispatch,
     )
     with authorization_scope(AuthorizationContext.for_principal(principal, scope=scope)):
@@ -525,6 +543,7 @@ async def test_memory_pool_one_commits_permit_before_send_and_preserves_concurre
     embeddings = EmbeddingService(
         SimpleNamespace(resolve=AsyncMock(return_value=_resolved_embedding())),
         SimpleNamespace(create_embedding=OpenAICompatibleEmbedding),
+        SimpleNamespace(resolve_model=AsyncMock(return_value=_resolved_embedding())),
         physical_dispatch=dispatch,
     )
     memory = MemoryService(uow, embeddings)

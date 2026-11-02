@@ -127,6 +127,8 @@ class KnowledgeBaseVersionORM(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    embedding_space: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    embedding_space_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     degraded_reasons: Mapped[list[str]] = mapped_column(
         JSONB,
         nullable=False,
@@ -155,6 +157,8 @@ class KnowledgeBaseVersionORM(Base):
             build_id=self.build_id,
             request_key=self.request_key,
             state=KnowledgeVersionState(self.state),
+            embedding_space=self.embedding_space,
+            embedding_space_digest=self.embedding_space_digest,
             capabilities=dict(self.capabilities or {}),
             degraded_reasons=list(self.degraded_reasons or []),
             metrics=dict(self.metrics or {}),
@@ -174,6 +178,10 @@ class KnowledgeBaseVersionORM(Base):
             build_id=version.build_id,
             request_key=version.request_key,
             state=version.state.value,
+            embedding_space=(
+                version.embedding_space.model_dump(mode="json") if version.embedding_space else None
+            ),
+            embedding_space_digest=version.embedding_space_digest,
             capabilities=mutable_json_value(version.capabilities),
             degraded_reasons=mutable_json_value(version.degraded_reasons),
             metrics=mutable_json_value(version.metrics),

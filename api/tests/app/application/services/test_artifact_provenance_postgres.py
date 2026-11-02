@@ -122,7 +122,7 @@ async def test_concurrent_writes_preserve_versions_and_unknown_producers():
 async def production_run(*, activity_type="tool.call", scope=None):
     from datetime import UTC, datetime, timedelta
 
-    from app.domain.execution.commands import CommandEnvelope
+    from app.domain.execution.commands import ActivityLeaseProof, CommandEnvelope
     from app.domain.execution.run import RunAggregate
     from app.domain.models.authorization import AuthorizationContext
     from app.domain.models.scope import OwnerScope
@@ -152,6 +152,34 @@ async def production_run(*, activity_type="tool.call", scope=None):
     )
 
     async def command(name, payload, schema=1):
+        proof = None
+        if name in {
+            "MarkActivityCallStarted",
+            "CompleteActivity",
+            "FailActivity",
+            "MarkActivityOutcomeUnknown",
+        }:
+            async with execution_admin_session() as db:
+                row = (
+                    (
+                        await db.execute(
+                            text(
+                                "SELECT request_generation,claim_generation,claimed_by FROM execution_activity_tasks WHERE activity_id=:id"
+                            ),
+                            {"id": payload["activity_id"]},
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+            proof = ActivityLeaseProof(
+                activity_id=payload["activity_id"],
+                request_generation=row["request_generation"],
+                claim_generation=row["claim_generation"],
+                worker_id=row["claimed_by"] or "f05-worker",
+            )
+            payload = {**payload, "claim_generation": proof.claim_generation}
+            schema = max(schema, 2)
         envelope = CommandEnvelope(
             command_id=uuid4(),
             command_type=name,
@@ -164,6 +192,7 @@ async def production_run(*, activity_type="tool.call", scope=None):
             causation_id=None,
             issued_at=datetime.now(UTC),
             payload=payload,
+            activity_lease_proof=proof,
         )
         result = await handler.handle(envelope)
         assert result.status == "accepted", result
@@ -195,7 +224,7 @@ async def production_run(*, activity_type="tool.call", scope=None):
     async with execution_admin_session() as db:
         await db.execute(
             text(
-                "UPDATE execution_activity_tasks SET claim_generation=1,status='call_started' WHERE activity_id=:id"
+                "UPDATE execution_activity_tasks SET claim_generation=1,status='call_started',claimed_by='f05-worker',claim_deadline=clock_timestamp()+INTERVAL '1 hour',call_started_at=clock_timestamp() WHERE activity_id=:id"
             ),
             {"id": activity},
         )

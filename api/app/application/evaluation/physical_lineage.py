@@ -4,6 +4,7 @@ from uuid import uuid5
 
 from app.application.execution.activity_types import MODEL_CALL
 from app.application.execution.decisions.base import activity_identity
+from app.application.execution.decisions.context import context_enabled
 from app.domain.execution.run import RunFamily, RunStatus
 
 
@@ -28,6 +29,7 @@ def logical_model_invocation(
         )
     elif state.family == RunFamily.AGENT:
         rounds = state.policy_snapshot.family_policy.agent.max_iterations
+        rounds += int(context_enabled(state.definition_manifest))
     else:
         raise ValueError("budget_logical_lineage_unavailable")
     for index in range(rounds):

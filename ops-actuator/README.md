@@ -8,20 +8,24 @@ The Ops Actuator is a separately deployable, write-capable MCP service for Ops P
 
 | Tool                | Kind support            | Mutates | Bounded input                                                                                                                                      |
 | ------------------- | ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_target` | Deployment / StatefulSet | No | Resolve an allowlisted current UID before approval |
+| `get_operation` | — | No workload writes | Authenticated operation ID; retained receipt or conservative recovery |
 | `get_capabilities`  | —                       | No      | Returns tool/schema/capability hashes                                                                                                              |
 | `restart_workload`  | Deployment, StatefulSet | Yes     | Allowlisted namespace + registered workload id; requires `idempotency_key`                                                                         |
 | `scale_workload`    | Deployment, StatefulSet | Yes     | Allowlisted namespace + registered workload id; `replicas` must be within the registered `min_replicas`/`max_replicas`; requires `idempotency_key` |
 | `rollback_workload` | Deployment only         | Yes     | Allowlisted namespace + registered workload id; requires `idempotency_key`                                                                         |
 
-`get_capabilities` is annotated read-only. All three write tools are annotated `readOnlyHint=false, destructiveHint=true` — an MCP client must not treat them as safe, repeatable reads.
+`get_capabilities`, `get_target(namespace, workload, kind)` and `get_operation(operation_id)` are read-only business tools. The platform discovers `effect_contract.target_identity`, resolves the current UID through `get_target` before approval, and freezes it with the platform-generated operation ID and digest; model output never supplies these identities. All three writes require `idempotency_key`, `operation_id`, `payload_digest` and the observed `target_uid`. The authenticated static bearer represents the configured `caller_authority`; callers cannot supply a different authority in arguments. Keep the original `rem:{id}` remediation key.
 
-Every write call **requires** `idempotency_key`. The Actuator patches that key into the target's `opencitadel.io/remediation-key` annotation in the same patch that performs the action. A repeated call with the same key is answered from the current observed state (`action_outcome=skipped_idempotent`) without a second mutating Kubernetes call; a different key executes again. Write actions are **never retried** on transient failure — a failed call returns `K8S_ERROR` (or a more specific code) immediately. Retry is a decision for the caller's approval chain, not this service.
+The v2 payload digest is SHA-256 of sorted, compact UTF-8 JSON containing `action`, `target_ref`, `namespace`, `workload`, `kind`, `target_uid` and `parameters` (`{"replicas": N}` for scale, `{}` otherwise). `operation_payload_digest()` in `contracts.py` is the canonical implementation. Reusing a key or operation ID for another payload/target returns `OPERATION_CONFLICT`.
 
-The three write-action responses use the `ActuatorEnvelope`: `target_ref`, `action`, `action_outcome` (`applied` / `skipped_idempotent` / `failed`), `before`/`after` observation snapshots, bounded `data`, evidence references (`actuator://evidence/...`), warnings, and a stable error code.
+A namespaced ConfigMap journal persists the immutable binding, the first restart timestamp or rollback template, and the original target UID/resourceVersion before sending. The single main-resource patch writes the business change and `opencitadel.io/operation-id` / `opencitadel.io/payload-digest` annotations atomically. Parallel processes use ConfigMap create/CAS and the fixed target preconditions. A conflict queries the original operation; it never rebases onto a newer target version.
 
-`get_capabilities` returns a separate capability manifest with tool/schema hashes.
+`get_operation` returns the retained receipt or checks the original target UID and both annotations to recover it. Missing/overwritten annotations, target recreation, and read failures remain `unknown`; matching current replicas is not proof. Same-key recovery reuses the persisted patch and preconditions. The service performs no automatic second write attempt within a call. A target gate blocks later operations until its predecessor's terminal receipt is durable. Other Kubernetes writers can still remove recovery proof, so this is not a distributed exactly-once guarantee.
 
-Deduplication compares the target's current single marker before patching; it is not an index of every historical key. A later different key replaces it, and read/patch does not provide a concurrent CAS. Caller claim/fencing and unknown-outcome handling remain necessary; concurrent calls or old-key replay do not establish global exactly-once execution.
+`ActuatorEnvelope` version 2 adds `operation_id`, `state` (`pending`, `applied`, `not_applied`, `unknown`), `receipt_revision`, `payload_digest`, `key_digest`, `target` and `receipt`. It retains `before`/`after`, evidence and errors. `action_outcome` adds `pending`/`unknown` to `applied`/`skipped_idempotent`/`failed`. Terminal receipts remain authoritative even after the workload changes or disappears. Querying can repair a journal receipt but never issues a workload patch.
+
+Journals have a 512 KiB total bound with 16 KiB reserved for receipts. Oversized patches and sensitive literals are rejected before sending. Rollback templates containing literal environment values, commands, arguments, or secret-shaped data are conservatively rejected; references to Secrets are supported without reading their values. All terminal receipts and key bindings are retained indefinitely as tombstones; there is no TTL or delete path. Journal permission/storage failure fails closed before new physical writes. Unknown/prepared entries are never automatically removed.
 
 ## Request flow
 
@@ -36,6 +40,9 @@ Configuration is environment-only and uses the `OPS_ACTUATOR_` prefix. Structure
 | Variable             | Default / range                          | Purpose                                                                                                                                         |
 | -------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TARGET_REF`         | `opencitadel-local`                      | Stable identity matched by the Pack                                                                                                             |
+| `JOURNAL_NAMESPACE` | `opencitadel` (Pod namespace in shipped manifests) | ConfigMap journals and target gates |
+| `PROVIDER_NAMESPACE` | `opencitadel-ops-actuator` | Stable provider identity; do not change for existing operations |
+| `CALLER_AUTHORITY` | `opencitadel-platform` | Stable principal represented by the configured bearer token |
 | `ALLOWED_NAMESPACES` | `["opencitadel"]`                        | Non-empty namespace allowlist                                                                                                                   |
 | `ALLOWED_WORKLOADS`  | `{}`                                     | JSON map of namespace to workload id to `{kind, min_replicas, max_replicas}`; a workload not listed here cannot be targeted by any write action |
 | `TOKEN`              | No valid default; at least 32 characters | Required for streamable HTTP; every request needs `Authorization: Bearer <token>`                                                               |
@@ -79,7 +86,7 @@ Streamable HTTP (`/mcp`, port `8091`) is the default:
 docker compose --profile actuator up -d --build opencitadel-ops-actuator
 ```
 
-Set a distinct strong `OPS_ACTUATOR_TOKEN` in `.env` first. The shipped Compose service does not pass `OPS_ACTUATOR_ALLOWED_WORKLOADS` or mount kubeconfig, and its default workload allowlist is empty; it supports transport/authentication checks without cluster writes. Use configured Helm/Kustomize allowlists and a dedicated ServiceAccount for real remediation.
+For a fresh Compose installation, `make configure` generates and saves a distinct strong `OPS_ACTUATOR_TOKEN` in `.env`; existing installations keep their token. The shipped Compose service does not pass `OPS_ACTUATOR_ALLOWED_WORKLOADS` or mount kubeconfig, and its default workload allowlist is empty; it supports transport/authentication checks without cluster writes. Use configured Helm/Kustomize allowlists and a dedicated ServiceAccount for real remediation.
 
 For development-only stdio:
 
@@ -87,23 +94,23 @@ For development-only stdio:
 OPS_ACTUATOR_ALLOW_STDIO=true uv run opencitadel-ops-actuator --transport stdio
 ```
 
-Never enable stdio in the production deployment.
+Never enable stdio in the production deployment. Outside a cluster, an explicit `PATROL_DEMO_CONTEXT` is required; the writer never falls back to the current kubectl context.
 
 ## Kubernetes deployment
 
 - Helm: set `opsActuator.enabled=true` and configure `allowedNamespaces`/`allowedWorkloads` in `deploy/helm/opencitadel/values.yaml`.
 - Kustomize: use `deploy/kustomize/ops-actuator` as a base and patch its image, target ref, and allowlists.
 - Keep the Service `ClusterIP`; only the approval/remediation caller should reach port 8091.
-- A Role in each allowed namespace grants `get/list/watch/patch` on Deployments/StatefulSets and only `get/list` on ReplicaSets for rollback history. It excludes Secrets, exec, attach, create, and delete. RBAC scopes namespaces; the server enforces the exact workload allowlist.
+- A Role in each allowed namespace grants `get/list/watch/patch` on Deployments/StatefulSets and only `get/list` on ReplicaSets for rollback history. It excludes Secrets, exec, attach, and workload create/delete. A separate Role in the Actuator management namespace permits only ConfigMap get/create/update for journals; no delete permission is granted. RBAC scopes namespaces; the server enforces the exact workload allowlist.
 - Review NetworkPolicy egress against the exact Kubernetes API location. The registered-workload allowlist is the application-layer boundary; NetworkPolicy is defense in depth.
 
 The container runs as UID/GID 10001 with a read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, and only a bounded writable `/tmp` — the same posture as the Ops Collector.
 
-The HTTP process refuses to start if the token is missing or shorter than 32 characters. Helm uses `opsActuator.token`; the Kustomize base Secret is empty and must be provisioned before apply. Configure `Authorization: Bearer <token>` in encrypted integration headers. TCP health probes verify only listener reachability, not Kubernetes/registered-target readiness or authenticated calls. Kubernetes manifests set `RuntimeDefault` seccomp; Compose sets non-root, read-only root, dropped capabilities, and `no-new-privileges`.
+The HTTP process refuses to start if the token is missing or shorter than 32 characters. Helm generates and persists the token when enabled; `opsActuator.token` remains an explicit override; the Kustomize base Secret is empty and must be provisioned before apply. Configure `Authorization: Bearer <token>` in encrypted integration headers. TCP health probes verify only listener reachability, not Kubernetes/registered-target readiness or authenticated calls. Kubernetes manifests set `RuntimeDefault` seccomp; Compose sets non-root, read-only root, dropped capabilities, and `no-new-privileges`.
 
 ## Authentication and data handling
 
-Kubernetes access uses the Pod ServiceAccount; that credential never becomes a tool argument or response field. The Actuator redacts authorization-shaped values, passwords, API keys, tokens, connection strings, cookies, JWT-shaped values, and secret-shaped object fields from `data`/`before`/`after` before output limiting. Do not rely on redaction as the only control: keep the allowlist minimal and never expose the Actuator publicly.
+Kubernetes access uses the Pod ServiceAccount; that credential never becomes a tool argument or response field. The Actuator rejects sensitive fixed patches before persistence and exposes only whitelisted workload observations, bounded identity fields and receipts. Raw Kubernetes exception bodies are never returned. Response limits never silently truncate receipt identities or digests. Do not rely on redaction as the only control: keep the allowlist minimal and never expose the Actuator publicly.
 
 ## Development and verification
 
@@ -114,6 +121,16 @@ uv run pytest -q
 ```
 
 `tests/test_rbac_baseline.py` requires the shipped Kustomize and fixture RBAC manifests and checks Kubernetes API egress on 443/6443; missing manifests fail.
+
+The real recovery suite requires an explicit disposable `kind-opencitadel-patrol-*` context and its own `KUBECONFIG`. It starts separate HTTP MCP processes with a namespace-scoped ServiceAccount, forwards requests to the actual Kubernetes API, and kills a process after a successful PATCH while withholding its response. It checks concurrent calls, conflicting keys, retained A/B/A receipts, missing recovery proof, and journal permission loss.
+
+```bash
+ACTUATOR_K8S_INTEGRATION=1 \
+ACTUATOR_EVIDENCE_DIR=/absolute/path/to/evidence \
+uv run pytest -q tests/integration/test_operation_recovery.py
+```
+
+Set `PATROL_DEMO_CONTEXT` and `KUBECONFIG` before this command. Evidence includes actual PATCH requests and API audit IDs, persisted ConfigMap journals, and MCP receipts; temporary credentials are excluded. The suite deletes its namespaces. `PATROL_RUN_REMEDIATION_FIXTURE=true ./scripts/run-patrol-fixtures.sh` also includes these tests and owns cluster creation and cleanup.
 
 ## Related documentation
 

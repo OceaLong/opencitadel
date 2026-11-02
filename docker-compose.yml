@@ -14,6 +14,48 @@ x-ownership-labels: &ownership-labels
   com.opencitadel.acceptance.project: ${ACCEPTANCE_PROJECT_ID:-none}
   com.opencitadel.acceptance.run: ${ACCEPTANCE_RUN_ID:-none}
 
+# Compose owns bundled service topology. The env file contains the site inputs,
+# persistent credentials, and any explicit advanced overrides.
+x-runtime-environment: &runtime-environment
+  ENV: ${ENV:-development}
+  FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:${NGINX_PORT:-8088}}
+  OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-}
+  COOKIE_SECURE: ${COOKIE_SECURE:-}
+  POSTGRES_USER: ${POSTGRES_USER:-opencitadel_app}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+  POSTGRES_DB: ${POSTGRES_DB:-opencitadel}
+  POSTGRES_HOST: ${POSTGRES_HOST:-opencitadel-postgres}
+  REDIS_HOST: ${REDIS_HOST:-opencitadel-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  STORAGE_PROVIDER: ${STORAGE_PROVIDER:-minio}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-opencitadel-minio:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-opencitadel}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_BUCKET: ${MINIO_BUCKET:-opencitadel}
+  MINIO_SECURE: ${MINIO_SECURE:-false}
+  API_KEY_SECRET: ${API_KEY_SECRET:?API_KEY_SECRET must be set}
+  AUDIT_SIGNING_KEY: ${AUDIT_SIGNING_KEY:?AUDIT_SIGNING_KEY must be set}
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+  SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+  DATABASE_AUTHORIZATION_SIGNING_SECRET: ${DATABASE_AUTHORIZATION_SIGNING_SECRET:-}
+  PUBLIC_CURSOR_SECRET: ${PUBLIC_CURSOR_SECRET:-}
+  SANDBOX_TOKEN_SEED: ${SANDBOX_TOKEN_SEED:?SANDBOX_TOKEN_SEED must be set}
+  OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS: ${OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS:-90}
+
+x-sandbox-environment: &sandbox-environment
+  SANDBOX_DRIVER: ${SANDBOX_DRIVER:-docker}
+  SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
+  SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
+  SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
+  SANDBOX_LABELS: >-
+    ${SANDBOX_LABELS:-{}}
+  SANDBOX_HTTP_PROXY: ${SANDBOX_HTTP_PROXY:-http://opencitadel-sandbox-egress:3128}
+  SANDBOX_HTTPS_PROXY: ${SANDBOX_HTTPS_PROXY:-http://opencitadel-sandbox-egress:3128}
+  SANDBOX_NO_PROXY: ${SANDBOX_NO_PROXY:-localhost,127.0.0.1}
+  SANDBOX_CHROME_ARGS: ${SANDBOX_CHROME_ARGS:---proxy-server=http://opencitadel-sandbox-egress:3128}
+
 services:
   # ==================== 基础设施 ====================
 
@@ -105,7 +147,7 @@ services:
     cpus: "0.50"
     command: server /data
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-opencitadel}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     volumes:
       - minio_data:/data
@@ -243,16 +285,8 @@ services:
     group_add:
       - "${DOCKER_SOCK_GID:-0}"
     environment:
+      <<: *sandbox-environment
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
-      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
-      SANDBOX_LABELS: >-
-        ${SANDBOX_LABELS:-{}}
-      SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
-      SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
-      SANDBOX_NO_PROXY: localhost,127.0.0.1
-      SANDBOX_CHROME_ARGS: --proxy-server=http://opencitadel-sandbox-egress:3128
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
@@ -287,6 +321,7 @@ services:
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
     environment:
+      <<: *runtime-environment
       POSTGRES_ADMIN_USER: ${POSTGRES_MIGRATION_USER:-opencitadel_migration_runtime}
       POSTGRES_ADMIN_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:?POSTGRES_MIGRATION_PASSWORD must be set}
     depends_on:
@@ -313,26 +348,22 @@ services:
         WITH_K8S: "0"
     image: opencitadel-api
     restart: unless-stopped
-    stop_grace_period: 45s
+    stop_grace_period: ${OPENCITADEL_STOP_GRACE_PERIOD:-120s}
     mem_limit: 640m
     mem_reservation: 384m
     cpus: "2.00"
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
     environment:
+      <<: [*runtime-environment, *sandbox-environment]
       POSTGRES_ADMIN_USER: ""
       POSTGRES_ADMIN_PASSWORD: ""
       POSTGRES_MIGRATION_USER: ""
       POSTGRES_MIGRATION_PASSWORD: ""
       POSTGRES_KERNEL_USER: ""
       POSTGRES_KERNEL_PASSWORD: ""
-      SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
+      SANDBOX_BROKER_URL: ${SANDBOX_BROKER_URL:-http://opencitadel-sandbox-broker:8090}
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
-      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
-      SANDBOX_LABELS: >-
-        ${SANDBOX_LABELS:-{}}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -372,26 +403,22 @@ services:
         WITH_K8S: "0"
     image: opencitadel-execution-kernel
     restart: unless-stopped
-    stop_grace_period: 45s
+    stop_grace_period: ${OPENCITADEL_STOP_GRACE_PERIOD:-120s}
     mem_limit: 1024m
     mem_reservation: 512m
     cpus: "2.00"
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
     environment:
+      <<: [*runtime-environment, *sandbox-environment]
       POSTGRES_USER: ${POSTGRES_KERNEL_USER:-opencitadel_execution_kernel_runtime}
       POSTGRES_PASSWORD: ${POSTGRES_KERNEL_PASSWORD:?POSTGRES_KERNEL_PASSWORD must be set}
       POSTGRES_ADMIN_USER: ""
       POSTGRES_ADMIN_PASSWORD: ""
       POSTGRES_MIGRATION_USER: ""
       POSTGRES_MIGRATION_PASSWORD: ""
-      SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
+      SANDBOX_BROKER_URL: ${SANDBOX_BROKER_URL:-http://opencitadel-sandbox-broker:8090}
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
-      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
-      SANDBOX_LABELS: >-
-        ${SANDBOX_LABELS:-{}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -474,7 +501,9 @@ services:
       OPS_COLLECTOR_ALLOWED_NAMESPACES: '${OPS_COLLECTOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
       OPS_COLLECTOR_TRANSPORT: streamable-http
       OPS_COLLECTOR_ALLOW_STDIO: "false"
-      OPS_COLLECTOR_TOKEN: ${OPS_COLLECTOR_TOKEN:?set a strong OPS_COLLECTOR_TOKEN}
+      # Optional profiles must not prevent base-stack interpolation. The HTTP
+      # process validates its token before binding when this profile is enabled.
+      OPS_COLLECTOR_TOKEN: ${OPS_COLLECTOR_TOKEN:-}
       OPS_COLLECTOR_HTTP_PROBES: >-
         ${OPS_COLLECTOR_HTTP_PROBES:-{"primary-endpoint":{"url":"http://opencitadel-api:8000/api/status","expected_statuses":[200]},"demo-console":{"url":"http://ops-console:9099/health","expected_statuses":[200]}}}
       OPS_COLLECTOR_DEPENDENCIES: >-
@@ -524,7 +553,7 @@ services:
       OPS_ACTUATOR_ALLOWED_NAMESPACES: '${OPS_ACTUATOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
       OPS_ACTUATOR_TRANSPORT: streamable-http
       OPS_ACTUATOR_ALLOW_STDIO: "false"
-      OPS_ACTUATOR_TOKEN: ${OPS_ACTUATOR_TOKEN:?set a strong OPS_ACTUATOR_TOKEN}
+      OPS_ACTUATOR_TOKEN: ${OPS_ACTUATOR_TOKEN:-}
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
     # Reachable only over the dedicated ops network (api + execution-kernel).
@@ -617,11 +646,13 @@ services:
     environment:
       OPENCITADEL_DOMAIN: ${OPENCITADEL_DOMAIN:-}
       HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
+      NGINX_HTTPS_PORT: ${NGINX_HTTPS_PORT:-443}
     ports:
       - "${NGINX_PORT:-8088}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       # Mounted outside the image's default /etc/nginx/templates so the stock
       # 20-envsubst-on-templates.sh entrypoint script (which blindly envsubst's
       # every *.template file it finds there) does not also render these -
@@ -630,13 +661,13 @@ services:
       # default.https.conf with unresolved cert paths. Our own
       # 40-generate-config.sh reads from here instead and is the only
       # renderer for these templates.
-      - ./nginx/templates:/etc/nginx/templates-src:ro
-      - ./nginx/generate-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
+      - ./deploy/nginx/templates:/etc/nginx/templates-src:ro
+      - ./deploy/nginx/generate-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
       - nginx_conf:/etc/nginx/conf.d
       # HTTPS 证书目录。默认指向仓库内空目录，避免 docker 在未装 certbot 的
       # 机器上以 root 创建 /etc/letsencrypt；启用 HTTPS 时在 .env 设
       # LETSENCRYPT_DIR=/etc/letsencrypt。
-      - ${LETSENCRYPT_DIR:-./nginx/letsencrypt}:/etc/letsencrypt:ro
+      - ${LETSENCRYPT_DIR:-./deploy/nginx/letsencrypt}:/etc/letsencrypt:ro
     depends_on:
       opencitadel-ui:
         condition: service_healthy

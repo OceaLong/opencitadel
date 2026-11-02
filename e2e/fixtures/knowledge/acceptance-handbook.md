@@ -10,5 +10,7 @@ the immutable knowledge-base version that contains it.
 
 When an optional index cannot be built, the product must name the unavailable
 capability and its stable degradation reason. It must never present a partial
-index as complete. In this fixture, an unavailable graph projection must be
-reported as `GRAPH_UNAVAILABLE` while keyword and vector search remain explicit.
+index as complete. Basic installations explicitly use keyword search with
+optional vector and graph indexes disabled. When another document cannot be
+parsed, the published version reports `DOCUMENT_PARTIAL` while this fact remains
+searchable and its source can still be read.

@@ -96,6 +96,22 @@ describe("ResourceVersionStatus", () => {
     document.body.replaceChildren();
   });
 
+  it("explains the mutable embedding alias and rebuilding requirement", async () => {
+    const history = makeHistory();
+    mocks.listVersions.mockResolvedValue({
+      ...history,
+      versions: history.versions.map((version) => ({
+        ...version,
+        embedding_space_digest: "a".repeat(64),
+        revision_assurance: "unverified_alias",
+      })),
+    });
+    const { container, unmount } = await renderStatus();
+    expect(container.textContent).toContain(enMessages.knowledge.embeddingSpaceUnverified);
+    expect(container.textContent).toContain(enMessages.knowledge.embeddingSpaceRebuild);
+    await unmount();
+  });
+
   it("renders the active build, capabilities, and version history", async () => {
     mocks.listVersions.mockResolvedValue(makeHistory());
     const { container, unmount } = await renderStatus();

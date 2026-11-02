@@ -11,9 +11,9 @@ from opencitadel_ops_collector.collector import OpsCollector
 from opencitadel_ops_collector.config import CollectorSettings
 
 ROOT = Path(__file__).parents[3]
-FIXTURES = ROOT / "deploy" / "patrol-demo" / "fixtures"
+FIXTURES = ROOT / "demo" / "patrol" / "fixtures"
 RBAC_FILES = [
-    ROOT / "deploy" / "patrol-demo" / "manifests" / "collector-rbac.yaml",
+    ROOT / "demo" / "patrol" / "manifests" / "collector-rbac.yaml",
     ROOT / "deploy" / "kustomize" / "ops-collector" / "rbac.yaml",
 ]
 

@@ -13,9 +13,7 @@ from app.application.execution.decision_worker import DecisionCandidate
 from app.domain.execution.run import (
     RunState,
     decision_data_digest,
-    validated_run_policy_snapshot,
 )
-from app.domain.execution.serialization import canonical_state_hash
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.notification import Notification
 from app.domain.models.scope import OwnerScope
@@ -25,6 +23,7 @@ from app.infrastructure.execution.models import (
     ExecutionPoisonedScopeORM,
     ExecutionRunProjectionORM,
 )
+from app.infrastructure.execution.run_projection_validation import decode_run_projection
 from app.infrastructure.models.team import TeamMemberORM
 from app.infrastructure.models.user import UserORM
 from app.infrastructure.observability.execution_metrics import record_poisoned_run
@@ -38,9 +37,11 @@ class PostgresRunDecisionSource:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         authorization: AuthorizationContext,
+        supported_definitions: frozenset[str] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._authorization = authorization
+        self._supported_definitions = supported_definitions
         # run_id -> last_event_position of the projection row as loaded by the
         # most recent load_ready batch. disarm() uses it as an optimistic guard:
         # a row the projector re-armed from a *newer* event between load and
@@ -72,6 +73,11 @@ class PostgresRunDecisionSource:
                     await session.scalars(
                         select(ExecutionRunProjectionORM)
                         .where(
+                            ExecutionRunProjectionORM.definition_digest.in_(
+                                sorted(self._supported_definitions)
+                            )
+                            if self._supported_definitions is not None
+                            else True,
                             ~select(ExecutionPoisonedScopeORM.owner_scope_key)
                             .where(
                                 or_(
@@ -336,16 +342,7 @@ class PostgresRunDecisionSource:
 
     @staticmethod
     def _decode(record: ExecutionRunProjectionORM) -> RunState:
-        state = RunState.model_validate(record.state)
-        snapshot = validated_run_policy_snapshot(state)
-        if canonical_state_hash(state) != record.state_hash:
-            raise ValueError("execution_run_projection state hash mismatch")
-        if (
-            snapshot.execution_revision_id != record.execution_policy_revision_id
-            or snapshot.execution_policy_digest != record.execution_policy_digest
-        ):
-            raise ValueError("execution_run_projection policy metadata mismatch")
-        return state
+        return decode_run_projection(record)
 
     @staticmethod
     async def _quarantine(

@@ -13,7 +13,10 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
+    model_validator,
 )
+
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
 
 
 def _deep_freeze(value: Any) -> Any:
@@ -107,11 +110,20 @@ class KnowledgeBaseVersion(BaseModel):
     build_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     request_key: str = Field(default_factory=lambda: uuid.uuid4().hex * 2)
     state: KnowledgeVersionState = KnowledgeVersionState.BUILDING
+    embedding_space: EmbeddingSpaceDescriptor | None = None
+    embedding_space_digest: str | None = None
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     published_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate_space(self):
+        expected = self.embedding_space.digest if self.embedding_space else None
+        if self.embedding_space_digest != expected:
+            raise ValueError("knowledge version embedding space digest mismatch")
+        return self
 
     @field_validator("capabilities", "metrics", mode="before")
     @classmethod

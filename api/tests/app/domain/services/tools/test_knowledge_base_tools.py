@@ -87,7 +87,9 @@ async def test_kb_search_returns_structured_citation_and_versioned_uri():
     assert isinstance(result, ToolResult)
     assert result.citations == [citation]
     assert "kbdoc://doc1?page=2&chunk=chunk1&version=kbv1&revision=revision-v1" in result.data
-    retriever.retrieve.assert_awaited_once_with("kb1", "kbv1", "policy", limit=5)
+    retriever.retrieve.assert_awaited_once_with(
+        "kb1", "kbv1", "policy", limit=5, keyword_only=False
+    )
 
 
 @pytest.mark.anyio
@@ -182,6 +184,7 @@ async def test_kb_search_caps_requested_limit_with_the_run_policy():
         "kbv1",
         "policy",
         limit=3,
+        keyword_only=False,
     )
 
 

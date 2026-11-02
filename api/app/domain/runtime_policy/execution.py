@@ -10,7 +10,7 @@ class _ExecutionPolicyModel(BaseModel):
 
 
 class AgentExecutionPolicy(_ExecutionPolicyModel):
-    max_iterations: int = Field(default=12, ge=1, le=100)
+    max_iterations: int = Field(default=12, ge=1, le=1000)
     max_retries: int = Field(default=2, ge=0, le=10)
 
 
@@ -111,6 +111,23 @@ class ExecutionPolicy(_ExecutionPolicyModel):
     )
 
 
+def initial_execution_policy() -> ExecutionPolicy:
+    """Seed a new installation without changing schema-v1 decoding defaults.
+
+    Historical revisions and Run snapshots may omit fields whose original
+    defaults participate in their canonical digest. Keep those defaults stable;
+    the initial revision explicitly records the installation's basic KB mode.
+    """
+    return ExecutionPolicy(
+        knowledge_base=KnowledgeBaseExecutionPolicy(
+            vector_enabled=False,
+            rerank=KnowledgeRerankPolicy(enabled=False),
+            graphrag=KnowledgeGraphRagPolicy(enabled=False),
+            ocr=KnowledgeOcrPolicy(mode=KnowledgeOcrMode.OFF),
+        )
+    )
+
+
 __all__ = [
     "ActivityExecutionPolicy",
     "AgentExecutionPolicy",
@@ -125,4 +142,5 @@ __all__ = [
     "KnowledgeRetrievalPolicy",
     "MemoryExecutionPolicy",
     "ModelResiliencePolicy",
+    "initial_execution_policy",
 ]

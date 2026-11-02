@@ -20,6 +20,9 @@ from app.application.execution.activities.remediation import RemediationActivity
 from app.application.execution.activities.resource_build import KnowledgeBuildActivityHandler
 from app.application.execution.activities.retrieval import RetrievalActivityHandler
 from app.application.execution.activities.tool_call import ToolCallActivityHandler
+from app.application.execution.activities.tool_intent_refresh import (
+    ToolIntentRefreshActivityHandler,
+)
 from app.application.execution.activity_registry import (
     ActivityRegistry,
     create_activity_registry,
@@ -93,14 +96,24 @@ def _worker_id(kind: str) -> str:
 
 
 def _build_activity_registry(
-    shared: SharedServices, *, replay=None, isolated=None, text_stream=False
+    shared: SharedServices,
+    *,
+    replay=None,
+    isolated=None,
+    text_stream=False,
+    effects=None,
+    definitions=None,
 ) -> ActivityRegistry:
     from app.application.evaluation.contract_capture import ContractCapture
+    from app.composition.execution_definitions import build_code_definitions
+
+    definitions = definitions if definitions is not None else build_code_definitions()
 
     tools = AgentToolCatalog(
         replay=replay,
         isolated=isolated,
         contract_capture=ContractCapture(shared.uow_factory),
+        context_sources=shared.context_runtime.reader,
         uow_factory=shared.uow_factory,
         sandbox_factory=shared.sandbox_factory,
         search_engine=shared.search_engine,
@@ -125,6 +138,14 @@ def _build_activity_registry(
     )
     collector = MCPPatrolCollectorValidator(shared.mcp_connection_pool)
     return create_activity_registry(
+        *shared.context_runtime.handlers(
+            definitions=definitions,
+            tools=tools,
+            usage=shared.execution_usage_service,
+            models=shared.inference_model_service,
+            client_factory=shared.resilient_llm_factory,
+            replay=replay,
+        ),
         ModelCallActivityHandler(
             objects=shared.activity_objects,
             models=shared.inference_model_service,
@@ -137,6 +158,7 @@ def _build_activity_registry(
             quota=shared.quota_service,
             judge=JudgeRuntime(shared.uow_factory),
             text_stream=text_stream,
+            context_validation=shared.context_runtime.prepared_validation,
         ),
         RetrievalActivityHandler(
             execution_usage=shared.execution_usage_service,
@@ -147,17 +169,20 @@ def _build_activity_registry(
             isolated=isolated,
         ),
         ToolCallActivityHandler(
+            effects=effects,
             objects=shared.activity_objects,
             tools=tools,
             replay=replay,
             execution_usage=shared.execution_usage_service,
         ),
+        ToolIntentRefreshActivityHandler(objects=shared.activity_objects, tools=tools),
         ChildRunActivityHandler(
             objects=shared.activity_objects,
             admission=shared.run_admission_service,
             runs=shared.run_projection,
         ),
         RemediationActivityHandler(
+            effects=effects,
             objects=shared.activity_objects,
             executor=shared.patrol_remediation_service,
             isolated=isolated,
@@ -202,6 +227,12 @@ async def open_kernel_runtime(
 ) -> AsyncIterator[KernelRuntime]:
     """Open the complete kernel graph without constructing HTTP presentation services."""
 
+    pool_capacity = settings.postgres_pool_size + settings.postgres_max_overflow
+    if settings.execution_activity_max_concurrency > pool_capacity:
+        raise ValueError(
+            "execution_activity_max_concurrency must not exceed "
+            "postgres_pool_size + postgres_max_overflow for the execution kernel"
+        )
     export_worker = None
     readiness = RuntimeReadiness()
     supervisor = TaskSupervisor(
@@ -235,8 +266,18 @@ async def open_kernel_runtime(
 
             redis = resources.general_redis
             leases = RedisLeaseManager(redis)
+            from app.composition.effects import build_effect_reconciler, build_effect_service
+
+            effect_service = build_effect_service(resources=resources, shared=shared)
+            from app.composition.definition_lifecycle import build_definition_publisher
+            from app.composition.execution_definitions import build_code_definitions
+
+            definitions = build_code_definitions()
+            worker_id = _worker_id("activities")
             activity_registry = _build_activity_registry(
                 shared,
+                definitions=definitions,
+                effects=effect_service,
                 text_stream=text_stream,
                 replay=build_replay_runtime(settings=settings, resources=resources, shared=shared),
                 isolated=build_environment_runtime(
@@ -245,6 +286,20 @@ async def open_kernel_runtime(
             )
             # 启动自检（D10）：决策侧声明的 activity 类型必须全部有已注册 handler。
             validate_decision_registry(activity_registry.registered_types)
+            definitions.validate_handlers(activity_registry)
+            definition_publisher = build_definition_publisher(
+                sessions=resources.postgres.session_factory,
+                definitions=definitions,
+                worker_id=worker_id,
+            )
+            # Fail startup before readiness or claims if a published version's
+            # artifact differs. Heartbeats never move the admission head.
+            await definition_publisher.run_once()
+            await supervisor.start(
+                "execution-definition-capabilities",
+                partial(definition_publisher.serve, supervisor.stop_event),
+                kind=TaskKind.CRITICAL,
+            )
 
             async def _approval_ttl_minutes(now):
                 active = await shared.runtime_policy_reader.active_operations(
@@ -268,6 +323,7 @@ async def open_kernel_runtime(
                 session_factory=resources.postgres.session_factory,
             )
             execution = build_execution_kernel_runtime(
+                effect_store=effect_service.store,
                 evaluation_execution=evaluation_execution,
                 progress_sink_wrapper=progress_sink_wrapper,
                 content_writer=content_writer,
@@ -275,11 +331,15 @@ async def open_kernel_runtime(
                 redis=redis,
                 authorization=AuthorizationContext.system("execution-kernel"),
                 activity_registry=activity_registry,
-                worker_id=_worker_id("activities"),
+                worker_id=worker_id,
+                definitions=definitions,
                 activity_max_concurrency=settings.execution_activity_max_concurrency,
                 activity_max_claim_attempts=settings.execution_activity_max_claim_attempts,
                 inbox_max_claim_attempts=settings.execution_inbox_max_claim_attempts,
                 approval_ttl_minutes=_approval_ttl_minutes,
+            )
+            effect_reconciler = build_effect_reconciler(
+                resources=resources, shared=shared, service=effect_service
             )
             resource_gc = ResourceVersionGCService(
                 uow_factory=shared.uow_factory,
@@ -318,10 +378,19 @@ async def open_kernel_runtime(
                 authorization=AuthorizationContext.system("execution-kernel"),
                 handler=execution,
             )
+            from app.infrastructure.execution.execution_object_lifecycle import ExecutionObjectGC
             from app.infrastructure.repositories.db_evaluation_dataset_repository import (
                 DatasetObjectLifecycle,
             )
 
+            execution_object_gc = ExecutionObjectGC(
+                resources.postgres.upload_intent_session_factory,
+                shared.object_storage.lifecycle.storage,
+                signing_secret=settings.database_authorization_signing_secret,
+                retention_days=settings.execution_object_retention_days,
+                orphan_hours=settings.execution_object_orphan_hours,
+                batch_size=settings.execution_object_gc_batch_size,
+            )
             dataset_objects = DatasetObjectLifecycle(
                 resources.postgres.upload_intent_session_factory,
                 shared.object_storage,
@@ -477,15 +546,26 @@ async def open_kernel_runtime(
             comparison_diff_worker = build_comparison_diff_worker(
                 settings=settings, resources=resources, shared=shared
             )
+            from app.infrastructure.execution.definition_management import (
+                PostgresDefinitionManagement,
+            )
+
+            definition_management = PostgresDefinitionManagement(
+                session_factory=resources.postgres.session_factory,
+                authorization=AuthorizationContext.system("execution-kernel"),
+            )
             for name, action in (
+                ("execution-definitions", definition_management.process_pending),
                 ("execution-export", export_worker.process_pending),
                 ("execution-export-cleanup", export_cleanup),
                 ("comparison-artifact-diff", comparison_diff_worker.process_pending),
                 ("notification-delivery", shared.notification_service.process_deliveries),
                 ("patrol-recheck", shared.patrol_remediation_service.reconcile_rechecks),
                 ("execution-recovery", recovery_worker.process_pending),
+                ("execution-effects", effect_reconciler.process_pending),
                 ("artifact-provenance", artifact_maintenance.process_pending),
                 ("execution-usage", usage_maintenance.process_pending),
+                ("execution-object-retention", execution_object_gc.cleanup),
                 (
                     "execution-view-cache",
                     PostgresExecutionView(

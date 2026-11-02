@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.errors import ConflictError
+from app.domain.models.embedding_space import validate_embedding
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.memory_entry_repository import MemoryEntryRepository
@@ -158,9 +159,21 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
             )
         )
 
-    async def update_embedding(self, entry_id: str, embedding: list[float]) -> None:
+    async def update_embedding(
+        self, entry_id: str, embedding: list[float] | None, *, embedding_space_digest: str | None
+    ) -> None:
+        if (embedding is None) != (embedding_space_digest is None):
+            raise ValueError("embedding and space must be replaced atomically")
+        if embedding is not None:
+            validate_embedding(embedding)
+            _validate_space_digest(embedding_space_digest)
+        # Production sessions disable autoflush. A just-created memory must
+        # exist before the vector update, while both writes stay in this UoW.
+        await self.db_session.flush()
         stmt = (
-            update(MemoryEntryORM).where(MemoryEntryORM.id == entry_id).values(embedding=embedding)
+            update(MemoryEntryORM)
+            .where(MemoryEntryORM.id == entry_id)
+            .values(embedding=embedding, embedding_space_digest=embedding_space_digest)
         )
         await self.db_session.execute(stmt)
 
@@ -169,14 +182,20 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         query_embedding: list[float],
         session_id: str | None = None,
         limit: int = 20,
+        *,
+        embedding_space_digest: str,
     ) -> list[MemoryEntry]:
+        validate_embedding(query_embedding)
+        _validate_space_digest(embedding_space_digest)
         # 向量距离检索仍使用 pgvector 运算符（ORM 不直接支持 <=>）
         stmt = text("""
             SELECT id, scope, session_id, title, content, tags, owner_user_id,
                    team_id, source, last_used_at, use_count, created_at, updated_at,
+                   embedding_space_digest,
                    embedding <=> CAST(:query_vec AS vector) AS distance
             FROM memory_entries
             WHERE embedding IS NOT NULL
+              AND embedding_space_digest = :embedding_space_digest
               AND EXISTS (
                 SELECT 1
                 FROM sessions s
@@ -201,6 +220,7 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
             "session_id": session_id,
             "query_vec": "[" + ",".join(str(v) for v in query_embedding) + "]",
             "limit": limit,
+            "embedding_space_digest": embedding_space_digest,
         }
         result = await self.db_session.execute(stmt, params)
         rows = result.fetchall()
@@ -219,8 +239,18 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
                 last_used_at=row.last_used_at,
                 use_count=row.use_count,
                 vector_score=max(0.0, 1.0 - float(row.distance or 0.0)),
+                embedding_space_digest=row.embedding_space_digest,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
             for row in rows
         ]
+
+
+def _validate_space_digest(value: str | None) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(c not in "0123456789abcdef" for c in value)
+    ):
+        raise ValueError("a canonical embedding space digest is required")

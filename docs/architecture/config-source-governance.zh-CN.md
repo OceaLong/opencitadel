@@ -16,6 +16,26 @@
 Migration 创建一个类型化 Execution Policy Revision、一个类型化 Operations Policy Revision，
 并通过单个原子 Head 同时激活两者。后续变更只能由 Admin API/UI 创建不可变 Revision。
 
+新安装 Seed 基础知识库处理：文本提取与关键词检索，向量检索、重排、GraphRAG 与 OCR 关闭。
+增强能力通过推理 Binding 与策略开关按需启用；升级保留已有 Policy Head 与已冻结 Run 的
+存储设置。
+
+## 简单部署输入
+
+本地安装运行 `make quickstart`；只准备配置运行 `make configure`。
+[`.env.example`](../../.env.example) 的六项选择是基础入口。
+分类的[完整参考](../../deploy/config/.env.reference) 列出可选覆盖，不是第二份运行时配置。
+默认运行时只加载 `.env`，显式环境覆盖优先；已有自定义 `OPENCITADEL_ENV_FILE` 继续支持。Compose/Helm 根据部署输入推导内部服务地址、
+沙箱网络/Namespace、OAuth 默认值与 Cookie 安全属性。
+
+凭据只在首次安装独立生成一次，持久保存在私有 `.env` 或按角色划分的 Kubernetes Secret。
+重启与 Helm 升级复用原值。有效的原变量名称与签名密钥回退继续兼容；恢复已有数据库时不得
+重新生成密钥。隔离的 `.env.e2e` 是验收 Fixture，不要求逐项复制所有默认值。
+
+Helm 生产环境需要真实 HTTPS `publicUrl`（或已启用 Ingress 的明确 Host）；本地 Chart
+体验显式使用 `env.ENV=development`。TLS、外部服务凭据与可信代理例外取决于实际基础设施，
+不能从示例域名推断。
+
 ## Runtime Policy 边界
 
 - Execution Policy 在 Run 准入时冻结；进行中的 Run 始终使用原 Revision 与 Policy Snapshot。
@@ -50,7 +70,7 @@ Retention/Purge Batch，以及 `RECYCLE_BIN_RETENTION_DAYS`（默认 30）；这
 ## 变更规则
 
 - 新增 Policy Field 时，只修改类型化 Model、初始 Seed、Admin Form、OpenAPI Contract、Test 与 Runtime Policy 架构/运维文档。
-- 新增 Deployment Setting 时，只修改 `core/config.py`、`.env.example`、Compose、Helm、Validation Schema 与部署文档。
+- 新增 Deployment Setting 时，修改 `core/config.py`、`deploy/config/.env.reference`、相关 Compose/Helm 适配器、Validation Schema 与部署文档；仅基础启动项加入 `.env.example`。
 - 禁止在权威来源之间复制同一个值，也禁止引入 Fallback Path。
 - Secret 不得进入 Runtime Policy Revision、Run Public Projection 或 UI Event Payload。
 

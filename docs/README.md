@@ -8,7 +8,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 
 ### Getting started
 
-1. [Self-host in 10 minutes](tutorials/01-self-host-10-minutes.md)
+1. [Self-hosting tutorial](tutorials/01-self-host-10-minutes.md)
 2. [Internal knowledge base](tutorials/02-internal-knowledge-base.md)
 3. [MCP integrations](tutorials/03-mcp-integrations.md)
 4. [Governed Web Operator](tutorials/04-governed-web-operator.md)
@@ -56,19 +56,19 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 
 ### Module guides
 
-| Document                                                | Scope                                                           |
-| ------------------------------------------------------- | --------------------------------------------------------------- |
-| [API](../api/README.md)                                 | Backend routes, SSE, local dev                                  |
-| [UI](../ui/README.md)                                   | Frontend stack and routes                                       |
-| [Sandbox](../sandbox/README.md)                         | Isolated runtime                                                |
-| [Nginx gateway](../nginx/README.md)                     | Edge proxy, SSE/WS, upload limits                               |
-| [Ops Collector](../ops-collector/README.md)             | Fixed read-only MCP probes, configuration and deployment        |
-| [Ops Actuator](../ops-actuator/README.md)               | Fixed patch-only write MCP probes, configuration and deployment |
-| [OpsConsole demo](../demo/ops-console/README.md)        | Web Operator ticket backend demo                                |
-| [E2E acceptance](../e2e/README.md)                      | Deterministic isolated full-stack gate, evidence, and cleanup   |
-| [Repository scripts](../scripts/README.md)              | `quickstart.sh`, `check-docs.sh`, acceptance runner             |
-| [Deploy scripts](../deploy/scripts/README.md)           | Production host tuning utilities                                |
-| [Ops Patrol fault lab](../deploy/patrol-demo/README.md) | Disposable kind cluster with reproducible Patrol fixtures       |
+| Document                                         | Scope                                                           |
+| ------------------------------------------------ | --------------------------------------------------------------- |
+| [API](../api/README.md)                          | Backend routes, SSE, local dev                                  |
+| [UI](../ui/README.md)                            | Frontend stack and routes                                       |
+| [Sandbox](../sandbox/README.md)                  | Isolated runtime                                                |
+| [Nginx gateway](../deploy/nginx/README.md)       | Edge proxy, SSE/WS, upload limits                               |
+| [Ops Collector](../ops-collector/README.md)      | Fixed read-only MCP probes, configuration and deployment        |
+| [Ops Actuator](../ops-actuator/README.md)        | Fixed patch-only write MCP probes, configuration and deployment |
+| [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo                                |
+| [E2E acceptance](../e2e/README.md)               | Deterministic isolated full-stack gate, evidence, and cleanup   |
+| [Repository scripts](../scripts/README.md)       | `quickstart.sh`, `check-docs.sh`, acceptance runner             |
+| [Deploy scripts](../deploy/scripts/README.md)    | Production host tuning utilities                                |
+| [Ops Patrol fault lab](../demo/patrol/README.md) | Disposable kind cluster with reproducible Patrol fixtures       |
 
 ### Open-source governance
 
@@ -82,7 +82,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 ## Maintenance rules
 
 - **One topic, one authoritative doc** — avoid duplicating policy across README and topic docs.
-- **Config source of truth** — `.env.example` for deployment inputs; PostgreSQL Runtime Policy revisions for live behavior.
+- **Configuration** — `.env.example` lists basic startup choices; [`deploy/config/.env.reference`](../deploy/config/.env.reference) groups optional overrides. Generated credentials persist in `.env`; PostgreSQL Runtime Policy revisions govern live behavior.
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.

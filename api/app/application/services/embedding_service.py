@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from collections.abc import Sequence
+from hashlib import sha256
 
 from app.application.ports.inference import EmbeddingFactoryPort
 from app.application.ports.inference_dispatch import (
@@ -11,6 +13,11 @@ from app.application.ports.inference_dispatch import (
 from app.application.services.inference_binding_service import InferenceBindingService
 from app.application.services.inference_model_service import InferenceModelService
 from app.domain.errors import BadRequestError, ServerRequestsError
+from app.domain.models.embedding_space import (
+    EmbeddingSpaceDescriptor,
+    EmbeddingSpaceMismatch,
+    validate_embedding,
+)
 from app.domain.models.inference import (
     PLATFORM_EMBEDDING_DIMENSIONS,
     EmbeddingModelSettings,
@@ -20,6 +27,7 @@ from app.domain.models.inference import (
 from app.domain.models.scope import OwnerScope
 
 _EMBEDDING_CACHE_MAX_SIZE = 256
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
@@ -37,7 +45,19 @@ class EmbeddingService:
         self._models = models
         self._embedding_factory = embedding_factory
         self._cache_max_size = cache_max_size
-        self._cache: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+        self._cache: OrderedDict[tuple[str, str, str, str], list[float]] = OrderedDict()
+
+    async def resolve_space(
+        self, *, scope: OwnerScope | None, model_id: str | None = None
+    ) -> EmbeddingSpaceDescriptor:
+        return EmbeddingSpaceDescriptor.from_resolved(await self._resolve(scope, model_id))
+
+    async def _resolve(self, scope, model_id):
+        if model_id is None:
+            return await self._bindings.resolve(InferencePurpose.EMBEDDING, scope=scope)
+        if self._models is None:
+            raise RuntimeError("model-specific embedding requires InferenceModelService")
+        return await self._models.resolve_model(model_id, scope=scope)
 
     async def embed(
         self,
@@ -46,15 +66,18 @@ class EmbeddingService:
         scope: OwnerScope | None,
         purpose_context: str = "unspecified",
         model_id: str | None = None,
+        expected_space: EmbeddingSpaceDescriptor | None = None,
     ) -> list[list[float]]:
         if not contents:
             return []
-        if model_id is None:
-            resolved = await self._bindings.resolve(InferencePurpose.EMBEDDING, scope=scope)
-        else:
-            if self._models is None:
-                raise RuntimeError("model-specific embedding requires InferenceModelService")
-            resolved = await self._models.resolve_model(model_id, scope=scope)
+        if expected_space is not None:
+            if model_id is not None and model_id != expected_space.model_id:
+                logger.warning("embedding_space_mismatch: model_identity")
+                raise EmbeddingSpaceMismatch()
+            model_id = expected_space.model_id
+        # Resolve on every call, before cache access, to recheck current access
+        # and detect mutations under an unchanged database model ID.
+        resolved = await self._resolve(scope, model_id)
         settings = resolved.model.settings
         if resolved.model.kind != InferenceModelKind.EMBEDDING or not isinstance(
             settings,
@@ -65,6 +88,20 @@ class EmbeddingService:
                 error_key="inference.errors.bindingKindMismatch",
             )
 
+        space = EmbeddingSpaceDescriptor.from_resolved(resolved)
+        if expected_space is not None and space.digest != expected_space.digest:
+            logger.warning("embedding_space_mismatch: descriptor_changed")
+            raise EmbeddingSpaceMismatch()
+        scope_key = f"{scope.type.value}:{scope.user_id}:{scope.team_id or ''}" if scope else None
+
+        def cache_key(content):
+            return (
+                scope_key or "",
+                space.digest,
+                purpose_context,
+                sha256(content.encode()).hexdigest(),
+            )
+
         results: list[list[float] | None] = [None] * len(contents)
         missing_texts: list[str] = []
         missing_indices: list[int] = []
@@ -73,8 +110,8 @@ class EmbeddingService:
             if not content.strip():
                 results[index] = []
                 continue
-            key = (resolved.id, content)
-            cached = self._cache.get(key)
+            key = cache_key(content)
+            cached = self._cache.get(key) if scope_key is not None else None
             if cached is not None:
                 self._cache.move_to_end(key)
                 results[index] = list(cached)
@@ -110,14 +147,15 @@ class EmbeddingService:
                         ):
                             self._validate_vector(vector)
                             normalized = [float(value) for value in vector]
-                            self._cache_set((resolved.id, content), normalized)
+                            if scope_key is not None:
+                                self._cache_set(cache_key(content), normalized)
                             results[index] = normalized
             finally:
                 await close_inference_adapter(adapter)
 
         return [vector if vector is not None else [] for vector in results]
 
-    def _cache_set(self, key: tuple[str, str], vector: list[float]) -> None:
+    def _cache_set(self, key: tuple[str, str, str, str], vector: list[float]) -> None:
         self._cache[key] = list(vector)
         self._cache.move_to_end(key)
         while len(self._cache) > self._cache_max_size:
@@ -125,14 +163,11 @@ class EmbeddingService:
 
     @staticmethod
     def _validate_vector(vector: object) -> None:
-        if not isinstance(vector, list) or len(vector) != PLATFORM_EMBEDDING_DIMENSIONS:
+        try:
+            validate_embedding(vector)
+        except ValueError as exc:
             raise ServerRequestsError(
-                f"Embedding 向量维度必须为 {PLATFORM_EMBEDDING_DIMENSIONS}",
-                error_key="inference.errors.embeddingDimensionMismatch",
-                error_params={"dimensions": str(PLATFORM_EMBEDDING_DIMENSIONS)},
-            )
-        if not all(isinstance(value, (int, float)) for value in vector):
-            raise ServerRequestsError(
-                "Embedding 向量包含非数值元素",
+                f"Embedding 向量必须为 {PLATFORM_EMBEDDING_DIMENSIONS} 维有限数值",
                 error_key="inference.errors.embeddingInvalidVector",
-            )
+                error_params={"dimensions": str(PLATFORM_EMBEDDING_DIMENSIONS)},
+            ) from exc

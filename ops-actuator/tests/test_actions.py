@@ -1,130 +1,115 @@
-"""TDD for the three registered write actions, using FakeKubernetesWriter
-(see conftest.py) injected via Actuator's k8s_factory -- the Fake-injection
-pattern mirrors ops-collector/tests/test_k8s_probes.py's FakeKubernetes.
-"""
+"""Registered actions exercise real patch preparation with a CAS workload fake."""
 
 import pytest
-from opencitadel_ops_actuator.actuator import Actuator
 
 
 @pytest.mark.asyncio
-async def test_restart_patches_restartedAt_annotation_and_reports_before_after(
-    actuator_settings, fake_k8s
+async def test_restart_patches_fixed_annotation_and_reports_before_after(
+    make_actuator, invoke, fake_k8s
 ):
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.restart_workload("demo", "api", "deployment", "key-1")
+    result = await invoke(make_actuator(), "restart_workload")
     assert result["action_outcome"] == "applied"
     assert fake_k8s.restart_calls == 1
     assert result["after"]["restarted_at"]
     assert result["before"]["generation"] == 1
     assert result["after"]["generation"] == 2
+    assert result["receipt"]["target"]["uid"] == fake_k8s.uid
+    assert fake_k8s.last_patch["metadata"]["resourceVersion"] == "1"
 
 
 @pytest.mark.asyncio
-async def test_scale_patches_main_resource_with_replicas_and_idempotency_key(
-    actuator_settings, fake_k8s
+async def test_scale_patches_main_resource_with_replicas_and_identity(
+    make_actuator, invoke, fake_k8s
 ):
-    """scale must NOT go through the apps/v1 /scale subresource: that
-    subresource only round-trips spec.replicas on real clusters and drops
-    metadata.annotations, which would silently break the idempotency key.
-    It has to be the same single main-resource merge patch as restart/
-    rollback (spec.replicas + the remediation-key annotation together)."""
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.scale_workload("demo", "api", "deployment", 5, "key-1")
+    result = await invoke(make_actuator(), "scale_workload", replicas=5)
     assert result["action_outcome"] == "applied"
     assert fake_k8s.scale_calls == 1
     assert fake_k8s.restart_calls == 0
     assert result["before"]["replicas"] == 3
     assert result["after"]["replicas"] == 5
-    # the idempotency marker landed on the same object the replica count did
-    assert fake_k8s.marker == "key-1"
+    assert fake_k8s.marker == result["operation_id"]
     assert fake_k8s.replicas == 5
 
 
 @pytest.mark.asyncio
-async def test_rollback_deployment_reverts_to_previous_replicaset_template(
-    actuator_settings, fake_k8s
-):
-    fake_k8s.revisions = ["template-v1", "template-v2"]
-    fake_k8s.current_template = "template-v2"
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.rollback_workload("demo", "api", "deployment", "key-1")
+async def test_rollback_uses_previous_template(make_actuator, invoke, fake_k8s):
+    result = await invoke(make_actuator(), "rollback_workload")
     assert result["action_outcome"] == "applied"
     assert fake_k8s.rollback_calls == 1
-    assert result["before"]["template"] == "template-v2"
-    assert result["after"]["template"] == "template-v1"
+    assert fake_k8s.current_template == "template-v1"
+    assert result["after"]["rolled_back_to_revision"] == "1"
 
 
 @pytest.mark.asyncio
-async def test_rollback_without_previous_revision_returns_no_rollback_revision(
-    actuator_settings, fake_k8s
-):
+async def test_rollback_without_revision_persists_rejection(make_actuator, invoke, fake_k8s):
     fake_k8s.revisions = ["template-v1"]
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.rollback_workload("demo", "api", "deployment", "key-1")
-    assert result["action_outcome"] == "failed"
+    actuator = make_actuator()
+    result = await invoke(actuator, "rollback_workload")
+    assert result["state"] == "not_applied"
     assert result["error_code"] == "NO_ROLLBACK_REVISION"
-    assert fake_k8s.rollback_calls == 0
+    assert (await actuator.get_operation(result["operation_id"]))["receipt"] == result["receipt"]
+    assert fake_k8s.patch_attempts == 0
 
 
 @pytest.mark.asyncio
-async def test_statefulset_rollback_rejected_kind_mismatch(actuator_settings, fake_k8s):
-    """rollback 仅支持 deployment；statefulset 调 rollback -> KIND_MISMATCH。"""
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.rollback_workload("demo", "cache", "statefulset", "key-1")
-    assert result["action_outcome"] == "failed"
+@pytest.mark.parametrize(
+    ("action", "workload", "kind"),
+    [
+        ("rollback_workload", "cache", "statefulset"),
+        ("restart_workload", "api", "statefulset"),
+    ],
+)
+async def test_kind_mismatch_is_denied(make_actuator, invoke, fake_k8s, action, workload, kind):
+    result = await invoke(make_actuator(), action, workload=workload, kind=kind)
     assert result["error_code"] == "KIND_MISMATCH"
-    assert fake_k8s.rollback_calls == 0
+    assert fake_k8s.patch_attempts == 0
 
 
 @pytest.mark.asyncio
-async def test_requested_kind_mismatching_registered_target_is_denied(actuator_settings, fake_k8s):
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.restart_workload("demo", "api", "statefulset", "key-1")
-    assert result["action_outcome"] == "failed"
-    assert result["error_code"] == "KIND_MISMATCH"
-    assert fake_k8s.restart_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_missing_workload_maps_to_target_not_found(actuator_settings, fake_k8s):
+async def test_missing_workload_is_definitively_not_applied(make_actuator, invoke, fake_k8s):
     fake_k8s.missing = True
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await actuator.restart_workload("demo", "api", "deployment", "key-1")
-    assert result["action_outcome"] == "failed"
+    result = await invoke(make_actuator(), "restart_workload")
+    assert result["state"] == "not_applied"
     assert result["error_code"] == "TARGET_NOT_FOUND"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("call", "call_count_of"),
+    ("action", "parameters"),
     [
-        (
-            lambda actuator: actuator.restart_workload("demo", "api", "deployment", "key-1"),
-            "restart_calls",
-        ),
-        (
-            lambda actuator: actuator.scale_workload("demo", "api", "deployment", 5, "key-1"),
-            "scale_calls",
-        ),
-        (
-            lambda actuator: actuator.rollback_workload("demo", "api", "deployment", "key-1"),
-            "rollback_calls",
-        ),
+        ("restart_workload", {}),
+        ("scale_workload", {"replicas": 5}),
+        ("rollback_workload", {}),
     ],
-    ids=["restart", "scale", "rollback"],
 )
-async def test_transient_k8s_error_is_never_retried(
-    actuator_settings, fake_k8s, call, call_count_of
+async def test_transport_failure_is_unknown_without_internal_retry(
+    make_actuator, invoke, fake_k8s, action, parameters
 ):
-    """Write actions must never retry: a transient failure (e.g. a dropped
-    connection to the API server) is attempted exactly once and reported as
-    K8S_ERROR immediately -- retry is a decision for the caller's approval
-    chain, not this service (contrast with ops-collector's retry-once-on-
-    transient-failure behavior for reads)."""
-    fake_k8s.raise_on_mutation = ConnectionError("connection reset by peer")
-    actuator = Actuator(actuator_settings(), k8s_factory=lambda: fake_k8s)
-    result = await call(actuator)
-    assert result["action_outcome"] == "failed"
-    assert result["error_code"] == "K8S_ERROR"
-    assert getattr(fake_k8s, call_count_of) == 1
+    fake_k8s.raise_on_mutation = ConnectionError("connection reset")
+    result = await invoke(make_actuator(), action, **parameters)
+    assert result["state"] == "unknown"
+    assert result["error_code"] == "OPERATION_UNKNOWN"
+    assert fake_k8s.patch_attempts == 1
+
+
+def test_real_adapter_selects_strategic_patch_wire_type():
+    from types import SimpleNamespace
+
+    from opencitadel_ops_actuator.k8s_writer import KubernetesWriter
+
+    calls = []
+    writer = object.__new__(KubernetesWriter)
+    writer.apps = SimpleNamespace(
+        patch_namespaced_deployment=lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    body = {"metadata": {"resourceVersion": "7"}, "spec": {"template": {"$patch": "replace"}}}
+    writer._patch("demo", "api", "deployment", body)
+    assert calls == [
+        (
+            ("api", "demo", body),
+            {
+                "_content_type": "application/strategic-merge-patch+json",
+                "_request_timeout": (5, 30),
+            },
+        )
+    ]

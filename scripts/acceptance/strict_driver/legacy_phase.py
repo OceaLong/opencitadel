@@ -90,6 +90,7 @@ async def execute(phase, document, previous):
     from app.domain.models.session import Session
     from app.domain.models.user import User
     from app.domain.runtime_policy.snapshot import derive_run_policy_snapshot
+    from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
     from app.infrastructure.execution.postgres_event_store import PostgresEventStore
     from app.infrastructure.execution.postgres_formal_projector import PostgresFormalProjector
     from app.infrastructure.execution.postgres_run_projection import PostgresRunProjection
@@ -207,22 +208,25 @@ async def execute(phase, document, previous):
             session_factory=factory, aggregates={"run": aggregate}, authorization=kernel
         )
 
-        async def send(kind, payload=None, version=1):
-            result = await handler.handle(
-                CommandEnvelope(
-                    command_id=uuid4(),
-                    command_type=kind,
-                    command_schema_version=version,
-                    stream_type="run",
-                    stream_id=str(run_id),
-                    owner_user_id=scope.user_id,
-                    team_id=None,
-                    correlation_id=run_id,
-                    causation_id=None,
-                    issued_at=datetime.now(UTC),
-                    payload=payload or {},
-                )
-            )
+        async def send(kind, payload=None, version=1, *, lease_proof=None):
+            envelope = {
+                "command_id": uuid4(),
+                "command_type": kind,
+                "command_schema_version": version,
+                "stream_type": "run",
+                "stream_id": str(run_id),
+                "owner_user_id": scope.user_id,
+                "team_id": None,
+                "correlation_id": run_id,
+                "causation_id": None,
+                "issued_at": datetime.now(UTC),
+                "payload": payload or {},
+            }
+            # The archived v1 envelope deliberately has no lease-proof field.
+            # Only commands constructed by current code carry the new authority.
+            if phase != "old":
+                envelope["activity_lease_proof"] = lease_proof
+            result = await handler.handle(CommandEnvelope(**envelope))
             require(result.status == "accepted", kind + "_accepted")
 
         if phase == "old":
@@ -258,6 +262,25 @@ async def execute(phase, document, previous):
             },
             1 if phase == "old" else 2,
         )
+        lease_proof = None
+        if phase != "old":
+            store = PostgresActivityStore(session_factory=factory, authorization=kernel)
+            claims = await store.claim(
+                now=datetime.now(UTC),
+                limit=1,
+                worker_id="strict-legacy-current",
+                claim_ttl=timedelta(minutes=5),
+            )
+            require(
+                len(claims) == 1 and claims[0].request.activity_id == identity,
+                "current_activity_claim",
+            )
+            claim = claims[0]
+            require(
+                await store.mark_call_started(claim, now=datetime.now(UTC)),
+                "current_activity_call_started",
+            )
+            lease_proof = claim.lease_proof
         await send(
             "MarkActivityCallStarted",
             {
@@ -266,6 +289,7 @@ async def execute(phase, document, previous):
                 **({"claim_generation": 1} if phase != "old" else {}),
             },
             1 if phase == "old" else 2,
+            lease_proof=lease_proof,
         )
         await send(
             "CompleteActivity",
@@ -275,6 +299,7 @@ async def execute(phase, document, previous):
                 **({"claim_generation": 1} if phase != "old" else {}),
             },
             1 if phase == "old" else 2,
+            lease_proof=lease_proof,
         )
         if phase != "old":
             await send("CompleteRun")

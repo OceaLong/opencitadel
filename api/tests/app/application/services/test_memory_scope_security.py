@@ -6,6 +6,7 @@ from app.application.services.memory_service import MemoryService
 from app.domain.models.memory_entry import MemoryEntry
 from app.domain.models.scope import OwnerScope
 from app.domain.runtime_policy import MemoryExecutionPolicy
+from tests.app.embedding_test_support import embedding_space
 
 
 class _FakeMemoryRepo:
@@ -20,6 +21,9 @@ class _FakeMemoryRepo:
 
     async def save(self, entry, **kwargs):
         self.saved = entry
+
+    async def update_embedding(self, entry_id, embedding, *, embedding_space_digest):
+        self.saved.embedding_space_digest = embedding_space_digest
 
     async def recall_for_session(self, session_id, limit):
         assert session_id == "session-1"
@@ -108,7 +112,10 @@ async def test_memory_embedding_never_borrows_open_business_transaction(operatio
         assert active == 0, "provider send holds caller transaction / pool connection"
         return [[0.1] * 1536]
 
-    service = MemoryService(lambda: TrackingUow(repo), SimpleNamespace(embed=embed))
+    service = MemoryService(
+        lambda: TrackingUow(repo),
+        SimpleNamespace(embed=embed, resolve_space=AsyncMock(return_value=embedding_space())),
+    )
     scope = OwnerScope.personal("user-1")
     policy = MemoryExecutionPolicy(vector_enabled=True)
     if operation == "recall":
@@ -130,7 +137,10 @@ async def test_memory_update_revalidates_entry_after_embedding_before_save():
     repo.get_by_id = AsyncMock(side_effect=[MemoryEntry(id="entry-1"), None])
     service = MemoryService(
         lambda: _FakeUow(repo),
-        SimpleNamespace(embed=AsyncMock(return_value=[[0.1] * 1536])),
+        SimpleNamespace(
+            embed=AsyncMock(return_value=[[0.1] * 1536]),
+            resolve_space=AsyncMock(return_value=embedding_space()),
+        ),
     )
     with pytest.raises(NotFoundError):
         await service.update_entry(
@@ -140,3 +150,46 @@ async def test_memory_update_revalidates_entry_after_embedding_before_save():
             policy=MemoryExecutionPolicy(vector_enabled=True),
         )
     assert repo.saved is None
+
+
+@pytest.mark.asyncio
+async def test_context_recall_uses_accepted_query_and_records_exact_revisions():
+    from unittest.mock import AsyncMock
+
+    from app.domain.execution.context_models import context_digest
+    from app.domain.execution.context_resources import memory_content_digest
+
+    entry = MemoryEntry(
+        id="memory-1",
+        owner_user_id="user-1",
+        title="Order",
+        content="Do not renew ORD83",
+        embedding_space_digest=embedding_space().digest,
+    )
+    repo = _FakeMemoryRepo()
+    repo.recall_for_session = AsyncMock(return_value=[entry])
+    repo.vector_search_entries = AsyncMock(return_value=[entry])
+    repo.touch_used = AsyncMock()
+    embeddings = SimpleNamespace(
+        embed=AsyncMock(return_value=[[0.1] * 1536]),
+        resolve_space=AsyncMock(return_value=embedding_space()),
+    )
+    service = MemoryService(lambda: _FakeUow(repo), embeddings)
+    recall = await service.recall_context(
+        "session-1",
+        query="accepted ORD83 question",
+        owner_scope=OwnerScope.personal("user-1"),
+        policy=MemoryExecutionPolicy(vector_enabled=True),
+    )
+    assert embeddings.embed.call_args.args[0] == ["accepted ORD83 question"]
+    assert recall.query_digest == context_digest("accepted ORD83 question")
+    assert recall.query_embedding_space_digest == embedding_space().digest
+    assert recall.entries[0].content_digest == memory_content_digest(entry)
+    assert recall.entries[0].embedding_space_digest == embedding_space().digest
+    assert "Do not renew ORD83" in recall.content
+    assert "content" not in recall.evidence().model_dump()
+    # Activity counters may advance while the immutable source version remains valid.
+    entry.use_count += 1
+    assert recall.entries[0].content_digest == memory_content_digest(entry)
+    entry.content = "renew ORD83"
+    assert recall.entries[0].content_digest != memory_content_digest(entry)

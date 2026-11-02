@@ -83,6 +83,11 @@ async def project_usage(session, *, event, observation):
         "configuration_revision": row["configuration_id"],
         "version_unpinned": fact.get("version_unpinned", True),
         "categories": usage,
+        "call_kind": "context_summary"
+        if row["body"].get("context_summary")
+        else "main_answer"
+        if row["body"].get("context_manifest")
+        else "other",
     }
     await session.execute(
         text("""INSERT INTO execution_usage_facts(id,call_identity,run_id,activity_id,attempt_id,purpose,model_revision,input_tokens,output_tokens,price_revision,cost_usd,coverage,occurred_at,revision,owner_user_id,team_id,created_by)
@@ -111,7 +116,7 @@ async def project_usage(session, *, event, observation):
         (
             await session.execute(
                 text(
-                    "SELECT purpose,input_tokens,output_tokens,cost_usd FROM execution_usage_facts WHERE run_id=:run AND owner_user_id IS NOT DISTINCT FROM :owner AND team_id IS NOT DISTINCT FROM :team"
+                    "SELECT purpose,input_tokens,output_tokens,cost_usd,coverage FROM execution_usage_facts WHERE run_id=:run AND owner_user_id IS NOT DISTINCT FROM :owner AND team_id IS NOT DISTINCT FROM :team"
                 ),
                 p,
             )
@@ -119,21 +124,7 @@ async def project_usage(session, *, event, observation):
         .mappings()
         .all()
     )
-    summary = {}
-    for purpose in ("production", "evaluation_subject", "evaluation_judge", "unknown"):
-        items = [r for r in records if r["purpose"] == purpose]
-        if not items:
-            continue
-        unknown_tokens = sum(r["input_tokens"] is None or r["output_tokens"] is None for r in items)
-        unknown_cost = sum(r["cost_usd"] is None for r in items)
-        summary[purpose] = {
-            "calls": len(items),
-            "unknown_usage_calls": unknown_tokens,
-            "unknown_cost_calls": unknown_cost,
-            "known_input_count": sum(r["input_tokens"] or 0 for r in items),
-            "known_output_count": sum(r["output_tokens"] or 0 for r in items),
-            "known_cost_usd": str(sum((r["cost_usd"] or Decimal(0) for r in items), Decimal(0))),
-        }
+    summary = usage_summary(records)
     body = row["body"]
     config = {
         "configuration_revision": row["configuration_id"],
@@ -165,6 +156,39 @@ async def project_usage(session, *, event, observation):
         },
     )
     await session.flush()
+
+
+def usage_summary(records):
+    """Group only published facts; unknown calls never become zero-cost facts."""
+
+    def counts(items):
+        return {
+            "calls": len(items),
+            "unknown_usage_calls": sum(
+                r["input_tokens"] is None or r["output_tokens"] is None for r in items
+            ),
+            "unknown_cost_calls": sum(r["cost_usd"] is None for r in items),
+            "known_input_count": sum(r["input_tokens"] or 0 for r in items),
+            "known_output_count": sum(r["output_tokens"] or 0 for r in items),
+            "known_cost_usd": str(sum((r["cost_usd"] or Decimal(0) for r in items), Decimal(0))),
+        }
+
+    summary = {}
+    for purpose in ("production", "evaluation_subject", "evaluation_judge", "unknown"):
+        items = [r for r in records if r["purpose"] == purpose]
+        if not items:
+            continue
+        groups = {}
+        for item in items:
+            kind = item["coverage"].get("call_kind", "other")
+            if kind not in {"main_answer", "context_summary"}:
+                kind = "other"
+            groups.setdefault(kind, []).append(item)
+        summary[purpose] = {
+            **counts(items),
+            "groups": {key: counts(group) for key, group in groups.items()},
+        }
+    return summary
 
 
 class ExecutionUsageMaintenance:

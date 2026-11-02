@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import and_, cast, delete, or_, select, update
+from sqlalchemy import and_, cast, delete, func, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.execution.activity import (
     ActivityClaim,
+    ActivityLeaseConfirmation,
     ActivityRequest,
 )
 from app.domain.execution.commands import CommandEnvelope, normalize_utc
@@ -32,12 +33,14 @@ class PostgresActivityStore:
         session_factory: async_sessionmaker[AsyncSession],
         authorization: AuthorizationContext,
         max_claim_attempts: int = DEFAULT_MAX_CLAIM_ATTEMPTS,
+        supported_implementations: frozenset[tuple[str, str, str]] | None = None,
     ) -> None:
         if max_claim_attempts <= 0:
             raise ValueError("max_claim_attempts must be positive")
         self._session_factory = session_factory
         self._authorization = authorization
         self._max_claim_attempts = max_claim_attempts
+        self._supported_implementations = supported_implementations
 
     async def claim(
         self,
@@ -53,14 +56,23 @@ class PostgresActivityStore:
             raise ValueError("worker_id must not be empty")
         if claim_ttl <= timedelta(0):
             raise ValueError("claim_ttl must be positive")
-        resolved_now = normalize_utc(now)
+        # Caller time is useful to test callers, never a lease authority.
+        normalize_utc(now)
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
+            resolved_now = await self._server_now(session)
             records = tuple(
                 (
                     await session.scalars(
                         select(ExecutionActivityTaskORM)
                         .where(
+                            tuple_(
+                                ExecutionActivityTaskORM.definition_digest,
+                                ExecutionActivityTaskORM.activity_type,
+                                ExecutionActivityTaskORM.handler_version,
+                            ).in_(sorted(self._supported_implementations))
+                            if self._supported_implementations is not None
+                            else True,
                             ExecutionActivityTaskORM.available_at <= resolved_now,
                             or_(
                                 ExecutionActivityTaskORM.status == "pending",
@@ -84,6 +96,9 @@ class PostgresActivityStore:
             )
             claims: list[ActivityClaim] = []
             for record in records:
+                # clock_timestamp(), unlike transaction now(), advances while
+                # waiting for locks or processing the preceding rows.
+                resolved_now = await self._server_now(session)
                 # Poison-pill cap (K2-2/D5): a row that keeps getting claimed
                 # without ever settling (worker crashes, stable infrastructure
                 # fault, endless defer loop) is parked as dead_lettered instead
@@ -93,8 +108,14 @@ class PostgresActivityStore:
                 # tick instead of waiting out the activity-timeout timer — the
                 # timer stays as the crash backstop and settles idempotently if
                 # it fires anyway.
+                # A possibly-sent operation must instead reach its recovery
+                # classifier (or trusted timeout); a counter is not evidence
+                # that an external side effect failed.
                 record.claim_attempts += 1
-                if record.claim_attempts > self._max_claim_attempts:
+                if (
+                    record.claim_attempts > self._max_claim_attempts
+                    and record.call_started_at is None
+                ):
                     record.status = "dead_lettered"
                     record.failure_code = "ACTIVITY_DEAD_LETTERED"
                     record.completed_at = resolved_now
@@ -117,6 +138,9 @@ class PostgresActivityStore:
                     ActivityClaim(
                         request=self._request(record),
                         claim_generation=record.claim_generation,
+                        worker_id=worker_id,
+                        server_now=resolved_now,
+                        lease_deadline=record.claim_deadline,
                         owner_user_id=record.owner_user_id,
                         team_id=record.team_id,
                         recovered_after_call_started=recovered_after_call_started,
@@ -131,27 +155,19 @@ class PostgresActivityStore:
         *,
         now: datetime,
     ) -> bool:
-        resolved_now = normalize_utc(now)
+        normalize_utc(now)
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            started = await session.scalar(
-                update(ExecutionActivityTaskORM)
-                .where(
-                    ExecutionActivityTaskORM.activity_id == claim.request.activity_id,
-                    ExecutionActivityTaskORM.claim_generation == claim.claim_generation,
-                    ExecutionActivityTaskORM.status == "claimed",
-                )
-                .values(
-                    status="call_started",
-                    attempt=ExecutionActivityTaskORM.attempt + 1,
-                    call_started_at=resolved_now,
-                    heartbeat_at=resolved_now,
-                    updated_at=resolved_now,
-                )
-                .returning(ExecutionActivityTaskORM.activity_id)
-            )
+            record, resolved_now = await self._owned_task(session, claim)
+            if record is None or record.status != "claimed" or record.timeout_at <= resolved_now:
+                return False
+            record.status = "call_started"
+            record.attempt += 1
+            record.call_started_at = resolved_now
+            record.heartbeat_at = resolved_now
+            record.updated_at = resolved_now
             await session.commit()
-            return started is not None
+            return True
 
     async def heartbeat(
         self,
@@ -159,28 +175,23 @@ class PostgresActivityStore:
         *,
         now: datetime,
         claim_ttl: timedelta,
-    ) -> bool:
+    ) -> ActivityLeaseConfirmation | None:
         if claim_ttl <= timedelta(0):
             raise ValueError("claim_ttl must be positive")
-        resolved_now = normalize_utc(now)
+        normalize_utc(now)
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            heartbeat = await session.scalar(
-                update(ExecutionActivityTaskORM)
-                .where(
-                    ExecutionActivityTaskORM.activity_id == claim.request.activity_id,
-                    ExecutionActivityTaskORM.claim_generation == claim.claim_generation,
-                    ExecutionActivityTaskORM.status.in_(("claimed", "call_started")),
-                )
-                .values(
-                    heartbeat_at=resolved_now,
-                    claim_deadline=resolved_now + claim_ttl,
-                    updated_at=resolved_now,
-                )
-                .returning(ExecutionActivityTaskORM.activity_id)
+            record, resolved_now = await self._owned_task(session, claim)
+            if record is None:
+                return None
+            record.heartbeat_at = resolved_now
+            record.claim_deadline = resolved_now + claim_ttl
+            record.updated_at = resolved_now
+            confirmation = ActivityLeaseConfirmation(
+                server_now=resolved_now, lease_deadline=record.claim_deadline
             )
             await session.commit()
-            return heartbeat is not None
+            return confirmation
 
     async def defer(
         self,
@@ -188,31 +199,61 @@ class PostgresActivityStore:
         *,
         now: datetime,
         retry_after: timedelta,
+        consume_attempt: bool = False,
     ) -> bool:
         if retry_after <= timedelta(0):
             raise ValueError("retry_after must be positive")
-        resolved_now = normalize_utc(now)
+        normalize_utc(now)
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
-            deferred = await session.scalar(
-                update(ExecutionActivityTaskORM)
-                .where(
-                    ExecutionActivityTaskORM.activity_id == claim.request.activity_id,
-                    ExecutionActivityTaskORM.claim_generation == claim.claim_generation,
-                    ExecutionActivityTaskORM.status.in_(("claimed", "call_started")),
-                )
-                .values(
-                    status="pending",
-                    available_at=resolved_now + retry_after,
-                    claimed_by=None,
-                    claim_deadline=None,
-                    heartbeat_at=None,
-                    updated_at=resolved_now,
-                )
-                .returning(ExecutionActivityTaskORM.activity_id)
-            )
+            record, resolved_now = await self._owned_task(session, claim)
+            if record is None:
+                return False
+            record.status = "pending"
+            record.available_at = resolved_now + retry_after
+            record.claimed_by = None
+            record.claim_deadline = None
+            record.heartbeat_at = None
+            record.updated_at = resolved_now
+            if not consume_attempt:
+                # Admission waits and transient infrastructure deferrals are
+                # not poison-pill failures. Never erase call_started evidence.
+                record.claim_attempts = max(0, record.claim_attempts - 1)
             await session.commit()
-            return deferred is not None
+            return True
+
+    @staticmethod
+    async def _server_now(session: AsyncSession) -> datetime:
+        value = await session.scalar(select(func.clock_timestamp()))
+        assert isinstance(value, datetime)
+        return normalize_utc(value)
+
+    @classmethod
+    async def _owned_task(
+        cls, session: AsyncSession, claim: ActivityClaim
+    ) -> tuple[ExecutionActivityTaskORM | None, datetime]:
+        record = await session.scalar(
+            select(ExecutionActivityTaskORM)
+            .where(
+                ExecutionActivityTaskORM.activity_id == claim.request.activity_id,
+                ExecutionActivityTaskORM.request_generation == claim.request.generation,
+                ExecutionActivityTaskORM.claim_generation == claim.claim_generation,
+                ExecutionActivityTaskORM.claimed_by == claim.worker_id,
+                ExecutionActivityTaskORM.owner_user_id == claim.owner_user_id,
+                ExecutionActivityTaskORM.team_id == claim.team_id,
+                ExecutionActivityTaskORM.status.in_(("claimed", "call_started")),
+            )
+            .with_for_update()
+        )
+        resolved_now = await cls._server_now(session)
+        if (
+            record is None
+            or record.claim_deadline is None
+            or record.claim_deadline <= resolved_now
+            or record.timeout_at <= resolved_now
+        ):
+            return None, resolved_now
+        return record, resolved_now
 
     async def purge_completed(self, *, before: datetime, limit: int) -> int:
         """Delete a batch of terminal activity rows older than ``before``.
@@ -222,6 +263,8 @@ class PostgresActivityStore:
         activities' ``decision_payload`` from these rows — purging them early
         would break digest verification and quarantine the Run. Rows without a
         run_id (non-run aggregates) are never purged here.
+        Cancellation/abandonment does not settle an external effect: its owning
+        Run's source rows remain recovery roots until the result is known.
         """
         if limit <= 0:
             raise ValueError("limit must be positive")
@@ -229,7 +272,20 @@ class PostgresActivityStore:
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
             terminal_runs = select(ExecutionRunProjectionORM.run_id).where(
-                ExecutionRunProjectionORM.terminal.is_(True)
+                ExecutionRunProjectionORM.terminal.is_(True),
+                text("""
+NOT EXISTS (
+ SELECT 1 FROM jsonb_array_elements(
+   COALESCE(execution_run_projection.state->'effect_operations','[]'::jsonb)
+ ) effect
+ WHERE COALESCE(effect->>'state','unknown') NOT IN ('applied','not_applied')
+   OR effect->>'awaiting_result'='true' OR effect->>'integrity_conflict'='true'
+)
+AND NOT EXISTS (
+ SELECT 1 FROM execution_effect_requests request
+ WHERE request.run_id=execution_run_projection.run_id AND request.status IN ('pending','running')
+)
+"""),
             )
             purgeable = (
                 select(ExecutionActivityTaskORM.activity_id)
@@ -298,6 +354,8 @@ class PostgresActivityStore:
             input_ref=record.request_ref,
             input_digest=record.request_digest,
             input_payload=record.request_payload,
+            definition_digest=record.definition_digest,
+            handler_version=record.handler_version,
         )
 
 

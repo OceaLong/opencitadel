@@ -52,30 +52,30 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-postgres-bootstrap-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "postgresBootstrap") }}
                   key: POSTGRES_ADMIN_PASSWORD
             - name: POSTGRES_DB
-              value: {{ .Values.postgresql.database | quote }}
+              value: {{ include "opencitadel.postgresDatabase" . | quote }}
             - name: OPENCITADEL_APP_USER
-              value: {{ .Values.postgresql.user | quote }}
+              value: {{ include "opencitadel.postgresUser" . | quote }}
             - name: OPENCITADEL_APP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "application") }}
                   key: POSTGRES_PASSWORD
             - name: OPENCITADEL_MIGRATION_USER
               value: {{ .Values.postgresql.migrationUser | quote }}
             - name: OPENCITADEL_MIGRATION_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-migration-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "migration") }}
                   key: POSTGRES_PASSWORD
             - name: OPENCITADEL_KERNEL_USER
               value: {{ .Values.executionKernel.databaseUser | quote }}
             - name: OPENCITADEL_KERNEL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-execution-kernel-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "executionKernel") }}
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: data

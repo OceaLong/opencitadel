@@ -15,9 +15,14 @@
    两半 payload（`EventPayloads`），internal 结构（policy_snapshot、
    input_payload、decision_digest）与 public 走同一条演进管道，没有旁路。
 
-当前 `RunAggregate.snapshot_serializer_version=6`，对应
+当前 `RunAggregate.snapshot_serializer_version=10`，对应
 `test_schema_guards.py` 的追加式 `RUN_STATE_FIELDS_BY_SERIALIZER_VERSION` 快照。
 2026-09 的 greenfield 重置形成当前 v1 基线；后续已持久化的版本不得再次重定基线。
+
+执行定义 pin 与 payload schema 独立演进。CreateRun/RunCreated v2 添加 pin，
+v3 添加不可变 manifest；RequestActivity/ActivityRequested v4 添加精确 handler
+版本和 definition digest。旧 payload 仅 upcast 为缺少 pin/manifest，不推断 latest。
+启用定义路由后，这些旧 Run 保留读取和稳定取消能力，执行需要明确的已固定定义。
 
 ## 配套机制（改动时同步检查）
 

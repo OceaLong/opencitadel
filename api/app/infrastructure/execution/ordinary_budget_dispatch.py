@@ -3,17 +3,18 @@
 from sqlalchemy import text
 
 from app.application.evaluation.budget_service import BudgetDemandFactory
+from app.application.execution import activity_types
 from app.application.services.execution_usage_service import (
     configuration_snapshot,
     request_snapshot,
 )
 from app.domain.evaluation.budget import BudgetBucket, BudgetDemand
-from app.domain.execution.aggregate import replay
-from app.domain.execution.run import RunAggregate, RunStatus
+from app.domain.execution.run import RunStatus
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.execution_usage import PriceSnapshot
 from app.domain.models.scope import OwnerScope, Principal
 from app.infrastructure.execution.postgres_event_store import PostgresEventStore
+from app.infrastructure.execution.verified_run_loader import PostgresVerifiedRunLoader
 from app.infrastructure.repositories.db_evaluation_dataset_repository import (
     DBEvaluationDatasetRepository,
 )
@@ -24,7 +25,18 @@ from app.infrastructure.repositories.db_resource_pin_repository import scope_par
 
 
 async def reserve_ordinary(
-    work, scope, request, context, model, payload, *, resolved, inventory, expected_policy
+    work,
+    scope,
+    request,
+    context,
+    model,
+    payload,
+    *,
+    resolved,
+    inventory,
+    expected_policy,
+    summary_validator=None,
+    model_validator=None,
 ):
     p = {**scope_params(scope), "run": context.run.run_id}
     admitted = (
@@ -106,11 +118,12 @@ async def reserve_ordinary(
         None if scope.team_id else scope.user_id, scope.team_id
     )
     await work.db_session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
-    aggregate = RunAggregate()
-    events = await PostgresEventStore(
-        work.db_session, event_registries={"run": aggregate.event_registry}
-    ).load_stream("run", str(context.run.run_id))
-    state = replay(aggregate, events, stream_id=str(context.run.run_id)).state
+    loaded = await PostgresVerifiedRunLoader(work.db_session).load(
+        str(context.run.run_id),
+        owner_scope=(None if scope.team_id else scope.user_id, scope.team_id),
+        required_pin=context.run.definition_pin,
+    )
+    state = loaded.replay.state
     if (
         state.status != RunStatus.RUNNING
         or state.source_entity_type
@@ -121,6 +134,84 @@ async def reserve_ordinary(
         or request.activity_id not in state.active_activity_ids
     ):
         raise ValueError("budget_activity_admission_unavailable")
+    if request.activity_type == activity_types.CONTEXT_COMPACT:
+        from app.application.evaluation.budget_candidates import FrozenBudgetCandidates
+        from app.domain.evaluation.budget_capabilities import BudgetProfile
+        from app.infrastructure.execution.context_summary_dispatch import (
+            validate_candidate_metadata,
+        )
+
+        if admitted is None or summary_validator is None or state.definition_manifest is None:
+            raise ValueError("CONTEXT_SUMMARY_BUDGET_UNAVAILABLE")
+        candidates = FrozenBudgetCandidates(
+            inventory, admitted["body"].get("context_candidate_proof", {})
+        ).for_context_summary(
+            output_tokens=state.definition_manifest.context_policy.summary_output_tokens
+        )
+        await validate_candidate_metadata(work, scope, candidates)
+        candidate = next(
+            (
+                item
+                for item in candidates.proof["candidates"]
+                if item["identity"]["model_id"] == model.id
+            ),
+            None,
+        )
+        if candidate is None:
+            raise ValueError("budget_candidate_changed")
+        candidates.validate(model, candidate, effective=True)
+        BudgetProfile.model_validate(candidate["profile"]).bound(
+            payload, output=candidate["output"]
+        )
+        detail = await summary_validator.validate(
+            work,
+            state,
+            request,
+            payload,
+            candidates,
+            purpose=purpose,
+            namespace_id=None,
+            model=model,
+        )
+        sends = await work.db_session.scalar(
+            text("""
+SELECT count(*) FROM execution_model_dispatches d JOIN execution_configurations c
+ ON c.scope_key=d.scope_key AND c.id=d.configuration_id
+ WHERE d.scope_key=:scope AND d.run_id=:run AND c.body->'context_summary'->>'logical_id'=:logical
+"""),
+            {**p, "logical": detail["logical_id"]},
+        )
+        if sends >= 3:
+            raise ValueError("budget_logical_attempts_exhausted")
+        resolved = {**resolved, "context_summary": detail}
+    if (
+        request.activity_type == activity_types.MODEL_CALL
+        and request.input_payload.get("context_ref") is not None
+    ):
+        from app.application.evaluation.budget_candidates import FrozenBudgetCandidates
+        from app.infrastructure.execution.context_summary_dispatch import (
+            validate_candidate_metadata,
+        )
+
+        if admitted is None or model_validator is None or inventory is None:
+            raise ValueError("CONTEXT_VALIDATION_UNAVAILABLE")
+        candidates = FrozenBudgetCandidates(
+            inventory, admitted["body"].get("context_candidate_proof", {})
+        )
+        await validate_candidate_metadata(work, scope, candidates)
+        candidate = next(
+            (
+                item
+                for item in candidates.proof["candidates"]
+                if item["identity"]["model_id"] == model.id
+            ),
+            None,
+        )
+        if candidate is None:
+            raise ValueError("CONTEXT_CANDIDATES_CHANGED")
+        candidates.validate(model, candidate, effective=True)
+        detail = await model_validator.validate(work, state, request, model, payload, candidates)
+        resolved = {**resolved, "context_manifest": detail}
     body = configuration_snapshot(model, **resolved)
     requested = payload.get("model", model.model_name)
     matches = requested == model.model_name

@@ -5,6 +5,7 @@ import uuid
 import httpx
 
 from app.domain.evaluation.recording import validate_typed
+from app.domain.services.tools.a2a_result import completed_result, response_result
 
 
 class RegisteredHTTPTestExecutor:
@@ -128,7 +129,28 @@ class RegisteredHTTPTestExecutor:
             data = response.json()
             if "error" in data or data.get("id") != request["id"] or "result" not in data:
                 raise ValueError("test_target_protocol_invalid")
-            return {"success": True, "data": data["result"]}
+            result = data["result"]
+            if target.kind == "a2a":
+                result = response_result(data, request["id"])
+            # A valid JSON-RPC response only confirms transport completion. The
+            # effect journal must not treat a tool error or an unfinished A2A
+            # task as evidence that the requested operation completed.
+            return {"success": _completed_result(target.kind, result), "data": result}
+
+
+def _completed_result(kind, result):
+    if not isinstance(result, dict):
+        return False
+    if kind == "mcp":
+        # The SDK is kernel-only; keep its import at the execution boundary.
+        from mcp.types import CallToolResult
+
+        try:
+            receipt = CallToolResult.model_validate(result, strict=True)
+        except ValueError:
+            return False
+        return receipt.isError is False
+    return completed_result(result)
 
 
 class SyntheticTestCredentialResolver:

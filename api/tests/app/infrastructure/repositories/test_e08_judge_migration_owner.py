@@ -24,13 +24,16 @@ from tests.app.infrastructure.repositories.test_evaluation_judge_repository impo
 pytestmark = pytest.mark.asyncio
 
 
-async def test_judge_storage_non_bypass_owner_and_private_api_boundary(budget_binding_fixture):
+@pytest.mark.parametrize("pinned", [False, True])
+async def test_judge_storage_non_bypass_owner_and_private_api_boundary(
+    budget_binding_fixture, pinned
+):
     from app.infrastructure.security.db_authorization import configure_session_authorization
     from core.config import load_deployment_settings
     from tests.app.execution_test_support import execution_admin_session
 
     suites, scope, principal, *_ = budget_binding_fixture
-    await check_admit(budget_binding_fixture)
+    await check_admit(budget_binding_fixture, pinned=pinned)
     async with suites.uow_factory(
         AuthorizationContext.for_principal(principal, scope=scope)
     ) as work:

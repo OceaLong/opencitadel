@@ -55,6 +55,12 @@ class DBEvaluationRecordingRepository:
         return dict(row)
 
     async def create(self, scope, job, selection, principal):
+        from app.infrastructure.execution.execution_object_lifecycle import guard_object_reference
+
+        try:
+            await guard_object_reference(self.db, params(scope)["scope"], job.source_run_id)
+        except ValueError as exc:
+            raise DatasetNotFound("recording_unavailable") from exc
         await self.db.execute(
             text(
                 "INSERT INTO evaluation_recording_jobs(id,source_run_id,status,selection,principal,owner_user_id,team_id,created_by) VALUES(:id,:run,'queued',CAST(:selection AS jsonb),CAST(:principal AS jsonb),:owner,:team,:actor)"
@@ -318,17 +324,41 @@ class DBEvaluationRecordingRepository:
             .one()
         )
 
-    async def approved(self, scope, run_id, activity_id):
+    async def approved(self, scope, run_id, activity_id, *, subject_digest=None):
+        # Execution permission derives from committed Run facts. UI projections
+        # may lag or be rebuilding and cannot authorize (or deny) a physical send.
         return bool(
             await self.db.scalar(
                 text(
-                    "SELECT 1 FROM execution_approval_projection WHERE run_id=:run AND subject_activity_id=:activity AND status='approved' AND ((CAST(:team AS text) IS NOT NULL AND team_id=:team) OR (CAST(:team AS text) IS NULL AND owner_user_id=:owner))"
+                    """SELECT 1 FROM execution_events requested
+                    JOIN execution_events decided
+                      ON decided.stream_type=requested.stream_type
+                     AND decided.stream_id=requested.stream_id
+                     AND decided.owner_scope_key=requested.owner_scope_key
+                     AND decided.public_payload->>'approval_id'=requested.public_payload->>'approval_id'
+                    WHERE requested.stream_type='run' AND requested.stream_id=:run
+                      AND requested.owner_scope_key=:scope
+                      AND requested.event_type='ApprovalRequested'
+                      AND requested.public_payload->>'subject_activity_id'=:activity
+                      AND (requested.public_payload->>'subject_digest') IS NOT DISTINCT FROM CAST(:subject AS text)
+                      AND decided.event_type='ApprovalDecided'
+                      AND decided.public_payload->>'decision'='approved'
+                      AND (decided.public_payload->>'expected_subject_digest') IS NOT DISTINCT FROM CAST(:subject AS text)
+                      AND decided.stream_version>requested.stream_version
+                    LIMIT 1"""
                 ),
-                params(scope, run=run_id, activity=activity_id),
+                params(
+                    scope,
+                    run=str(run_id),
+                    activity=str(activity_id),
+                    subject=subject_digest,
+                ),
             )
         )
 
-    async def connector_binding(self, scope, pack, connector_id, *, lock=False):
+    async def connector_binding(
+        self, scope, pack, connector_id, *, lock=False, execution=False, tool_name=None
+    ):
         if pack not in {"mcp", "a2a"}:
             raise ValueError("invalid_connector_kind")
         row = await self.db.scalar(
@@ -340,6 +370,17 @@ class DBEvaluationRecordingRepository:
         )
         if row is None:
             raise ReplayMismatch("connector_unavailable")
+        if execution:
+            # Selected schemas/policies are bound separately by RecordedContract.
+            # Unrelated tool policy edits and presentation timestamps do not
+            # change this connector's transport/authorization identity.
+            policy = (row.get("tool_policies") or {}).get(tool_name) if tool_name else None
+            row = {
+                key: value
+                for key, value in row.items()
+                if key not in {"tool_policies", "created_at", "updated_at", "description"}
+            }
+            row["selected_tool_policy"] = policy
         # Ciphertext/configuration bytes never leave this metadata boundary.
         return hashlib.sha256(canonical(row)).hexdigest()
 

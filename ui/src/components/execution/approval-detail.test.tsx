@@ -24,6 +24,30 @@ const value = (approval_id = "a"): ApprovalInboxItem => ({
   requested_at: "now",
 });
 afterEach(() => vi.restoreAllMocks());
+test("approval shows the final frozen intent preview without inventing hidden values", async () => {
+  const r = await renderComponent(
+    <ApprovalDetail
+      approval={{
+        approval_id: "a",
+        subject_activity_id: "activity-a",
+        status: "pending",
+        subject_digest: "a".repeat(64),
+        public_preview: {
+          arguments_json: '{"namespace":"prod","password":"[redacted]"}',
+          redacted: true,
+        },
+      }}
+      runId="r"
+      workspaceId="w"
+      onRevoked={() => {}}
+    />,
+  );
+  expect(r.container.textContent).toContain("prod");
+  expect(r.container.textContent).toContain("a".repeat(64));
+  expect(r.container.querySelector('[role="status"]')?.textContent).toContain("redacted");
+  expect(r.container.querySelector("button")).toBeNull();
+  await r.unmount();
+});
 test("detail approval uses its exact ID and subject, independently of the latest conversation approval", async () => {
   vi.spyOn(approvalsApi, "list").mockResolvedValue({
     items: [value("b"), value()],

@@ -226,14 +226,13 @@ jobs:
   deployment-render:
     name: Deployment render
     runs-on: ubuntu-latest
-    env:
-      OPENCITADEL_ENV_FILE: .env.example
-      SANDBOX_BROKER_TOKEN: ci-sandbox-broker-token-at-least-32-characters
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - name: Prepare default local configuration
+        run: make configure
       - name: Validate Docker Compose
-        run: docker compose --env-file .env.example config --quiet
+        run: docker compose --env-file .env config --quiet
       - name: Validate sandbox egress proxy policy
         run: >-
           docker run --rm
@@ -244,73 +243,23 @@ jobs:
       - name: Lint Helm chart
         run: >-
           helm lint deploy/helm/opencitadel
-          --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa
-          --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
-          --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
-          --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
-          --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee
-          --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff
-          --set secrets.bootstrapAdminPassword=ci-admin-password-strong
-          --set secrets.postgresAdminPassword=ci-postgres-admin-password
-          --set secrets.postgresMigrationPassword=ci-postgres-migration-pw
-          --set secrets.postgresPassword=ci-postgres-password-strong
-          --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw
-          --set secrets.redisPassword=ci-redis-password-strong
-          --set secrets.minioRootPassword=ci-minio-root-password-strong
+          --set publicUrl=https://ci.example.test
       - name: Render Helm manifests
         run: >-
           helm template opencitadel deploy/helm/opencitadel
-          --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa
-          --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb
-          --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc
-          --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd
-          --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee
-          --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff
-          --set secrets.bootstrapAdminPassword=ci-admin-password-strong
-          --set secrets.postgresAdminPassword=ci-postgres-admin-password
-          --set secrets.postgresMigrationPassword=ci-postgres-migration-pw
-          --set secrets.postgresPassword=ci-postgres-password-strong
-          --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw
-          --set secrets.redisPassword=ci-redis-password-strong
-          --set secrets.minioRootPassword=ci-minio-root-password-strong
+          --set publicUrl=https://ci.example.test
           > /dev/null
       - name: Render least-privilege Ops Collector manifests
         run: |
           helm template opencitadel deploy/helm/opencitadel \
             --set opsCollector.enabled=true \
-            --set opsCollector.token=ci-ops-collector-token-gggggggggggggggg \
-            --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee \
-            --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff \
-            --set secrets.postgresMigrationPassword=ci-postgres-migration-pw \
-            --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw \
-            --set secrets.minioRootPassword=ci-minio-root-password-strong \
-            --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
-            --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
-            --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \
-            --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd \
-            --set secrets.bootstrapAdminPassword=ci-admin-password-strong \
-            --set secrets.postgresAdminPassword=ci-postgres-admin-password \
-            --set secrets.postgresPassword=ci-postgres-password-strong \
-            --set secrets.redisPassword=ci-redis-password-strong > /dev/null
+            --set publicUrl=https://ci.example.test > /dev/null
           kubectl kustomize deploy/kustomize/ops-collector > /dev/null
       - name: Render least-privilege Ops Actuator manifests
         run: |
           helm template opencitadel deploy/helm/opencitadel \
             --set opsActuator.enabled=true \
-            --set opsActuator.token=ci-ops-actuator-token-hhhhhhhhhhhhhhhhhh \
-            --set secrets.sandboxTokenSeed=ci-sandbox-token-seed-eeeeeeeeeeee \
-            --set secrets.sandboxBrokerToken=ci-sandbox-broker-token-ffffffff \
-            --set secrets.postgresMigrationPassword=ci-postgres-migration-pw \
-            --set secrets.executionKernelPostgresPassword=ci-postgres-kernel-pw \
-            --set secrets.minioRootPassword=ci-minio-root-password-strong \
-            --set secrets.apiKeySecret=ci-api-key-secret-aaaaaaaaaaaaaaaa \
-            --set secrets.auditSigningKey=ci-audit-key-bbbbbbbbbbbbbbbbbbbb \
-            --set secrets.jwtSecret=ci-jwt-secret-cccccccccccccccccccc \
-            --set secrets.sessionSecret=ci-session-secret-ddddddddddddddddd \
-            --set secrets.bootstrapAdminPassword=ci-admin-password-strong \
-            --set secrets.postgresAdminPassword=ci-postgres-admin-password \
-            --set secrets.postgresPassword=ci-postgres-password-strong \
-            --set secrets.redisPassword=ci-redis-password-strong > /dev/null
+            --set publicUrl=https://ci.example.test > /dev/null
           kubectl kustomize deploy/kustomize/ops-actuator > /dev/null
 
   patrol-kind-fixtures:

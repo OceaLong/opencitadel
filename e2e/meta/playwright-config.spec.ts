@@ -65,6 +65,7 @@ test("execution collects evaluations, workbench and original sessions", () => {
     "evaluations.spec.ts",
     "execution-analysis.spec.ts",
     "evaluation-governance.spec.ts",
+    "long-running-context.spec.ts",
   ];
   expect(
     files.filter((file) =>

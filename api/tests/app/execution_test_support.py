@@ -167,6 +167,77 @@ async def execution_admin_session() -> AsyncIterator[AsyncSession]:
         await engine.dispose()
 
 
+async def with_current_test_claim(handler, command):
+    """Attach the real fixture-owned live claim to a manually submitted outcome.
+
+    Only success-path fixture builders use this helper. It neither claims work
+    nor changes persisted authority; stale/negative tests submit their own proof.
+    """
+    if command.command_type not in {
+        "MarkActivityCallStarted",
+        "CompleteActivity",
+        "FailActivity",
+        "MarkActivityOutcomeUnknown",
+    }:
+        return command
+    from sqlalchemy import func, select
+
+    from app.domain.execution.commands import ActivityLeaseProof
+    from app.infrastructure.execution.models import ExecutionActivityTaskORM
+
+    async with handler._session_factory() as session:
+        await configure_session_authorization(session, handler._authorization)
+        row = await session.get(ExecutionActivityTaskORM, UUID(command.payload["activity_id"]))
+        now = await session.scalar(select(func.clock_timestamp()))
+        assert row is not None
+        assert row.status in {"claimed", "call_started"}
+        assert row.claimed_by
+        assert row.claim_deadline is not None
+        assert row.claim_deadline > now
+        assert row.timeout_at > now
+        assert row.request_generation == command.payload["generation"]
+        assert command.payload.get("claim_generation") in {None, row.claim_generation}
+        proof = ActivityLeaseProof(
+            activity_id=row.activity_id,
+            request_generation=row.request_generation,
+            claim_generation=row.claim_generation,
+            worker_id=row.claimed_by,
+        )
+    return command.model_copy(
+        update={
+            "command_schema_version": 2,
+            "payload": {**command.payload, "claim_generation": proof.claim_generation},
+            "activity_lease_proof": proof,
+        }
+    )
+
+
+async def dispatched_activity_timeout(handler, activity_id):
+    """Read the command that the real timer dispatcher durably published."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.infrastructure.adapters.execution_ports import SqlAlchemyTimerDispatcher
+    from app.infrastructure.execution.models import ExecutionCommandInboxORM
+    from app.infrastructure.execution.postgres_inbox_source import PostgresInboxSource
+
+    await SqlAlchemyTimerDispatcher(
+        session_factory=handler._session_factory, authorization=handler._authorization
+    ).fire_due(limit=1000, now=datetime.now(UTC), claim_ttl=timedelta(seconds=30))
+    async with handler._session_factory() as session:
+        await configure_session_authorization(session, handler._authorization)
+        row = await session.scalar(
+            select(ExecutionCommandInboxORM).where(
+                ExecutionCommandInboxORM.command_type == "FailActivity",
+                ExecutionCommandInboxORM.payload["activity_id"].astext == str(activity_id),
+                ExecutionCommandInboxORM.payload["failure_code"].astext == "ACTIVITY_TIMEOUT",
+            )
+        )
+        assert row is not None, "Activity timeout must already be due on the database clock"
+        return PostgresInboxSource._to_command(row)
+
+
 __all__ = [
     "authenticated_session_factory",
     "execution_admin_database_uri",

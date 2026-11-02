@@ -57,6 +57,13 @@ preserving edits until the operator explicitly reloads.
 
 ## Process lifecycle
 
+An empty database receives an explicit initial Execution Policy: knowledge
+vector search, reranking, and GraphRAG are off, and OCR is off. Text extraction
+and keyword search work without optional models. Administrators enable
+enhancements after configuring inference. This initial policy is distinct from
+schema-version-1 deserialization defaults, which preserve historical payloads
+and digests. Bootstrap never replaces an existing head or rewrites revisions.
+
 API and execution kernel initialize readers from PostgreSQL; migration
 bootstrap verifies or seeds the typed revision/head pair. A short local refresh interval bounds propagation even if Redis is
 down. Fresh Execution Policy reads attempt PostgreSQL on every admission;

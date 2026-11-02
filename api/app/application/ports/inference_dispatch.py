@@ -4,6 +4,7 @@ ContextVars keep concurrent invocations isolated without putting accounting data
 in provider kwargs. E05 can implement this protocol or compose the durable guard.
 """
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Protocol
@@ -15,6 +16,25 @@ class InferenceDispatchGuard(Protocol):
 
 
 current_dispatch = ContextVar("inference_dispatch", default=(None, None))
+_activity_lease_check: ContextVar[Callable[[], None] | None] = ContextVar(
+    "inference_activity_lease_check", default=None
+)
+
+
+@contextmanager
+def activity_lease_context(require_active_lease: Callable[[], None]):
+    """Keep Activity ownership independent of model/accounting guard changes."""
+    token = _activity_lease_check.set(require_active_lease)
+    try:
+        yield
+    finally:
+        _activity_lease_check.reset(token)
+
+
+def require_active_activity_lease() -> None:
+    check = _activity_lease_check.get()
+    if check is not None:
+        check()
 
 
 @contextmanager

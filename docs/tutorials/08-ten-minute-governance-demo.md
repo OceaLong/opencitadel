@@ -11,8 +11,8 @@ chain verification, and signed evidence.
 ./scripts/quickstart.sh --demo
 ```
 
-During first-run configuration, set `BOOTSTRAP_ADMIN_PASSWORD` and a strong
-`OPS_COLLECTOR_TOKEN` (at least 32 characters). Quickstart builds the dynamic
+First-run configuration automatically generates and persists
+`BOOTSTRAP_ADMIN_PASSWORD` and a strong `OPS_COLLECTOR_TOKEN` (at least 32 characters). Quickstart builds the dynamic
 Sandbox image before starting the stack. The demo profile starts Ops Collector
 and OpsConsole, registers
 read-only Collector policies, and creates **Demo Governance Patrol**. Configure

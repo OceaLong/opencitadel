@@ -7,6 +7,7 @@ from openai import AsyncOpenAI, OpenAIError
 
 from app.application.ports.crypto import OutboundNetworkPolicy
 from app.domain.errors import BadRequestError, ServerRequestsError
+from app.domain.models.embedding_space import validate_embedding
 from app.domain.models.inference import (
     EmbeddingModelSettings,
     InferenceModelKind,
@@ -65,6 +66,25 @@ class OpenAICompatibleEmbedding:
                 error_key="inference.errors.embeddingRequestFailed",
             ) from exc
         ordered = sorted(response.data, key=lambda item: item.index)
+        if (
+            len(ordered) != len(contents)
+            or [item.index for item in ordered] != list(range(len(contents)))
+            or any(type(item.index) is not int for item in ordered)
+        ):
+            raise ServerRequestsError(
+                "Embedding response indices do not match the requested batch",
+                error_key="inference.errors.embeddingCardinalityMismatch",
+            )
+        try:
+            for item in ordered:
+                # Validate provider data before float() can turn booleans or
+                # numeric strings into apparently valid vector components.
+                validate_embedding(item.embedding)
+        except ValueError as exc:
+            raise ServerRequestsError(
+                "Embedding response contains an invalid vector",
+                error_key="inference.errors.embeddingInvalidVector",
+            ) from exc
         return [[float(value) for value in item.embedding] for item in ordered]
 
     async def aclose(self):

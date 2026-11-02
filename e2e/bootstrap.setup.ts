@@ -74,12 +74,17 @@ test("bootstrap deterministic inference through the public control plane", async
   const beforeCapabilities = capabilityProjection(
     (await appApi<InferenceStatus>(page, "/inference/status")).data,
   );
-  for (const [name, capability] of Object.entries(beforeCapabilities)) {
-    expect(
-      capability.state,
-      `${name} capability must begin unconfigured in a disposable run`,
-    ).toBe("not_configured");
-  }
+  expect(beforeCapabilities.chat.state).toBe("not_configured");
+  expect(beforeCapabilities.embeddings).toMatchObject({
+    state: "disabled",
+    model_id: null,
+    reason_key: "capabilities.reason.allVectorConsumersDisabled",
+  });
+  expect(beforeCapabilities.rerank).toMatchObject({
+    state: "disabled",
+    model_id: null,
+    reason_key: "capabilities.reason.rerankDisabled",
+  });
 
   const operations = await appApi<ActiveOperationsPolicy>(
     page,
@@ -205,12 +210,12 @@ test("bootstrap deterministic inference through the public control plane", async
     (projection) =>
       projection.capabilities.items.chat?.state === "available" &&
       projection.capabilities.items.chat?.model_id === chat.data.id &&
-      projection.capabilities.items.embeddings?.state === "available" &&
-      projection.capabilities.items.embeddings?.model_id ===
-        embedding.data.id &&
-      projection.capabilities.items.rerank?.state === "available" &&
-      projection.capabilities.items.rerank?.model_id === chat.data.id,
-    { message: "inference capabilities become available" },
+      projection.capabilities.items.embeddings?.state === "disabled" &&
+      projection.capabilities.items.rerank?.state === "disabled",
+    {
+      message:
+        "chat becomes available while optional consumers remain disabled",
+    },
   );
   expect(status.capabilities.items.chat.state).toBe("available");
   state.capability_transition = {
@@ -218,5 +223,7 @@ test("bootstrap deterministic inference through the public control plane", async
     after: capabilityProjection(status),
   };
   writeBootstrapState(state);
-  await prepareStrictDriver(page, state);
+  if (process.env.ACCEPTANCE_PHASE2_CONTEXT !== "1") {
+    await prepareStrictDriver(page, state);
+  }
 });

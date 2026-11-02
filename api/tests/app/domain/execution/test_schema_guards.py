@@ -105,6 +105,30 @@ RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[6] = tuple(
 )
 
 
+RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[7] = tuple(
+    sorted(
+        (
+            *RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[6],
+            "effect_operations",
+            "pending_approval_subject_digest",
+            "approval_subjects",
+        )
+    )
+)
+
+RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[8] = tuple(
+    sorted(
+        (*RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[7], "activity_subjects", "tool_intent_refreshes")
+    )
+)
+RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[9] = tuple(
+    sorted((*RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[8], "definition_pin"))
+)
+RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[10] = tuple(
+    sorted((*RUN_STATE_FIELDS_BY_SERIALIZER_VERSION[9], "definition_manifest"))
+)
+
+
 def test_canonical_state_hash_golden_bytes() -> None:
     state = RunState(
         run_id=UUID("10000000-0000-0000-0000-0000000000aa"),
@@ -115,10 +139,35 @@ def test_canonical_state_hash_golden_bytes() -> None:
     )
 
     # Frozen v5 form remains byte-identical; the added nullable claim state is v6.
-    historical = state.model_dump(mode="json", exclude={"started_activity_claims"})
+    historical = state.model_dump(
+        mode="json",
+        exclude={
+            "definition_pin",
+            "definition_manifest",
+            "started_activity_claims",
+            "effect_operations",
+            "pending_approval_subject_digest",
+            "approval_subjects",
+            "activity_subjects",
+            "tool_intent_refreshes",
+        },
+    )
     assert canonical_state_hash(historical) == GOLDEN_STATE_HASH
     assert (
-        canonical_state_hash(state)
+        canonical_state_hash(
+            state.model_dump(
+                mode="json",
+                exclude={
+                    "definition_pin",
+                    "definition_manifest",
+                    "effect_operations",
+                    "pending_approval_subject_digest",
+                    "approval_subjects",
+                    "activity_subjects",
+                    "tool_intent_refreshes",
+                },
+            )
+        )
         == "d43fbc202289e7315f0abcd4d4e84e16c0b75a15c3881ae8f0feb998f6fe2d26"
     )
 

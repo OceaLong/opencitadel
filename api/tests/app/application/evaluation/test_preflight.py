@@ -59,8 +59,16 @@ def test_static_contract_reader_never_constructs_tools(monkeypatch):
 
 def test_schema_change_has_distinct_digest_without_redefining_old_fingerprint():
     from app.application.evaluation.configuration_metadata import contract_fingerprints
+    from app.domain.services.tools.capability_policy import READ_SAFE
 
-    one = [{"name": "x", "pack": "shell", "policy": {}, "schema": {"type": "string"}}]
+    one = [
+        {
+            "name": "x",
+            "pack": "shell",
+            "policy": READ_SAFE.model_dump(mode="json"),
+            "schema": {"type": "string"},
+        }
+    ]
     two = [{**one[0], "schema": {"type": "integer"}}]
     legacy1, full1 = contract_fingerprints(one, mode="agent", skill=None)
     legacy2, full2 = contract_fingerprints(two, mode="agent", skill=None)

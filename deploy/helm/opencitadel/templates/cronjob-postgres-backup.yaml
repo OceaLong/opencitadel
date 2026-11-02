@@ -72,14 +72,14 @@ spec:
                 - name: PGPORT
                   value: "5432"
                 - name: PGDATABASE
-                  value: {{ .Values.postgresql.database | quote }}
+                  value: {{ include "opencitadel.postgresDatabase" . | quote }}
                 # 管理员凭据仅用于逻辑备份；与运行时 API/kernel 角色隔离。
                 - name: PGUSER
                   value: {{ .Values.postgresql.adminUser | quote }}
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "opencitadel.fullname" . }}-postgres-bootstrap-secret
+                      name: {{ include "opencitadel.secretName" (dict "root" . "group" "postgresBootstrap") }}
                       key: POSTGRES_ADMIN_PASSWORD
               resources:
                 {{- toYaml .Values.backup.resources | nindent 16 }}

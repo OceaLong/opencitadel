@@ -290,6 +290,21 @@ async def _step_orders(session, scope, boundary, *, evidence=None):
 
 
 class PostgresExecutionView:
+    async def definition_availability(self, session, scope, run_id):
+        row = (
+            (
+                await session.execute(
+                    text("SELECT * FROM public.opencitadel_definition_availability(:scope,:run)"),
+                    {"scope": scope_key(scope), "run": run_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise ViewNotFound("run does not exist")
+        return dict(row)
+
     async def production_observation(self, session, scope, boundary, event_id, formal_position):
         row = (
             await session.execute(

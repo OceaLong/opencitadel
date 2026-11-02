@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+from app.domain.models.embedding_space import EmbeddingSpaceMismatch
 from app.domain.models.knowledge_base import ChunkLevel, KnowledgeChunk
 from app.domain.runtime_policy import KnowledgeChunkPolicy
 from app.domain.services.knowledge_base.parsers import PageBlock
@@ -49,6 +50,8 @@ class KBChunker:
         if children and self._vector is not None and self._vector.enabled:
             try:
                 embeddings = await self._vector.embed_batch([chunk.content for chunk in children])
+            except EmbeddingSpaceMismatch:
+                raise
             except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("文档向量化降级 doc=%s: %s", doc_id, exc)
                 embeddings = [[] for _ in children]

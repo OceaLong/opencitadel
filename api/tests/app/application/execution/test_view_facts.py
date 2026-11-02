@@ -34,6 +34,90 @@ def test_reclaim_cannot_collapse_attempts():
     assert attempt_key("a", 1, 2) == attempt_key("a", 1, 2)
 
 
+def test_context_diagnostics_are_allowlisted_and_never_assistant_messages():
+    from app.application.execution.view_facts import to_view_facts
+
+    payload = {
+        "activity_id": str(UUID(int=2)),
+        "generation": 0,
+        "claim_generation": 1,
+        "public_data": {
+            "kind": "context",
+            "context": {
+                "stage": "compact",
+                "state": "compacted",
+                "context_digest": "a" * 64,
+                "original_sources": 123,
+            },
+        },
+    }
+    facts = to_view_facts(event("ActivityCompleted", payload))
+    assert len(facts) == 1
+    assert facts[0].kind == "step"
+    diagnostic = facts[0].playback_patch()["patch"]["context"]
+    assert diagnostic["original_sources"] == 123
+    assert diagnostic["context_digest"] == "a" * 64
+    payload["public_data"]["context"]["private_source_text"] = "must stay private"
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        to_view_facts(event("ActivityCompleted", payload))[0].playback_patch()
+
+
+@pytest.mark.parametrize("stage", ["prepare", "compact"])
+def test_pending_context_activity_exposes_its_stage_without_private_payload(stage):
+    from app.application.execution.view_facts import sanitize_patch
+
+    fact = to_view_fact(
+        event(
+            "ActivityRequested",
+            {"activity_id": str(UUID(int=2)), "activity_type": f"context.{stage}"},
+        )
+    )
+    assert fact.patch["context"] == {"stage": stage}
+    assert fact.patch["status"] == "queued"
+    assert "private" not in str(fact.playback_patch())
+    sanitized = fact.playback_patch()["patch"]
+    assert sanitize_patch("step", sanitized) == sanitized
+
+
+def test_no_send_contract_drift_is_explicit_public_evidence():
+    drift = {"reason": "contract_changed", "subject_digest": "a" * 64, "tool_name": "scale"}
+    fact = to_view_fact(
+        event(
+            "ActivityFailed",
+            {
+                "activity_id": str(UUID(int=2)),
+                "generation": 0,
+                "claim_generation": 1,
+                "failure_code": "TOOL_CONTRACT_CHANGED",
+                "public_data": {"status": "not_sent", "contract_drift": drift},
+            },
+        )
+    )
+    assert fact.playback_patch()["patch"]["contract_drift"] == drift
+
+
+def test_approval_preview_preserves_subject_identity_and_redacts_serialized_secret_values():
+    fact = to_view_fact(
+        event(
+            "ApprovalRequested",
+            {
+                "approval_id": str(UUID(int=3)),
+                "subject_activity_id": str(UUID(int=2)),
+                "subject_digest": "b" * 64,
+                "public_preview": {
+                    "arguments_json": '{"namespace":"prod","password":"private-value"}',
+                    "redacted": False,
+                },
+            },
+        )
+    )
+    patch = fact.playback_patch()["patch"]
+    assert patch["subject_digest"] == "b" * 64
+    assert patch["public_preview"]["redacted"] is True
+    assert "private-value" not in patch["public_preview"]["arguments_json"]
+    assert "prod" in patch["public_preview"]["arguments_json"]
+
+
 def test_same_named_calls_have_distinct_steps_and_no_private_payload():
     a = to_view_fact(
         event(

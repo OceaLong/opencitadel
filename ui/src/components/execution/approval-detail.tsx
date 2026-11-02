@@ -111,6 +111,20 @@ function ApprovalEvidence({
         <dd className="break-all">{approval.subject_activity_id ?? t("notRecorded")}</dd>
       </dl>
       <p>{t("recordedDecision", { status })}</p>
+      {approval.subject_digest && (
+        <p className="font-mono text-xs break-all" translate="no">
+          {approval.subject_digest}
+        </p>
+      )}
+      {approval.public_preview && (
+        <section className="space-y-1">
+          <h4>{t("kindInput")}</h4>
+          {approval.public_preview.redacted && <p role="status">{t("redacted")}</p>}
+          <pre className="max-h-64 overflow-auto text-xs break-all whitespace-pre-wrap">
+            {approval.public_preview.arguments_json}
+          </pre>
+        </section>
+      )}
       {item && (
         <>
           <p>{item.subject_label}</p>

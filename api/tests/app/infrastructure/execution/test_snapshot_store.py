@@ -62,7 +62,7 @@ def metric_sample(name: str, labels: dict | None = None) -> float:
     return REGISTRY.get_sample_value(name, labels or {}) or 0.0
 
 
-async def seed_stream(session_factory) -> tuple[StreamRef, tuple]:
+async def seed_stream(session_factory, *, initial_events=EVENTS) -> tuple[StreamRef, tuple]:
     stream = StreamRef(
         stream_type="run",
         stream_id=str(uuid4()),
@@ -72,10 +72,10 @@ async def seed_stream(session_factory) -> tuple[StreamRef, tuple]:
             session,
             AuthorizationContext.system("snapshot-test-seed"),
         )
-        result = await PostgresEventStore(session).append(
+        await PostgresEventStore(session).append(
             stream,
             0,
-            EVENTS,
+            initial_events,
             AppendContext(
                 owner_user_id="snapshot-user",
                 team_id=None,
@@ -84,8 +84,11 @@ async def seed_stream(session_factory) -> tuple[StreamRef, tuple]:
                 occurred_at=NOW,
             ),
         )
+        events = await PostgresEventStore(
+            session, event_registries={"run": RunAggregate().event_registry}
+        ).load_stream(stream.stream_type, stream.stream_id)
         await session.commit()
-    return stream, result.events
+    return stream, events
 
 
 async def cleanup_stream(session_factory, stream: StreamRef) -> None:

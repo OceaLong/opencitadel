@@ -27,6 +27,7 @@ class MemoryEntryORM(Base):
         ),
         # RLS predicate shape; leading team_id also serves the teams FK scan.
         Index("ix_memory_entries_team_created", "team_id", "created_at"),
+        Index("ix_memory_entries_embedding_space", "embedding_space_digest"),
         # RLS personal scope (team_id IS NULL AND owner_user_id = :user).
         Index(
             "ix_memory_entries_owner_created",
@@ -73,6 +74,7 @@ class MemoryEntryORM(Base):
         Vector(PLATFORM_EMBEDDING_DIMENSIONS) if Vector is not None else JSONB,
         nullable=True,
     )
+    embedding_space_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     @classmethod
     def from_domain(cls, entry: MemoryEntry) -> "MemoryEntryORM":
@@ -103,6 +105,7 @@ class MemoryEntryORM(Base):
             source=MemorySource(self.source),
             last_used_at=self.last_used_at,
             use_count=self.use_count,
+            embedding_space_digest=self.embedding_space_digest,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

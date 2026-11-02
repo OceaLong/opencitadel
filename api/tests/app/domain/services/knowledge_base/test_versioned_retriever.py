@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,8 +20,64 @@ from app.domain.runtime_policy import (
     KnowledgeRerankPolicy,
     KnowledgeRetrievalPolicy,
     KnowledgeRetrievalRunPolicy,
+    initial_execution_policy,
 )
 from app.domain.services.knowledge_base.retriever import HybridRetriever
+from tests.app.embedding_test_support import embedding_space
+
+
+@pytest.mark.asyncio
+async def test_space_mismatch_does_not_silently_downgrade_to_keyword_search():
+    from app.domain.models.embedding_space import EmbeddingSpaceMismatch
+
+    repo = _KnowledgeRepo()
+    vector = MagicMock(embed=AsyncMock(side_effect=EmbeddingSpaceMismatch()))
+    with pytest.raises(EmbeddingSpaceMismatch):
+        await _retriever(repo, _version(), vector).retrieve("kb1", "kbv1", "question", limit=2)
+    repo.vector_search_chunks_for_version.assert_not_awaited()
+    repo.bm25_search_chunks_for_version.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_keyword_query_does_not_use_alias_space():
+    repo = _KnowledgeRepo()
+    vector = MagicMock(embed=AsyncMock(side_effect=AssertionError("must not invoke")))
+    response = await _retriever(repo, _version(), vector).retrieve(
+        "kb1", "kbv1", "question", limit=2, keyword_only=True
+    )
+    assert "vector_search_unavailable" in response.degraded_reasons
+    assert response.capabilities["vector_search"] is False
+    vector.embed.assert_not_awaited()
+    repo.vector_search_chunks_for_version.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_current_strict_policy_rejects_published_unverified_space_before_query():
+    from app.domain.models.embedding_space import EmbeddingRevisionUnverified
+
+    repo = _KnowledgeRepo()
+    repo.get_kb.return_value.settings = {"embedding_revision_policy": "verified_only"}
+    vector = MagicMock(embed=AsyncMock())
+    with pytest.raises(EmbeddingRevisionUnverified):
+        await _retriever(repo, _version(), vector).retrieve("kb1", "kbv1", "question", limit=2)
+    vector.embed.assert_not_awaited()
+    repo.vector_search_chunks_for_version.assert_not_awaited()
+    repo.bm25_search_chunks_for_version.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_keyword_query_remains_available_under_strict_revision_policy():
+    repo = _KnowledgeRepo()
+    repo.get_kb.return_value.settings = {"embedding_revision_policy": "verified_only"}
+    repo.bm25_search_chunks_for_version.return_value = [_record()]
+    vector = MagicMock(embed=AsyncMock())
+    response = await _retriever(repo, _version(), vector).retrieve(
+        "kb1", "kbv1", "question", limit=2, keyword_only=True
+    )
+    assert [item.chunk.id for item in response.items] == ["chunk-v1"]
+    assert "vector_search_unavailable" in response.degraded_reasons
+    vector.embed.assert_not_awaited()
+
 
 _POLICY = KnowledgeRetrievalRunPolicy(
     vector_enabled=True,
@@ -37,6 +94,7 @@ class _VersionRepo:
 
 class _KnowledgeRepo:
     def __init__(self):
+        self.get_kb = AsyncMock(return_value=SimpleNamespace(settings={}))
         self.vector_search_chunks_for_version = AsyncMock(return_value=[])
         self.bm25_search_chunks_for_version = AsyncMock(return_value=[])
         self.get_related_chunk_ids_for_version = AsyncMock(return_value=[])
@@ -67,6 +125,8 @@ def _version(
         id=version_id,
         knowledge_base_id="kb1",
         state=state,
+        embedding_space=embedding_space(),
+        embedding_space_digest=embedding_space().digest,
         capabilities=capabilities or {"vector_search": True, "graph_search": False},
         degraded_reasons=(
             ("VECTOR_INDEX_UNAVAILABLE",) if state is KnowledgeVersionState.DEGRADED else ()
@@ -210,6 +270,52 @@ async def test_vector_disabled_skips_embedding_and_vector_sql():
     assert response.capabilities["vector_search"] is False
     vector.embed.assert_not_awaited()
     repo.vector_search_chunks_for_version.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_initial_keyword_policy_retrieves_without_any_enhancement_model():
+    repo = _KnowledgeRepo()
+    repo.bm25_search_chunks_for_version.return_value = [
+        _record(content="release approval", score=0.9),
+        _record(chunk_id="chunk-2", content="approval process", score=0.8),
+    ]
+    # Even when an existing index offers enhancements, the admitted basic
+    # policy must not invoke embedding, graph expansion, or LLM reranking.
+    version = _version(
+        capabilities={"keyword_search": True, "vector_search": True, "graph_search": True}
+    )
+    vector = MagicMock(embed=AsyncMock(side_effect=AssertionError("vector disabled")))
+    llm = MagicMock(invoke=AsyncMock(side_effect=AssertionError("rerank disabled")))
+    basic = initial_execution_policy().knowledge_base
+    uow = _Uow(repo, _VersionRepo(version))
+    retriever = HybridRetriever(
+        uow_factory=lambda: uow,
+        policy=KnowledgeRetrievalRunPolicy(
+            vector_enabled=basic.vector_enabled,
+            graph_enabled=basic.graphrag.enabled,
+            retrieval=basic.retrieval,
+            rerank=basic.rerank,
+        ),
+        vector_service=vector,
+        llm=llm,
+    )
+
+    response = await retriever.retrieve("kb1", "kbv1", "approval", limit=3)
+
+    assert {item.content for item in response.items} == {"release approval", "approval process"}
+    assert all(item.citation.version_id == "kbv1" for item in response.items)
+    assert response.capabilities == {
+        "keyword_search": True,
+        "vector_search": False,
+        "graph_search": False,
+    }
+    assert response.degraded_reasons == ()
+    repo.bm25_search_chunks_for_version.assert_awaited_once()
+    repo.vector_search_chunks_for_version.assert_not_awaited()
+    repo.get_related_chunk_ids_for_version.assert_not_awaited()
+    repo.get_chunks_by_ids_for_version.assert_not_awaited()
+    vector.embed.assert_not_awaited()
+    llm.invoke.assert_not_awaited()
 
 
 @pytest.mark.anyio

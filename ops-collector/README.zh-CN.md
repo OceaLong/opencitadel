@@ -89,7 +89,7 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 
 Compose Profile 适合验证传输、配置和非 Kubernetes 注册探针；它不会挂载宿主机 kubeconfig。真实 Kubernetes 观察应使用 Helm/Kustomize ServiceAccount 部署，不应增加高权限宿主凭据挂载。
 
-先在 `.env` 设置强 `OPS_COLLECTOR_TOKEN`。Compose 仅传入 Namespace、HTTP 探针和依赖注册项；Prometheus、证书、备份及 Workload 注册表需要 Compose 覆盖文件或 Helm/Kustomize。Collector 同时加入应用网和 Ops 网以访问本地探针，未发布宿主端口；Bearer 认证是其主要访问边界。
+新的 Compose 安装通过 `make configure` 自动生成强 `OPS_COLLECTOR_TOKEN` 并保存到 `.env`，已有安装保留原 Token。Compose 仅传入 Namespace、HTTP 探针和依赖注册项；Prometheus、证书、备份及 Workload 注册表需要 Compose 覆盖文件或 Helm/Kustomize。Collector 同时加入应用网和 Ops 网以访问本地探针，未发布宿主端口；Bearer 认证是其主要访问边界。
 
 仅开发使用的 stdio：
 
@@ -109,7 +109,7 @@ OPS_COLLECTOR_ALLOW_STDIO=true uv run opencitadel-ops-collector --transport stdi
 
 容器使用 UID/GID 10001、只读根文件系统、删除全部 Linux Capability、`RuntimeDefault` seccomp，并仅提供有界可写 `/tmp`。
 
-HTTP 进程会在 Token 缺失或不足 32 字符时拒绝启动。Helm 使用 `opsCollector.token`；Kustomize Base 的 Secret 为空，应用前必须填充。集成配置中的加密 Headers 应设置 `Authorization: Bearer <token>`。TCP 健康探针只说明监听端口可达，不保证 Kubernetes/注册目标或认证调用成功。`RuntimeDefault` Seccomp 由 Kubernetes 清单设置；Compose 设置非 Root、只读根目录、Capability Drop 和 `no-new-privileges`。
+HTTP 进程会在 Token 缺失或不足 32 字符时拒绝启动。Helm 首次启用时自动生成并保存 Token，`opsCollector.token` 继续支持显式覆盖；Kustomize Base 的 Secret 为空，应用前必须填充。集成配置中的加密 Headers 应设置 `Authorization: Bearer <token>`。TCP 健康探针只说明监听端口可达，不保证 Kubernetes/注册目标或认证调用成功。`RuntimeDefault` Seccomp 由 Kubernetes 清单设置；Compose 设置非 Root、只读根目录、Capability Drop 和 `no-new-privileges`。
 
 ## 认证与数据处理
 
@@ -125,7 +125,7 @@ uv sync --frozen
 uv run pytest -q
 ```
 
-破坏性黄金集实验仅可在仓库根目录运行 `./scripts/run-patrol-fixtures.sh`。参见 `deploy/patrol-demo/README.zh-CN.md`，严禁将 Fixture 应用于共享集群。
+破坏性黄金集实验仅可在仓库根目录运行 `./scripts/run-patrol-fixtures.sh`。参见 `demo/patrol/README.zh-CN.md`，严禁将 Fixture 应用于共享集群。
 
 ## 相关文档
 

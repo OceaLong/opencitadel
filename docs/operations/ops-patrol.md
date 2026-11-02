@@ -40,7 +40,7 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 docker compose --profile actuator up -d --build opencitadel-ops-actuator
 ```
 
-First set distinct strong `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN` values (at least 32 characters) and matching `Authorization: Bearer <token>` in encrypted integration headers. Helm uses `opsCollector.token` / `opsActuator.token`; Kustomize base Secrets are empty and must be provisioned. The Compose Actuator does not inject a workload registry and supports transport/authentication checks only.
+`make configure` generates distinct strong `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN` values for a fresh Compose install. Use the persisted values in matching `Authorization: Bearer <token>` encrypted integration headers. Helm generates and reuses role-specific token Secrets; `opsCollector.token` / `opsActuator.token` remain explicit overrides. Kustomize base Secrets are empty and must be provisioned. The Compose Actuator does not inject a workload registry and supports transport/authentication checks only.
 
 Compose does not mount host Kubernetes credentials. Use Helm or Kustomize with
 dedicated ServiceAccounts for real cluster checks.
@@ -116,6 +116,25 @@ Pack changes create a new version and require validation/activation again.
 Scheduled admission, Patrol execution, remediation approval, and verification
 all produce formal Runs.
 
+## Uncertain remediation outcome
+
+Keep the original `rem:{id}`, operation ID, payload digest and target UID when
+the Actuator response is lost. Query `get_operation` through the operation's
+workbench action; matching current replicas alone is not execution evidence.
+Journal permission or storage failure must be repaired before another physical
+write. Missing target annotations or a recreated target remain unknown.
+
+The workbench retains query history across refresh/login and offers authorized,
+evidence-backed human resolution. An applied operation without its required
+result waits for material. A confirmed not-applied operation is terminal; a
+new attempt requires a new proposal, Invocation and approval. Cancelling or
+abandoning a Run does not prove the effect absent or clear accounting holds.
+Back up the Actuator journal namespace with its stable provider/caller identity.
+Prepared/unknown journals and terminal key tombstones have no automatic delete
+path; account for their growth and namespace quota. See the
+[Actuator contract](../../ops-actuator/README.md) and
+[execution recovery metrics](deployment.md#execution-failures-and-verified-recovery).
+
 ## Verification
 
 ```bash
@@ -128,7 +147,7 @@ helm template opencitadel deploy/helm/opencitadel \
   --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
 kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
-docker compose --env-file .env.example config --quiet
+docker compose --env-file .env config --quiet
 ```
 
 After deployment, verify Collector Pod reads without Pod writes or Secret reads. Actuator namespaced Roles permit Deployment/StatefulSet patch in each namespace; the service enforces exact workload registration. Check RBAC denial outside the namespace, `TARGET_DENIED` for unregistered workloads, and no Secret access separately. After TCP health passes, verify authenticated capabilities and actual registered targets.

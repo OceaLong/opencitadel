@@ -52,11 +52,19 @@ class KnowledgeBaseTool(BaseTool):
         parameters={
             "query": {"type": "string", "description": "搜索查询"},
             "limit": {"type": "integer", "description": "返回结果数量，默认5"},
+            "keyword_only": {
+                "type": "boolean",
+                "description": "显式只使用关键词检索，响应标明向量检索不可用",
+            },
         },
         required=["query"],
         policy=READ_SAFE,
     )
-    async def kb_search(self, query: str, limit: int | None = None) -> ToolResult[str]:
+    async def kb_search(
+        self, query: str, limit: int | None = None, keyword_only: bool = False
+    ) -> ToolResult[str]:
+        if not isinstance(keyword_only, bool):
+            raise ToolInvocationError("keyword_only must be boolean", kind="invalid_arguments")
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
         ):
@@ -84,13 +92,15 @@ class KnowledgeBaseTool(BaseTool):
             self._version_id,
             query,
             limit=effective_limit,
+            keyword_only=keyword_only,
         )
         if not response.items:
             return ToolResult(
-                data="未找到相关文档片段",
+                data=("[vector_search_unavailable] " if keyword_only else "")
+                + "未找到相关文档片段",
                 citations=[],
             )
-        lines = []
+        lines = ["[vector_search_unavailable] 仅关键词检索"] if keyword_only else []
         citations: list[KnowledgeCitation] = []
         for item in response.items:
             chunk = item.chunk

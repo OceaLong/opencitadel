@@ -47,6 +47,11 @@ Conflict 时保留编辑，直到操作者显式 Reload。
 
 ## 进程生命周期
 
+空库会得到显式初始 Execution Policy：知识库向量检索、重排、GraphRAG 与 OCR 默认关闭，
+文本提取和关键词检索无需增强模型。管理员配置推理后可按需开启。这份初始策略独立于
+Schema Version 1 的反序列化默认值，保留历史 Payload 与 Digest 兼容性。Bootstrap 不会
+替换已有 Head 或重写 Revision。
+
 API 与执行内核从 PostgreSQL 初始化 Reader；Migration Bootstrap 校验或 Seed 类型化
 Revision/Head Pair。本地短 Refresh Interval
 保证即使 Redis 故障也有传播上界。Fresh Execution Policy Read 在每次 Admission 尝试

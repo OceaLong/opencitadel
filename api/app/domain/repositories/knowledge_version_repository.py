@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
 from app.domain.models.knowledge_version import (
     DocumentRevisionState,
     KnowledgeBaseVersion,
@@ -98,6 +99,10 @@ class KnowledgeVersionGCResult:
 
 
 class KnowledgeVersionRepository(Protocol):
+    async def freeze_embedding_space(
+        self, version_id: str, *, knowledge_base_id: str, space: EmbeddingSpaceDescriptor
+    ) -> None: ...
+
     async def collect_garbage(
         self,
         *,

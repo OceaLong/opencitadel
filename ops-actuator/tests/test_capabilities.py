@@ -1,5 +1,5 @@
 """Mirrors ops-collector/tests/test_capabilities.py, adapted for the
-actuator's 4-tool write surface (get_capabilities + 3 registered write
+actuator's 6-tool surface (capabilities, recovery + 3 registered write
 actions) and its non-read-only annotations.
 """
 
@@ -13,11 +13,11 @@ from opencitadel_ops_actuator.capabilities import (
 from opencitadel_ops_actuator.server import create_server
 
 
-def test_manifest_has_four_tools_and_deterministic_hash():
+def test_manifest_has_six_tools_and_deterministic_hash():
     first = capability_manifest("demo")
     second = capability_manifest("demo")
     assert first == second
-    assert len(first["enabled_tools"]) == 4
+    assert len(first["enabled_tools"]) == 6
     assert set(first["enabled_tools"]) == set(TOOL_INPUT_MODELS)
     assert first["overall_capability_hash"] == second["overall_capability_hash"]
 
@@ -44,3 +44,17 @@ def test_input_schemas_require_idempotency_key():
     by_name = {item.name: item for item in tools}
     for name in ("restart_workload", "scale_workload", "rollback_workload"):
         assert "idempotency_key" in by_name[name].inputSchema.get("required", [])
+
+
+def test_manifest_declares_durable_recovery_and_input_binding():
+    manifest = capability_manifest("demo")
+    assert manifest["effect_contract"]["resolve"] == "get_operation"
+    assert manifest["effect_contract"]["max_journal_bytes"] == 512 * 1024
+    tools = {item.name: item for item in asyncio.run(create_server().list_tools())}
+    assert tools["get_operation"].annotations.readOnlyHint is True
+    assert tools["get_target"].annotations.readOnlyHint is True
+    assert manifest["effect_contract"]["target_identity"] == "get_target"
+    for name in ("restart_workload", "scale_workload", "rollback_workload"):
+        assert {"operation_id", "payload_digest", "target_uid", "idempotency_key"} <= set(
+            tools[name].inputSchema["required"]
+        )

@@ -40,6 +40,12 @@
 
 所有 `/api/*` 都要求 `Authorization: Bearer <SANDBOX_ACCESS_TOKEN>`；未配置 Token 返回 503，错误或缺失 Header 返回 401。动态沙箱由 API/内核通过 `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)` 派生并注入独立 Token；Seed 不进入沙箱。`/openapi.json` 位于该前缀之外。CDP/VNC 端口没有此 HTTP 中间件，应保持内部网络与 API 代理边界。
 
+### Shell 完成与输出
+
+`exec-command` 在进程退出且输出读取任务完成后返回 `completed`；命令是否成功由返回码判断。两个阶段共用原有的五秒总等待预算。任一阶段仍未完成时返回 `running`，可用 `read-shell-output` 查看已采集输出，或通过 `wait-process` 在请求指定的超时内再次等待。
+
+等待请求超时或被取消后，后台仍继续采集输出。替换或移除 Shell 会话会停止旧读取任务，旧输出不会进入新命令的输出或控制台记录。输出读取失败时，`exec-command` 和 `wait-process` 会明确报错，不会携带残缺输出返回 `completed`。
+
 ### 路径 containment 与 sudo 转义
 
 `FileService` 会将每个文件/目录路径与

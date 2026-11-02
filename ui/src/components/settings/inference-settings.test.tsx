@@ -113,6 +113,9 @@ describe.each([
     expect(container.textContent).toContain(messages.settingsInference.purpose_chat);
     expect(container.textContent).toContain(messages.settingsInference.purpose_embedding);
     expect(container.textContent).toContain(messages.settingsInference.purpose_rerank);
+    expect(container.textContent).toContain(messages.settingsInference.knowledgeBindingsHint);
+    expect(container.textContent).toContain(messages.settingsInference.purposeHint_embedding);
+    expect(container.textContent).toContain(messages.settingsInference.purposeHint_rerank);
     expect(container.textContent).toContain("Primary Chat");
     expect(container.textContent).toContain("Primary Embedding");
     expect(container.textContent).toContain("1536");

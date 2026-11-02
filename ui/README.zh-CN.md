@@ -24,6 +24,10 @@ UI 是投影客户端：提交 API Command，展示正式 Run、Activity、审�
 `/patrols`、`/patrol-runs/[id]`、`/teams` 与 `/admin/*`。设置包含通用、Agent、
 推理、Skill、记忆、集成，以及仅管理员可见的运行时配置。
 
+知识库创建继承服务端当前 Execution Policy。新安装默认文本提取与关键词检索；运行时
+表单仅在对应能力开启时展示增强调参。先在推理中配置可选模型，再启用向量检索、重排、
+GraphRAG 或视觉 OCR；已有策略值仍是权威来源。
+
 ## 执行与评测入口
 
 - `/runs/[id]`：Live/Playback 工作台与有界正文，历史模式不能直接触发当前动作。
@@ -55,6 +59,11 @@ API 访问统一使用 `src/lib/api/fetch.ts`；保持 TypeScript strict；业�
 开发服务地址是 `http://localhost:3000`。浏览器 API 默认是相对路径 `/api`；
 Next.js Rewrite 把它代理到 `NEXT_PUBLIC_API_PROXY_TARGET`（默认 `http://localhost:8088`）。
 `NEXT_PUBLIC_API_BASE_URL` 可显式覆盖浏览器 Base URL；生产流量由 Nginx 统一代理。
+
+只体验完整服务栈可在根目录运行 `make quickstart`，默认访问 `http://localhost:8088`。
+独立开发 UI 使用 `http://localhost:3000` 时，将后端 `FRONTEND_BASE_URL` 设为该 Origin，
+使邀请链接与 OAuth 回调返回开发 UI。基础配置和高级覆盖分类见
+[`deploy/config/.env.reference`](../deploy/config/.env.reference)。
 
 参见[前端架构](../docs/architecture/frontend-ui.zh-CN.md)与
 [执行内核](../docs/architecture/execution-kernel.zh-CN.md)。

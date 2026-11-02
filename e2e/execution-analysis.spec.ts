@@ -1,13 +1,18 @@
 import { zoomTest } from "./fixtures/native-zoom.fixture";
-import { selectHistoryCuts } from "./support/execution-history";
+import {
+  selectAssistantMessageForStep,
+  selectHistoryCuts,
+} from "./support/execution-history";
 import { strictScenario } from "./support/strict-driver";
 import { randomUUID } from "node:crypto";
 import type { Locator, Page } from "@playwright/test";
 import { appApi, expect, test } from "./fixtures/acceptance.fixture";
 import {
   bindExportDownload,
+  bindPublishedTeamRetention,
   registerCleanupAction,
 } from "./support/cleanup-journal";
+import type { PublishedTeamRetention } from "./support/published-team-retention";
 import { acceptanceId } from "./support/ids";
 import {
   createSession,
@@ -62,6 +67,9 @@ async function closedLoop(
   page: Page,
   modelId: string,
   approve?: (page: Page, target?: Locator) => Promise<void>,
+  onRecordingPublished?: (
+    recording: PublishedTeamRetention["recording"],
+  ) => void,
 ) {
   const workspaceId = await page.evaluate(() =>
     localStorage.getItem("opencitadel-active-workspace"),
@@ -170,7 +178,7 @@ async function closedLoop(
     resource: "evaluation-recording",
     resource_id: recording.id,
   });
-  await pollProjection(
+  const readyRecording = await pollProjection(
     () =>
       scopedApi<any>(`/evaluation/recordings/${recording.id}`).then(
         (r) => r.data,
@@ -178,9 +186,21 @@ async function closedLoop(
     (v) => v.status === "ready",
     { timeout: 120_000, message: "recording publication" },
   );
-  const recordingVersion = (
+  const recordingResult = (
     await scopedApi<any>(`/evaluation/recordings/${recording.id}/result`)
-  ).data.version_id;
+  ).data;
+  expect(readyRecording.id).toBe(recording.id);
+  expect(readyRecording.source_run_id).toBe(run);
+  expect(readyRecording.result_version).toBe(recordingResult.version_id);
+  const recordingVersion = recordingResult.version_id;
+  onRecordingPublished?.({
+    job_id: recording.id,
+    source_run_id: run,
+    version_id: recordingVersion,
+    revision: recordingResult.revision,
+    slot_count: recordingResult.slot_count,
+    tool_names: recordingResult.tool_names,
+  });
   let dataset = (
     await scopedApi<any>("/evaluation/datasets", {
       method: "POST",
@@ -512,8 +532,9 @@ test(
     ).data;
     expect(finalOutput.availability).toBe("available");
     expect(finalOutput.content.length).toBeGreaterThan(0);
-    const finalMessage = loop.view.messages.find(
-      (message: any) => message.role === "assistant",
+    const finalMessage = selectAssistantMessageForStep(
+      loop.view.messages,
+      finalModel.step_id,
     );
     expect(
       finalMessage,
@@ -1234,7 +1255,12 @@ test(
     test.setTimeout(600_000);
     const { createOwnedActor } = await import("./support/owned-actor");
     const team = (
-      await appApi<{ id: string }>(page, "/teams", {
+      await appApi<{
+        id: string;
+        name: string;
+        created_by: string;
+        created_at: string;
+      }>(page, "/teams", {
         method: "POST",
         body: {
           name: acceptanceId("authority"),
@@ -1242,7 +1268,7 @@ test(
         },
       })
     ).data;
-    registerCleanupAction({
+    const teamCleanup = registerCleanupAction({
       action: "delete-resource",
       resource: "team",
       resource_id: team.id,
@@ -1260,7 +1286,21 @@ test(
         },
         { workspaceId: team.id, userId: operatorId },
       );
-      const loop = await closedLoop(page, bootstrapState.model_ids.chat!);
+      expect(team.created_by).toBe(operatorId);
+      const loop = await closedLoop(
+        page,
+        bootstrapState.model_ids.chat!,
+        undefined,
+        (recording) =>
+          bindPublishedTeamRetention(teamCleanup, {
+            run_id: process.env.ACCEPTANCE_RUN_ID!,
+            team_id: team.id,
+            team_name: team.name,
+            team_created_at: team.created_at,
+            owner_id: operatorId,
+            recording,
+          }),
+      );
       const comparison = (
         await appApi<any>(actor.page, "/execution-comparisons", {
           method: "POST",

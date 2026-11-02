@@ -6,6 +6,7 @@ import pytest
 from app.domain.models.authorization import AuthorizationContext
 from tests.app.alembic.test_execution_view_migration import isolated_database
 from tests.app.application.services.test_execution_usage_postgres import fresh_f07_database
+from tests.app.execution_test_support import with_current_test_claim
 from tests.app.infrastructure.repositories.test_evaluation_budget_binding import (
     budget_binding_fixture,
 )
@@ -63,12 +64,27 @@ async def test_durable_judge_intent_is_current_and_idempotent(budget_binding_fix
             )
 
 
-async def test_schedule_admits_dedicated_ask_and_leaves_subject_unchanged(budget_binding_fixture):
+@pytest.mark.parametrize("pinned", [False, True])
+async def test_schedule_admits_dedicated_ask_and_leaves_subject_unchanged(
+    budget_binding_fixture, pinned
+):
     from app.application.evaluation.judge_service import JudgeService
     from app.infrastructure.evaluation.rule_evidence_reader import RuleEvidenceReader
 
     suites, scope, _principal, suite, config, _pair, factory = budget_binding_fixture
     _, scheduler, batch, candidate = await completed(budget_binding_fixture, final_output="answer")
+    if pinned:
+        from app.composition.execution_definitions import build_code_definitions
+        from app.infrastructure.execution.admission_definition_resolver import (
+            AdmissionDefinitionResolver,
+        )
+        from app.infrastructure.execution.postgres_definition_store import PostgresDefinitionStore
+
+        async with factory(AuthorizationContext.system("execution-kernel")) as work:
+            for definition in build_code_definitions().manifests:
+                await PostgresDefinitionStore(work.db_session).seed_head(definition)
+            await work.commit()
+        scheduler.admission._definition_resolver = AdmissionDefinitionResolver()
     service = JudgeService(
         factory,
         suites,
@@ -80,6 +96,7 @@ async def test_schedule_admits_dedicated_ask_and_leaves_subject_unchanged(budget
     async with factory(AuthorizationContext.system("execution-kernel")) as work:
         intent = await work.evaluation_judge.get(scope, run)
         assert intent["status"] == "submitted"
+        assert (intent["envelope"]["payload"].get("definition_pin") is not None) is pinned
         assert intent["envelope"]["payload"]["family"] == "ask"
         assert intent["envelope"]["payload"]["semantic_payload"]["judge_protocol"] == 1
         binding = await work.evaluation_budget_control.binding(scope, run)
@@ -116,14 +133,17 @@ async def finish_judge(fixture, scheduler, intent, output, *, late_usage=False):
 
     async def command(kind, payload, version=1, command_id=None):
         result = await handler.handle(
-            create.model_copy(
-                update={
-                    "command_id": command_id or uuid4(),
-                    "command_type": kind,
-                    "command_schema_version": version,
-                    "expected_stream_version": None,
-                    "payload": payload,
-                }
+            await with_current_test_claim(
+                handler,
+                create.model_copy(
+                    update={
+                        "command_id": command_id or uuid4(),
+                        "command_type": kind,
+                        "command_schema_version": version,
+                        "expected_stream_version": None,
+                        "payload": payload,
+                    }
+                ),
             )
         )
         assert result.status == "accepted", result
@@ -540,14 +560,17 @@ async def test_actual_model_repairs_have_independent_physical_budget_and_usage(
 
     async def command(kind, payload, version=1, command_id=None):
         result = await handler.handle(
-            create.model_copy(
-                update={
-                    "command_id": command_id or uuid4(),
-                    "command_type": kind,
-                    "command_schema_version": version,
-                    "expected_stream_version": None,
-                    "payload": payload,
-                }
+            await with_current_test_claim(
+                handler,
+                create.model_copy(
+                    update={
+                        "command_id": command_id or uuid4(),
+                        "command_type": kind,
+                        "command_schema_version": version,
+                        "expected_stream_version": None,
+                        "payload": payload,
+                    }
+                ),
             )
         )
         assert result.status == "accepted", result
@@ -579,7 +602,7 @@ async def test_actual_model_repairs_have_independent_physical_budget_and_usage(
         async def load_input(self, **kw):
             return {"message": "judge", "skill_id": "forbidden", "conversation": "forbidden"}
 
-        async def put_result(self, identity, value):
+        async def put_result(self, identity, value, **_ownership):
             self.results[str(identity)] = value
             return "e08/" + str(identity)
 
@@ -1218,6 +1241,7 @@ async def test_actual_judge_cancel_waits_for_accepted_child_terminal(
                 update={
                     "command_id": uuid4(),
                     "command_type": "StartRun",
+                    "command_schema_version": 1,
                     "expected_stream_version": None,
                     "payload": {},
                 }
@@ -1263,14 +1287,12 @@ async def test_actual_judge_cancel_waits_for_accepted_child_terminal(
             .mappings()
             .one()
         )
-    cancel = envelope.model_copy(
-        update={
-            "command_id": row["command_id"],
-            "command_type": "CancelRun",
-            "expected_stream_version": None,
-            "payload": row["payload"],
-        }
-    )
+    from app.infrastructure.execution.postgres_inbox_source import PostgresInboxSource
+
+    pending = await PostgresInboxSource(
+        session_factory=handler._session_factory, authorization=auth
+    ).load_pending(now=datetime.now(UTC), limit=100)
+    cancel = next(command for command in pending if command.command_id == row["command_id"])
     assert (await handler.handle(cancel)).status == "accepted"
     await PostgresFormalProjector(
         session_factory=handler._session_factory, authorization=auth

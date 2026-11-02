@@ -7,6 +7,8 @@ from sqlalchemy import text
 from app.application.evaluation.budget_candidates import FrozenBudgetCandidates
 from app.application.evaluation.budget_service import BudgetDemandFactory, require_fresh_permit
 from app.application.evaluation.physical_lineage import logical_model_invocation
+from app.application.execution import activity_types
+from app.application.execution.context_compaction import require_summary_lineage
 from app.application.services.execution_usage_service import (
     configuration_snapshot,
     request_snapshot,
@@ -38,12 +40,102 @@ class CommittedDispatchPermit:
 
 
 class DurableBudgetDispatchService:
-    def __init__(self, *, uow_factory, inventory, physical_policy, execution_policy):
+    def __init__(
+        self,
+        *,
+        uow_factory,
+        inventory,
+        physical_policy,
+        execution_policy,
+        summary_validator=None,
+        model_validator=None,
+    ):
         self.uow_factory = uow_factory
         self.inventory = inventory
         self.physical_policy = physical_policy
         self.execution_policy = execution_policy
         self.authorization = AuthorizationContext.system("execution-kernel")
+        self.summary_validator = summary_validator
+        self.model_validator = model_validator
+
+    async def summary_authority(self, scope, context):
+        async with self.uow_factory(self.authorization) as work:
+            binding = await work.evaluation_budget_control.binding(scope, context.run.run_id)
+            if binding is None:
+                from app.infrastructure.repositories.db_resource_pin_repository import scope_params
+
+                admitted = (
+                    (
+                        await work.db_session.execute(
+                            text(
+                                "SELECT body,purpose FROM execution_configurations WHERE scope_key=:scope AND run_id=:run AND body->>'stage'='admission' ORDER BY created_at,id LIMIT 1"
+                            ),
+                            {**scope_params(scope), "run": context.run.run_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if admitted is None or admitted["purpose"] != "production":
+                    raise ValueError("CONTEXT_SUMMARY_BUDGET_UNAVAILABLE")
+                proof, purpose, namespace = (
+                    admitted["body"].get("context_candidate_proof"),
+                    "production",
+                    None,
+                )
+            else:
+                proof, purpose, namespace = (
+                    binding.candidate_proof,
+                    binding.purpose,
+                    binding.namespace_id,
+                )
+            manifest = context.run.definition_manifest
+            if proof is None or manifest is None or manifest.context_policy is None:
+                raise ValueError("CONTEXT_SUMMARY_BUDGET_UNAVAILABLE")
+            candidates = FrozenBudgetCandidates(self.inventory, proof).for_context_summary(
+                output_tokens=manifest.context_policy.summary_output_tokens
+            )
+            return candidates, purpose, namespace
+
+    async def freeze_context_candidates(self, work, scope, run_id, pin, payload, execution_policy):
+        from app.application.evaluation.budget_service import BudgetAuthority
+        from app.application.execution.decisions.context import context_enabled
+        from app.domain.evaluation.configuration import ConfigSelection
+        from app.domain.execution.definition import DefinitionPin
+        from app.domain.runtime_policy import ExecutionPolicy
+        from app.infrastructure.execution.postgres_definition_store import PostgresDefinitionStore
+        from app.infrastructure.repositories.db_resource_pin_repository import scope_params
+
+        manifest = await PostgresDefinitionStore(work.db_session).manifest(
+            DefinitionPin.model_validate(pin)
+        )
+        admitted = await work.db_session.scalar(
+            text(
+                "SELECT manifest_digest FROM execution_definition_admissions WHERE scope_key=:scope AND run_id=:run"
+            ),
+            {**scope_params(scope), "run": run_id},
+        )
+        if admitted != manifest.digest:
+            raise ValueError("CONTEXT_ADMISSION_TRANSACTION_REQUIRED")
+        if not context_enabled(manifest):
+            return None
+        if manifest.context_policy is None or self.inventory is None:
+            raise ValueError("CONTEXT_CANDIDATE_PROFILE_UNAVAILABLE")
+        selection = ConfigSelection(
+            model_id=payload.get("model_id"),
+            temperature=payload.get("temperature_override"),
+            max_output_tokens=manifest.context_policy.main_output_tokens,
+        )
+        primary = await work.evaluation_configuration.metadata(scope, selection)
+        if type(execution_policy) is not ExecutionPolicy:
+            raise ValueError("CONTEXT_CANDIDATE_POLICY_UNAVAILABLE")
+        return await BudgetAuthority(self.inventory).candidates_in_uow(
+            work,
+            scope,
+            selection,
+            primary,
+            policy=execution_policy.model_resilience,
+        )
 
     async def candidates(self, scope, context):
         async with self.uow_factory(self.authorization) as work:
@@ -55,8 +147,31 @@ class DurableBudgetDispatchService:
                     "evaluation_judge",
                 }:
                     raise ValueError("budget_run_binding_unavailable")
+                from app.application.execution.decisions.context import context_enabled
+
+                if context_enabled(context.run.definition_manifest):
+                    from app.infrastructure.repositories.db_resource_pin_repository import (
+                        scope_params,
+                    )
+
+                    proof = await work.db_session.scalar(
+                        text(
+                            "SELECT body->'context_candidate_proof' FROM execution_configurations WHERE scope_key=:scope AND run_id=:run AND body->>'stage'='admission' ORDER BY created_at,id LIMIT 1"
+                        ),
+                        {**scope_params(scope), "run": context.run.run_id},
+                    )
+                    if proof is None:
+                        raise ValueError("CONTEXT_CANDIDATE_PROFILE_UNAVAILABLE")
+                    return FrozenBudgetCandidates(self.inventory, proof)
                 return None
-            return FrozenBudgetCandidates(self.inventory, binding.candidate_proof)
+            candidates = FrozenBudgetCandidates(self.inventory, binding.candidate_proof)
+            from app.application.execution.decisions.context import context_enabled
+
+            if context_enabled(context.run.definition_manifest):
+                candidates = candidates.for_context_model(
+                    output_tokens=context.run.definition_manifest.context_policy.main_output_tokens
+                )
+            return candidates
 
     async def before_send(self, scope, request, context, model, payload, *, resolved=None):
         async with self.uow_factory(self.authorization) as work:
@@ -83,6 +198,8 @@ class DurableBudgetDispatchService:
                 resolved=resolved or {},
                 inventory=self.inventory,
                 expected_policy=self.physical_policy,
+                summary_validator=self.summary_validator,
+                model_validator=self.model_validator,
             )
         scope = (
             OwnerScope.team(binding.requester["user_id"], scope.team_id) if scope.team_id else scope
@@ -105,6 +222,8 @@ class DurableBudgetDispatchService:
             or state.source_entity_id != binding.source_entity_id
             or state.policy_snapshot.snapshot_digest != binding.policy_digest
             or context.run.policy_snapshot.snapshot_digest != binding.policy_digest
+            or state.definition_pin != context.run.definition_pin
+            or state.definition_manifest != context.run.definition_manifest
             or request.activity_id not in state.active_activity_ids
             or (request.activity_id, request.generation, context.claim_generation)
             not in state.started_activity_claims
@@ -114,23 +233,51 @@ class DurableBudgetDispatchService:
         if lineage is None:
             raise ValueError("budget_logical_lineage_unavailable")
         judge = None
-        if binding.purpose == "evaluation_judge":
+        compact = request.activity_type == activity_types.CONTEXT_COMPACT
+        if binding.purpose == "evaluation_judge" and not compact:
             judge = await work.evaluation_judge.authorize_run(
                 scope, binding.run_id, state=state, request=request
             )
             if payload.get("tools") or payload.get("functions"):
                 raise ValueError("judge_tools_forbidden")
-        logical_id = logical_model_invocation(
-            state,
-            request.activity_id,
-            request.generation,
-            root_run_id=lineage["root_run_id"],
-            judge_protocol=judge["protocol"] if judge else None,
+        logical_id = (
+            require_summary_lineage(state, request, root_run_id=lineage["root_run_id"])
+            if compact
+            else logical_model_invocation(
+                state,
+                request.activity_id,
+                request.generation,
+                root_run_id=lineage["root_run_id"],
+                judge_protocol=judge["protocol"] if judge else None,
+            )
         )
         policy = await DBEvaluationBudgetPolicyRepository(work.db_session).active(lock=True)
         if policy != self.physical_policy or not policy.hard_evaluation_available:
             raise ValueError("budget_physical_policy_unavailable")
         candidates = FrozenBudgetCandidates(self.inventory, binding.candidate_proof)
+        from app.application.execution.decisions.context import context_enabled
+
+        if not compact and context_enabled(state.definition_manifest):
+            candidates = candidates.for_context_model(
+                output_tokens=state.definition_manifest.context_policy.main_output_tokens
+            )
+        if compact:
+            if self.summary_validator is None or state.definition_manifest.context_policy is None:
+                raise ValueError("CONTEXT_SUMMARY_BUDGET_UNAVAILABLE")
+            candidates = candidates.for_context_summary(
+                output_tokens=state.definition_manifest.context_policy.summary_output_tokens
+            )
+            detail = await self.summary_validator.validate(
+                work,
+                state,
+                request,
+                payload,
+                candidates,
+                purpose=binding.purpose,
+                namespace_id=namespace.id,
+                model=model,
+            )
+            resolved = {**(resolved or {}), "context_summary": detail}
         for candidate in candidates.proof["candidates"]:
             metadata = await work.evaluation_configuration.metadata(
                 scope, ConfigSelection(model_id=candidate["identity"]["model_id"])
@@ -159,6 +306,13 @@ class DurableBudgetDispatchService:
         if candidate is None:
             raise ValueError("budget_candidate_changed")
         candidates.validate(model, candidate, effective=True)
+        if not compact and request.input_payload.get("context_ref") is not None:
+            if self.model_validator is None:
+                raise ValueError("CONTEXT_VALIDATION_UNAVAILABLE")
+            detail = await self.model_validator.validate(
+                work, state, request, model, payload, candidates
+            )
+            resolved = {**(resolved or {}), "context_manifest": detail}
         profile = BudgetProfile.model_validate(candidate["profile"])
         bound = profile.bound(payload, output=candidate["output"])
         principal = Principal.model_validate(binding.requester)
@@ -227,6 +381,7 @@ class DurableBudgetDispatchService:
             claim_generation=context.claim_generation,
             configuration_id=config,
             request_snapshot=request_snapshot(payload),
+            activity_type=request.activity_type,
         )
         result = await work.evaluation_budget.reserve(identity, demand)
         await work.db_session.execute(

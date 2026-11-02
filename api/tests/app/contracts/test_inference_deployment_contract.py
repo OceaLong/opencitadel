@@ -9,6 +9,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 RUNTIME_SURFACES = (
     ".env.example",
+    "deploy/config/.env.reference",
     "scripts/quickstart.sh",
     "e2e/patrol-admin.spec.ts",
     "deploy/helm/opencitadel/values.yaml",
@@ -77,8 +78,9 @@ def test_runtime_surfaces_have_no_legacy_inference_or_feature_flag_controls(
 
 
 def test_demo_seed_and_patrol_controls_use_canonical_names() -> None:
-    environment = _source(".env.example")
+    environment = _source("deploy/config/.env.reference")
     quickstart = _source("scripts/quickstart.sh")
+    seed = _source("api/app/seed_demo.py")
     e2e = _source("e2e/patrol-admin.spec.ts")
     helm_values = _source("deploy/helm/opencitadel/values.yaml")
 
@@ -89,7 +91,8 @@ def test_demo_seed_and_patrol_controls_use_canonical_names() -> None:
         "DEMO_INFERENCE_PROVIDER",
     ):
         assert name in environment
-        assert name in quickstart
+        assert name in seed
+    assert "python -m app.seed_demo" in quickstart
     assert "/runtime-policies/operations/revisions" in e2e
     assert "patrol_policy:" not in helm_values
 

@@ -33,6 +33,7 @@ from tests.app.application_test_support import (
     NoopGovernanceMetrics,
     RecordingGovernanceMetrics,
 )
+from tests.app.patrol_actuator_support import capabilities, operation_envelope, target_identity
 from tests.runtime_policy_support import MutablePolicyReader
 
 
@@ -42,6 +43,7 @@ class Repo:
 
     def __init__(self):
         config = load_patrol_template("kubernetes-baseline-v1")
+        config.checks[0].probe.args["workload"] = "api"
         self.pack = PatrolPack(
             owner_user_id="user-1",
             name="Daily",
@@ -205,12 +207,14 @@ def make_service(
         item.recheck_run_id = "default-recheck-run"
         return SimpleNamespace(id=item.recheck_run_id)
 
+    actuator = actuator or SimpleNamespace(get_capabilities=AsyncMock(return_value=capabilities()))
+    if not hasattr(actuator, "get_target"):
+        actuator.get_target = AsyncMock(side_effect=target_identity)
+    if not hasattr(actuator, "get_operation"):
+        actuator.get_operation = AsyncMock(return_value={"state": "unknown"})
     return PatrolRemediationService(
         lambda: uow,
-        actuator_client=actuator
-        or SimpleNamespace(
-            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
-        ),
+        actuator_client=actuator,
         patrol_run_service=patrol_runs
         or SimpleNamespace(trigger_recheck=AsyncMock(side_effect=dispatch)),
         run_admission_service=admission or SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
@@ -239,7 +243,7 @@ async def test_propose_creates_remediation_with_hash_and_session():
     assert remediation.idempotency_key == f"rem:{remediation.id}"
     assert remediation.target_namespace == "opencitadel"
     expected_hash = patrol_remediation_params_hash(
-        "restart_workload", "opencitadel", "", "Deployment", {}
+        "restart_workload", "opencitadel", "api", "Deployment", {}
     )
     assert remediation.params_hash == expected_hash
     assert repo.remediations[remediation.id].id == remediation.id
@@ -541,7 +545,7 @@ async def test_propose_rollback_workload_impact_summary_does_not_imply_a_chosen_
     assert remediation.params == {}
     assert (
         remediation.impact_summary
-        == "Roll Deployment/<unresolved> in opencitadel back to the previous revision."
+        == "Roll Deployment/api in opencitadel back to the previous revision."
     )
 
 
@@ -590,7 +594,7 @@ async def test_execute_resumes_an_interrupted_idempotent_actuator_call():
         get_by_name=AsyncMock(return_value=SimpleNamespace(enabled=True))
     )
     actuator = SimpleNamespace(
-        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"}),
+        get_capabilities=AsyncMock(return_value=capabilities("capability-v1")),
         execute_action=AsyncMock(
             return_value={
                 "action_outcome": "succeeded",
@@ -612,6 +616,7 @@ async def test_execute_resumes_an_interrupted_idempotent_actuator_call():
         )
     remediation.actuator_capability_hash = "capability-v1"
     remediation.status = PatrolRemediationStatus.EXECUTING
+    actuator.get_operation.return_value = operation_envelope(remediation)
     await repo.save_remediation(remediation)
 
     with _patched():
@@ -624,10 +629,8 @@ async def test_execute_resumes_an_interrupted_idempotent_actuator_call():
         )
 
     assert result["status"] == PatrolRemediationStatus.EXECUTED.value
-    actuator.execute_action.assert_awaited_once()
-    assert actuator.execute_action.await_args.args[2]["idempotency_key"] == (
-        remediation.idempotency_key
-    )
+    actuator.execute_action.assert_not_awaited()
+    actuator.get_operation.assert_awaited_once()
     persisted = repo.remediations[remediation.id]
     assert persisted.status == PatrolRemediationStatus.EXECUTED
     assert persisted.before_observation == {"replicas": 1}
@@ -655,7 +658,7 @@ async def test_policy_tightening_after_capability_check_denies_actuator_call():
                     patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.DISABLED)
                 )
             )
-        return {"overall_capability_hash": "capability-v1"}
+        return capabilities("capability-v1")
 
     actuator = SimpleNamespace(
         get_capabilities=AsyncMock(side_effect=tighten_policy),
@@ -673,7 +676,6 @@ async def test_policy_tightening_after_capability_check_denies_actuator_call():
             workload="deployment/api",
         )
         remediation.actuator_capability_hash = "capability-v1"
-        remediation.status = PatrolRemediationStatus.EXECUTING
         await repo.save_remediation(remediation)
 
         with pytest.raises(BadRequestError) as denied:
@@ -698,7 +700,7 @@ async def test_execute_recovery_skips_completed_actuator_call_and_resumes_rechec
     repo = Repo()
     uow = Uow(repo)
     actuator = SimpleNamespace(
-        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"}),
+        get_capabilities=AsyncMock(return_value=capabilities("capability-v1")),
         execute_action=AsyncMock(),
     )
     recheck = SimpleNamespace(id="recheck-run-1")
@@ -784,17 +786,8 @@ async def test_cancel_if_pending_cancels_proposed_and_frees_finding_for_repropos
 
 
 @pytest.mark.asyncio
-async def test_cancel_if_pending_fails_executing_session_and_frees_finding_for_reproposal():
-    """Final-review finding I2 (part 1): if the worker process dies while a
-    remediation session is EXECUTING — execute() has already flipped the row
-    to EXECUTING (before releasing its row lock and calling the Actuator)
-    but the session terminates before an outcome is ever recorded —
-    on_session_terminal's cancel_if_pending must not silently no-op the way
-    it used to for anything other than PROPOSED. Left stuck in EXECUTING,
-    the remediation would permanently block any new proposal for the same
-    Finding, because EXECUTING is not in PATROL_REMEDIATION_TERMINAL_STATUSES
-    (and the DB partial unique index agrees — see the alembic revision that
-    creates patrol_remediations)."""
+async def test_cancel_if_pending_preserves_unknown_effect_and_blocks_new_proposal():
+    """Unknown provider effects remain active after their waiting session ends."""
     repo = Repo()
     service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
@@ -815,19 +808,17 @@ async def test_cancel_if_pending_fails_executing_session_and_frees_finding_for_r
     await service.cancel_if_pending(remediation.session_id)
 
     aborted = repo.remediations[remediation.id]
-    assert aborted.status == PatrolRemediationStatus.FAILED
+    assert aborted.status == PatrolRemediationStatus.UNKNOWN
     assert aborted.error_code == "session_terminated_mid_execution"
 
-    with _patched():
-        reproposed = await service.propose(
+    with _patched(), pytest.raises(ConflictError):
+        await service.propose(
             repo.k8s_finding.id,
             PatrolRemediationAction.SCALE_WORKLOAD,
             {"replicas": 2},
             scope,
             "user-1",
         )
-    assert reproposed.id != remediation.id
-    assert reproposed.status == PatrolRemediationStatus.PROPOSED
 
 
 @pytest.mark.asyncio
@@ -907,7 +898,7 @@ async def test_propose_persists_pre_approval_capability_baseline():
     # closed at execute() with CAPABILITY_BASELINE_MISSING.
     repo = Repo()
     actuator = SimpleNamespace(
-        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "cap-baseline-9"}),
+        get_capabilities=AsyncMock(return_value=capabilities("cap-baseline-9")),
         execute_action=AsyncMock(),
     )
     service = make_service(Uow(repo), actuator=actuator)
@@ -933,7 +924,7 @@ async def test_execute_fails_closed_when_capability_baseline_missing():
     # coverage because every execute test manually injected a baseline hash.
     repo = Repo()
     actuator = SimpleNamespace(
-        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "cap-1"}),
+        get_capabilities=AsyncMock(return_value=capabilities("cap-1")),
         execute_action=AsyncMock(),
     )
     service = make_service(Uow(repo), actuator=actuator)
@@ -950,7 +941,6 @@ async def test_execute_fails_closed_when_capability_baseline_missing():
         )
         # Simulate the historical defect: no baseline persisted before approval.
         remediation.actuator_capability_hash = None
-        remediation.status = PatrolRemediationStatus.EXECUTING
         await repo.save_remediation(remediation)
 
         with pytest.raises(ConflictError) as missing:

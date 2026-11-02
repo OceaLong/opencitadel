@@ -626,6 +626,7 @@ const DYNAMIC_EXPANSIONS = [
       "governance",
       "evidence",
       "complianceReport",
+      "executionDefinitions",
     ],
   },
   {
@@ -640,6 +641,7 @@ const DYNAMIC_EXPANSIONS = [
       "governance",
       "evidence",
       "complianceReport",
+      "executionDefinitions",
     ],
   },
   {

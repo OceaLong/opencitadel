@@ -53,7 +53,7 @@ Due to the large size of the video file, please click on the image or link below
 
 ## Quick start
 
-**10-minute BYO API key path**
+**BYO API key setup**
 
 ```bash
 git clone https://github.com/OceaLong/opencitadel.git
@@ -65,9 +65,15 @@ Open **http://localhost:8088**, sign in, configure an inference **endpoint**,
 **model**, and **chat binding** in Settings → Inference, and run your first
 agent task.
 
-`make quickstart` also builds the sandbox image and defaults to local MinIO storage — see the guides below for cloud storage and full configuration.
+New installations use text extraction and keyword search for knowledge bases.
+Vector search, reranking, GraphRAG, and OCR can be enabled after configuring
+their models; existing policies are preserved on upgrade.
 
-- Step-by-step: [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md)
+`make quickstart` also builds the sandbox image and defaults to local MinIO storage — see the guides below for cloud storage and full configuration.
+The first build downloads browser and system dependencies; its duration depends
+on the network and image caches. Subsequent starts reuse the built images.
+
+- Step-by-step: [Self-hosting tutorial](docs/tutorials/01-self-host-10-minutes.md)
 - Production: [Deployment guide](docs/operations/deployment.md)
 - HTTPS & domain: [HTTPS setup](docs/operations/https-domain-setup.md)
 
@@ -90,19 +96,36 @@ The execution workbench, analysis, comparisons, and exports read pinned evidence
 
 | Audience             | Start here                                                                                                                                                                                                                                                                                                        |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| First run            | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) · [10-minute governance demo loop](docs/tutorials/08-ten-minute-governance-demo.md)                                                                                                                                                          |
+| First run            | [Self-hosting tutorial](docs/tutorials/01-self-host-10-minutes.md) · [10-minute governance demo loop](docs/tutorials/08-ten-minute-governance-demo.md)                                                                                                                                                            |
 | Ops / DevOps         | [Deployment](docs/operations/deployment.md) · [Ops Patrol](docs/tutorials/06-ops-patrol.md) · [Approved remediation](docs/tutorials/07-approved-remediation.md) · [Patrol operations](docs/operations/ops-patrol.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
 | Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) · [Governed Web Operator](docs/tutorials/04-governed-web-operator.md) · [Refund reconciliation & compliance](docs/tutorials/05-refund-reconciliation-compliance.md)           |
 | Platform engineers   | [Docs index](docs/README.md) · [Execution kernel](docs/architecture/execution-kernel.md) · [Security model](docs/architecture/security-model.md) · [Ops Patrol architecture](docs/architecture/ops-patrol.md)                                                                                                     |
 | Contributors         | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md)                                                                                                                                                                                                                                         |
 
+## Repository layout
+
+| Directory                         | Responsibility                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `api/`                            | API and execution kernel; domain, application, adapters, composition and tests                          |
+| `ui/`                             | Next.js application and frontend tests                                                                  |
+| `sandbox/`                        | Isolated browser, shell and VNC runtime                                                                 |
+| `ops-collector/`, `ops-actuator/` | Independently deployed read and approved-write services                                                 |
+| `deploy/`                         | Nginx, Helm, Kustomize and operator configuration                                                       |
+| `demo/`                           | OpsConsole example and disposable Patrol fixture lab                                                    |
+| `e2e/`                            | Browser acceptance scenarios, providers and evidence collectors                                         |
+| `scripts/`                        | Bootstrap, backup, acceptance orchestration and capacity tooling; tests live in `tests/` subdirectories |
+| `contracts/`                      | Shared acceptance and i18n schemas                                                                      |
+| `docs/`                           | Maintained architecture, operations and tutorials                                                       |
+
+Keep service-specific code and tests with their service. Put deployment assets in
+`deploy/` and runnable examples in `demo/`. Retired plans remain in Git history;
+generated files belong in ignored output directories such as `tmp/`.
+
 ## Local development
 
 ```bash
-cp .env.example .env
-# Set BOOTSTRAP_ADMIN_PASSWORD; configure inference endpoint/model/bindings after first login
-
-docker compose --profile local up --build
+make quickstart
+# First startup prints the generated admin login; configure inference after login
 
 # Or run API / UI tests separately
 cd api && uv sync --all-groups && uv run pytest --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
@@ -113,6 +136,11 @@ API integration tests require the configured PostgreSQL database; strict mode al
 The excluded six current-invocation consumers run in the [acceptance runner](e2e/README.md), after their native evidence is produced and validated; all six must pass without skips.
 
 Module guides: [api/README.md](api/README.md) · [ui/README.md](ui/README.md) · [sandbox/README.md](sandbox/README.md)
+
+Configuration starts with six optional choices in `.env.example`; credentials
+are generated once and saved in private `.env`. `make configure` prepares it
+without starting containers. Advanced overrides are grouped in
+[`deploy/config/.env.reference`](deploy/config/.env.reference).
 
 ## License
 

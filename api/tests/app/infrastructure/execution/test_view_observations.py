@@ -151,6 +151,12 @@ async def test_formal_projector_wires_observation_and_approval_run_state():
         session_factory=None, authorization=AuthorizationContext.system("f02")
     )
     async with execution_admin_session() as session:
+        from app.domain.execution.run import RunAggregate
+        from app.infrastructure.execution.postgres_event_store import PostgresEventStore
+
+        (source,) = PostgresEventStore(
+            session, event_registries={"run": RunAggregate().event_registry}
+        )._upcast((source,))
         await projector._project_event(session, source, [], {})
         rows = (
             await session.scalars(

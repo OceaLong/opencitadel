@@ -124,12 +124,14 @@ class CapabilityService:
         execution = execution_active.revision.policy
         operations = operations_active.revision.policy
         chat = await self._inference_state(InferencePurpose.CHAT, scope)
-        embedding = await self._inference_state(InferencePurpose.EMBEDDING, scope)
-        if not (execution.memory.vector_enabled or execution.knowledge_base.vector_enabled):
-            embedding = CapabilityState(
+        embedding = (
+            await self._inference_state(InferencePurpose.EMBEDDING, scope)
+            if execution.memory.vector_enabled or execution.knowledge_base.vector_enabled
+            else CapabilityState(
                 state=CapabilityStateValue.DISABLED,
                 reason_key="capabilities.reason.allVectorConsumersDisabled",
             )
+        )
         rerank = (
             await self._inference_state(InferencePurpose.RERANK, scope)
             if execution.knowledge_base.rerank.enabled

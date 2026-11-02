@@ -1,7 +1,9 @@
 """Capture resolved inputs before send; never consult mutable settings on reads."""
 
 from app.application.execution.content_sanitization import sanitize_content
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
 from app.domain.models.execution_usage import PriceSnapshot
+from app.domain.models.inference import EmbeddingModelSettings
 
 
 def configuration_snapshot(
@@ -16,6 +18,8 @@ def configuration_snapshot(
     thinking_enabled=False,
     price_snapshot=None,
     admission_configuration_id=None,
+    context_summary=None,
+    context_manifest=None,
 ):
     model = resolved_model
     price = price_snapshot or PriceSnapshot(
@@ -37,6 +41,11 @@ def configuration_snapshot(
         "endpoint_id": model.endpoint.id,
         "credential_ref": {"kind": "inference_endpoint", "id": model.endpoint.id},
         "settings": model.model.settings.model_dump(mode="json"),
+        **(
+            {"embedding_space_digest": EmbeddingSpaceDescriptor.from_resolved(model).digest}
+            if isinstance(model.model.settings, EmbeddingModelSettings)
+            else {}
+        ),
         "thinking_enabled": thinking_enabled,
         "extra_parameters": {"availability": "omitted", "reason": "not_allowlisted"}
         if model.extra_params
@@ -57,6 +66,8 @@ def configuration_snapshot(
         "version_unpinned": True,
         "price": price.model_dump(mode="json"),
         "price_revision": price.revision,
+        **({"context_summary": context_summary} if context_summary is not None else {}),
+        **({"context_manifest": context_manifest} if context_manifest is not None else {}),
     }
 
 
@@ -87,6 +98,8 @@ _REQUEST_FIELDS = frozenset(
 
 
 def request_snapshot(payload):
+    from app.domain.execution.context_models import context_digest
+
     allowed = {key: value for key, value in payload.items() if key in _REQUEST_FIELDS}
     clean = sanitize_content(allowed)
     controls = {
@@ -106,7 +119,21 @@ def request_snapshot(payload):
             }
     return {
         "request": clean,
+        "native_payload_digest": context_digest(payload),
         "inference": controls,
+        # Typed numeric controls remain readable after the public-body secret-key
+        # filter. Only these allowlisted paths may be restored during replay.
+        "numeric_parameters": [
+            {"path": [key, child], "value": number}
+            for key, value in controls.items()
+            if isinstance(value, dict)
+            for child, number in value.items()
+        ]
+        + [
+            {"path": [key], "value": value}
+            for key, value in controls.items()
+            if type(value) in (int, float)
+        ],
         "redacted": clean != payload,
         "omitted_field_count": len(payload) - len(allowed),
     }
@@ -120,7 +147,14 @@ class ExecutionUsageService:
 
     def admission_resolver(self, models):
         async def resolve(
-            scope, run_id, policy_revision, payload, purpose, *, inference_read_context=None
+            scope,
+            run_id,
+            policy_revision,
+            payload,
+            purpose,
+            *,
+            inference_read_context=None,
+            execution_policy=None,
         ):
             if not isinstance(payload.get("message"), str):
                 if self.physical_dispatch is None:
@@ -159,6 +193,21 @@ class ExecutionUsageService:
                     thinking_enabled=payload.get("thinking_enabled", False),
                 )
             body["stage"] = "admission"
+            if payload.get("_execution_definition") is not None:
+                if self.physical_dispatch is None or inference_read_context is None:
+                    raise ValueError("CONTEXT_ADMISSION_TRANSACTION_REQUIRED")
+                context_proof = await self.physical_dispatch.freeze_context_candidates(
+                    inference_read_context,
+                    scope,
+                    run_id,
+                    payload["_execution_definition"],
+                    # A request may select the default binding. Freeze the
+                    # exact model already resolved in this admission UoW.
+                    {**payload, "model_id": body.get("model_id", payload.get("model_id"))},
+                    execution_policy,
+                )
+                if context_proof is not None:
+                    body["context_candidate_proof"] = context_proof
 
             async def capture(repository):
                 if self.physical_dispatch is not None:
@@ -212,6 +261,11 @@ class ExecutionUsageService:
         if self.physical_dispatch is None:
             return None
         return await self.physical_dispatch.candidates(scope, context)
+
+    async def summary_authority(self, scope, context):
+        if self.physical_dispatch is None:
+            raise ValueError("CONTEXT_SUMMARY_BUDGET_UNAVAILABLE")
+        return await self.physical_dispatch.summary_authority(scope, context)
 
     def guard(self, *, scope, request, context, purpose, resolved):
         return UsageDispatchGuard(self, scope, request, context, purpose, resolved)

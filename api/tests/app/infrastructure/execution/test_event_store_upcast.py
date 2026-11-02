@@ -140,7 +140,9 @@ def test_real_run_v1_upcast_preserves_raw_hash_and_unknown_claim(name):
     )
     store = _store(RunAggregate().event_registry)
     (result,) = store._upcast((event,))
-    assert result.event_schema_version == 2
+    assert result.event_schema_version == (3 if name == "ActivityFailed" else 2)
+    if name == "ActivityFailed":
+        assert result.public_payload["public_data"] == {}
     assert result.public_payload["claim_generation"] is None
     assert result.internal_payload == internal
     assert result.event_hash == event.event_hash

@@ -217,12 +217,12 @@ test.describe("inference control plane", () => {
     ).toMatchObject({ model_id: chatId, team_id: null, owner_user_id: null });
   });
 
-  test("bootstrap proves capabilities transition from unconfigured to available", async ({
+  test("bootstrap enables chat without overriding disabled optional consumers", async ({
     operatorPage: page,
     bootstrapState,
   }) => {
     cover("INF-CAP");
-    const { chatId, embeddingId } = requireBootstrapIds(bootstrapState);
+    const { chatId } = requireBootstrapIds(bootstrapState);
     const transition = (
       bootstrapState as typeof bootstrapState & {
         capability_transition?: CapabilityTransition;
@@ -234,20 +234,22 @@ test.describe("inference control plane", () => {
       "bootstrap must retain both capability projections",
     ).toBeDefined();
     expect(transition?.before.chat.state).toBe("not_configured");
-    expect(transition?.before.embeddings.state).toBe("not_configured");
-    expect(transition?.before.rerank.state).toBe("not_configured");
     expect(transition?.after.chat).toMatchObject({
       state: "available",
       model_id: chatId,
     });
-    expect(transition?.after.embeddings).toMatchObject({
-      state: "available",
-      model_id: embeddingId,
-    });
-    expect(transition?.after.rerank).toMatchObject({
-      state: "available",
-      model_id: chatId,
-    });
+    for (const projection of [transition?.before, transition?.after]) {
+      expect(projection?.embeddings).toMatchObject({
+        state: "disabled",
+        model_id: null,
+        reason_key: "capabilities.reason.allVectorConsumersDisabled",
+      });
+      expect(projection?.rerank).toMatchObject({
+        state: "disabled",
+        model_id: null,
+        reason_key: "capabilities.reason.rerankDisabled",
+      });
+    }
 
     const current = await appApi<InferenceStatus>(page, "/inference/status");
     expect(current.data.capabilities.items.chat).toMatchObject(

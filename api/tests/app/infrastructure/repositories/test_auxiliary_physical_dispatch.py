@@ -26,6 +26,8 @@ async def test_actual_tool_activity_embedding_send_uses_original_nonchat_admissi
 
     from app.application.execution.activities.tool_call import ToolCallActivityHandler
     from app.application.services.embedding_service import EmbeddingService
+    from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
+    from app.domain.services.knowledge_base.vector_service import KBVectorService
     from app.infrastructure.external.inference.embedding import OpenAICompatibleEmbedding
     from tests.app.application.services.test_embedding_service import _resolved_embedding
 
@@ -37,6 +39,8 @@ async def test_actual_tool_activity_embedding_send_uses_original_nonchat_admissi
     )
     fixture = ready_dispatch[0]
     _, scope, principal, _, _, _, uow = fixture
+    model = _resolved_embedding()
+    frozen_space = EmbeddingSpaceDescriptor.from_resolved(model)
 
     async def create(**payload):
         async with uow(durable.authorization) as work:
@@ -44,6 +48,14 @@ async def test_actual_tool_activity_embedding_send_uses_original_nonchat_admissi
                 text("SELECT demand FROM evaluation_budget_reservations")
             )
             assert demand["requester"] == principal.user_id
+            configuration = await work.db_session.scalar(
+                text(
+                    "SELECT c.body FROM execution_configurations c "
+                    "JOIN execution_model_dispatches d ON d.configuration_id=c.id "
+                    "AND d.scope_key=c.scope_key"
+                )
+            )
+            assert configuration["embedding_space_digest"] == frozen_space.digest
             assert (
                 await work.db_session.scalar(
                     text("SELECT count(*) FROM execution_model_dispatches")
@@ -65,12 +77,14 @@ async def test_actual_tool_activity_embedding_send_uses_original_nonchat_admissi
         lambda **kwargs: None,
     )
     embeddings = EmbeddingService(
-        SimpleNamespace(resolve=AsyncMock(return_value=_resolved_embedding())),
+        SimpleNamespace(resolve=AsyncMock(return_value=model)),
         SimpleNamespace(create_embedding=OpenAICompatibleEmbedding),
+        SimpleNamespace(resolve_model=AsyncMock(return_value=model)),
     )
 
     async def invoke(*args, **kwargs):
-        await embeddings.embed(["query"], scope=scope)
+        vector = KBVectorService(embeddings, scope=scope, enabled=True)
+        await vector.embed("query", expected_space=frozen_space)
         return {"success": True, "data": "done"}
 
     objects = SimpleNamespace(

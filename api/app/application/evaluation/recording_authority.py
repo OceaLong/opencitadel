@@ -34,8 +34,25 @@ async def validate_recording(uow, scope, principal, version_id):
             if not contract.connector_id or not contract.connector_bindings:
                 raise ReplayMismatch("connector_unavailable")
             for connector_id, revision in contract.connector_bindings.items():
-                if await repo.connector_binding(scope, contract.pack, connector_id) != revision:
+                if (
+                    await repo.connector_binding(
+                        scope,
+                        contract.pack,
+                        connector_id,
+                        **(
+                            {"execution": True, "tool_name": contract.source_name}
+                            if contract.contract_schema_version == 2
+                            else {}
+                        ),
+                    )
+                    != revision
+                ):
                     raise ReplayMismatch("connector_changed")
+        elif contract.pack == "context_recording":
+            from app.application.evaluation.context_recording import summary_recording_contract
+
+            if contract != summary_recording_contract():
+                raise ReplayMismatch("context_recording_contract_changed")
         elif contract.pack != "retrieval":
             import inspect
 

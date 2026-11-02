@@ -157,7 +157,7 @@ async def test_real_f_snapshot_to_from_run_route_preserves_prefix_and_confirmati
         authorization=kernel,
     )
 
-    async def command(kind, payload, schema=1, command_id=None):
+    async def command(kind, payload, schema=1, command_id=None, *, lease_proof=None):
         envelope = CommandEnvelope(
             command_id=command_id or uuid4(),
             command_type=kind,
@@ -170,6 +170,7 @@ async def test_real_f_snapshot_to_from_run_route_preserves_prefix_and_confirmati
             causation_id=None,
             issued_at=datetime.now(UTC),
             payload=payload,
+            activity_lease_proof=lease_proof,
         )
         outcome = await handler.handle(envelope)
         assert outcome.status == "accepted", outcome
@@ -218,9 +219,10 @@ async def test_real_f_snapshot_to_from_run_route_preserves_prefix_and_confirmati
     async with execution_admin_session() as db:
         await db.execute(
             text(
-                "UPDATE execution_activity_tasks SET claim_generation=1,status='call_started' WHERE activity_id=:id"
+                "UPDATE execution_activity_tasks SET claim_generation=1,status='call_started',"
+                "claimed_by='e01-controlled-worker',claim_deadline=:deadline WHERE activity_id=:id"
             ),
-            {"id": activity_id},
+            {"id": activity_id, "deadline": timeout_at},
         )
         await db.commit()
     claim = ActivityClaim(
@@ -236,6 +238,9 @@ async def test_real_f_snapshot_to_from_run_route_preserves_prefix_and_confirmati
             input_payload=request,
         ),
         claim_generation=1,
+        worker_id="e01-controlled-worker",
+        server_now=datetime.now(UTC),
+        lease_deadline=timeout_at,
         owner_user_id=scope.user_id,
         team_id=None,
     )
@@ -245,12 +250,12 @@ async def test_real_f_snapshot_to_from_run_route_preserves_prefix_and_confirmati
     started_id = uuid4()
     started = {"activity_id": str(activity_id), "generation": 0, "claim_generation": 1}
     await writer.prepare(claim, started_id, "MarkActivityCallStarted", started)
-    await command("MarkActivityCallStarted", started, 2, started_id)
+    await command("MarkActivityCallStarted", started, 2, started_id, lease_proof=claim.lease_proof)
     result_ref = await store.put_result(activity_id, {"answer": "historical candidate"})
     completed_id = uuid4()
     completed = {**started, "result_ref": result_ref, "result_summary": "not the case input"}
     await writer.prepare(claim, completed_id, "CompleteActivity", completed)
-    await command("CompleteActivity", completed, 2, completed_id)
+    await command("CompleteActivity", completed, 2, completed_id, lease_proof=claim.lease_proof)
     await PostgresFormalProjector(
         session_factory=execution_admin_session, authorization=kernel
     ).run_once(scope, limit=1000)

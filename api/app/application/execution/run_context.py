@@ -47,6 +47,8 @@ def run_execution_context(state: RunState) -> RunExecutionContext:
         return RunExecutionContext(
             run_id=state.run_id,
             family=state.family,
+            definition_pin=state.definition_pin,
+            definition_manifest=state.definition_manifest,
             owner_scope=owner_scope,
             policy_snapshot=snapshot,
             correlation_id=state.correlation_id,

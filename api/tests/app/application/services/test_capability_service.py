@@ -17,6 +17,7 @@ from app.domain.runtime_policy import (
     PatrolAdmissionMode,
     PatrolOperationsPolicy,
     PatrolRemediationMode,
+    initial_execution_policy,
 )
 from tests.runtime_policy_support import MutablePolicyReader
 
@@ -48,7 +49,7 @@ async def test_capability_matrix_distinguishes_configuration_and_policy() -> Non
         policy_heads=MutablePolicyReader(
             execution=ExecutionPolicy(
                 knowledge_base=KnowledgeBaseExecutionPolicy(
-                    rerank=KnowledgeRerankPolicy(enabled=False)
+                    vector_enabled=True, rerank=KnowledgeRerankPolicy(enabled=False)
                 )
             )
         ),
@@ -75,12 +76,17 @@ async def test_capability_matrix_reports_degraded_and_paused() -> None:
             }
         ),
         policy_heads=MutablePolicyReader(
+            execution=ExecutionPolicy(
+                knowledge_base=KnowledgeBaseExecutionPolicy(
+                    vector_enabled=True, rerank=KnowledgeRerankPolicy(enabled=True)
+                )
+            ),
             operations=OperationsPolicy(
                 patrol=PatrolOperationsPolicy(
                     admission=PatrolAdmissionMode.PAUSED,
                     remediation=PatrolRemediationMode.PROPOSE_ONLY,
                 )
-            )
+            ),
         ),
     )
 
@@ -166,7 +172,11 @@ async def test_capability_contract_uses_reason_keys_and_top_level_model_id() -> 
                 InferencePurpose.RERANK: resolved,
             }
         ),
-        policy_heads=MutablePolicyReader(),
+        policy_heads=MutablePolicyReader(
+            execution=ExecutionPolicy(
+                knowledge_base=KnowledgeBaseExecutionPolicy(vector_enabled=True)
+            )
+        ),
     )
 
     snapshot = await service.get_capabilities(OwnerScope.personal("user-1"))
@@ -174,3 +184,20 @@ async def test_capability_contract_uses_reason_keys_and_top_level_model_id() -> 
     assert snapshot.items["chat"].model_id == "chat-1"
     assert snapshot.items["chat"].details == {}
     assert snapshot.items["embeddings"].reason_key == "inference.errors.bindingNotConfigured"
+
+
+@pytest.mark.asyncio
+async def test_basic_policy_does_not_resolve_disabled_enhancement_bindings() -> None:
+    scope = OwnerScope.personal("user-1")
+    bindings = _bindings({InferencePurpose.CHAT: Mock(id="chat-1")})
+    service = CapabilityService(
+        bindings,
+        policy_heads=MutablePolicyReader(execution=initial_execution_policy()),
+        pdf_probe=lambda: True,
+    )
+
+    snapshot = await service.get_capabilities(scope)
+
+    assert snapshot.items["embeddings"].state is CapabilityStateValue.DISABLED
+    assert snapshot.items["rerank"].state is CapabilityStateValue.DISABLED
+    bindings.resolve.assert_awaited_once_with(InferencePurpose.CHAT, scope=scope)

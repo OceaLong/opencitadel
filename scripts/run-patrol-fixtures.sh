@@ -12,6 +12,7 @@ if [[ "$cluster_name" != opencitadel-patrol-* || "$cluster_name" =~ [Pp][Rr][Oo]
   exit 64
 fi
 created=false
+fixture_kubeconfig=""
 cleanup() {
   local exit_status=$?
   if [[ "$created" == true && "$exit_status" -ne 0 ]]; then
@@ -21,6 +22,9 @@ cleanup() {
     if ! kind delete cluster --name "$cluster_name"; then
       [[ "$exit_status" -ne 0 ]] || exit_status=1
     fi
+  fi
+  if [[ -n "$fixture_kubeconfig" && "${PATROL_KEEP_DEMO_CLUSTER:-false}" != true ]]; then
+    rm -f "$fixture_kubeconfig"
   fi
   exit "$exit_status"
 }
@@ -38,10 +42,12 @@ pull_runtime_image() {
   done
 }
 if [[ -z "${PATROL_DEMO_CONTEXT:-}" ]]; then
+  fixture_kubeconfig=$(mktemp "${TMPDIR:-/tmp}/opencitadel-patrol-kubeconfig.XXXXXX")
+  export KUBECONFIG="$fixture_kubeconfig"
   kind create cluster \
     --name "$cluster_name" \
     --image "${PATROL_KIND_NODE_IMAGE:-kindest/node:v1.35.0}" \
-    --config "$repo_dir/deploy/patrol-demo/kind-config.yaml"
+    --config "$repo_dir/demo/patrol/kind-config.yaml"
   export PATROL_DEMO_CONTEXT="kind-$cluster_name"
   created=true
   for image in nginx:1.27-alpine busybox:1.36 python:3.12-alpine; do
@@ -54,16 +60,16 @@ if [[ "$PATROL_DEMO_CONTEXT" != kind-opencitadel-patrol-* ]]; then
   exit 64
 fi
 
-"$repo_dir/deploy/patrol-demo/scripts/reset-fixture.sh"
+"$repo_dir/demo/patrol/scripts/reset-fixture.sh"
 # Validate every resource against the actual Kubernetes API before the long
 # replay. Security scanners do not detect misplaced fields in valid YAML.
-for manifest in "$repo_dir"/deploy/patrol-demo/manifests/*.yaml \
-                "$repo_dir"/deploy/patrol-demo/fixtures/*/*.yaml; do
+for manifest in "$repo_dir"/demo/patrol/manifests/*.yaml \
+                "$repo_dir"/demo/patrol/fixtures/*/*.yaml; do
   kubectl --context "$PATROL_DEMO_CONTEXT" apply --dry-run=server --validate=strict \
     -f "$manifest" > /dev/null
 done
-"$repo_dir/deploy/patrol-demo/scripts/assert-read-only.sh"
-"$repo_dir/deploy/patrol-demo/scripts/assert-actuator-write-scope.sh"
+"$repo_dir/demo/patrol/scripts/assert-read-only.sh"
+"$repo_dir/demo/patrol/scripts/assert-actuator-write-scope.sh"
 
 # Fixture 21 exercises the ops-actuator remediation flow (fail -> restart ->
 # idempotent replay -> heal -> recheck pass) and is not part of the 20-case
@@ -116,6 +122,7 @@ PY
   # narrow it to the disposable fixture namespace and register the one
   # workload this demo is allowed to write, without a second overlay.
   kubectl --context "$PATROL_DEMO_CONTEXT" -n opencitadel set env deployment/opencitadel-ops-actuator \
+    OPS_ACTUATOR_JOURNAL_NAMESPACE=opencitadel-patrol-demo \
     OPS_ACTUATOR_ALLOWED_NAMESPACES='["opencitadel-patrol-demo"]' \
     OPS_ACTUATOR_ALLOWED_WORKLOADS='{"opencitadel-patrol-demo":{"fixture-remediation-crashloop":{"kind":"deployment","min_replicas":0,"max_replicas":3}}}'
   kubectl --context "$PATROL_DEMO_CONTEXT" -n opencitadel rollout status deployment/opencitadel-ops-actuator --timeout=120s
@@ -151,12 +158,12 @@ baseline_signature() {
 baseline=$(baseline_signature)
 verified_resets=0
 verified_live_cases=0
-for fixture in "$repo_dir"/deploy/patrol-demo/fixtures/*; do
+for fixture in "$repo_dir"/demo/patrol/fixtures/*; do
   case_id=$(basename "$fixture")
   if [[ "$case_id" == 21-* && "$run_remediation_fixture" != true ]]; then
     continue
   fi
-  "$repo_dir/deploy/patrol-demo/scripts/apply-fixture.sh" "$case_id"
+  "$repo_dir/demo/patrol/scripts/apply-fixture.sh" "$case_id"
   case "$case_id" in
     01-*|02-*|03-*|04-*|05-*|06-*|07-*|08-*|09-*|20-*)
       (
@@ -182,7 +189,7 @@ for fixture in "$repo_dir"/deploy/patrol-demo/fixtures/*; do
       verified_live_cases=$((verified_live_cases + 1))
       ;;
   esac
-  "$repo_dir/deploy/patrol-demo/scripts/reset-fixture.sh"
+  "$repo_dir/demo/patrol/scripts/reset-fixture.sh"
   current=$(baseline_signature)
   if [[ "$current" != "$baseline" ]]; then
     echo "fixture $case_id did not restore the live baseline signature" >&2
@@ -190,6 +197,17 @@ for fixture in "$repo_dir"/deploy/patrol-demo/fixtures/*; do
   fi
   verified_resets=$((verified_resets + 1))
 done
+
+if [[ "$run_remediation_fixture" == true ]]; then
+  : "${KUBECONFIG:?recovery fixtures require an explicit disposable kubeconfig}"
+  (
+    cd "$repo_dir/ops-actuator"
+    ACTUATOR_K8S_INTEGRATION=1 \
+    ACTUATOR_EVIDENCE_DIR="$repo_dir/tmp/actuator-recovery-evidence" \
+    UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/opencitadel-uv-cache} \
+      uv run --no-sync pytest -q tests/integration/test_operation_recovery.py
+  )
+fi
 
 (
   cd "$repo_dir/ops-collector"

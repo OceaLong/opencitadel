@@ -1,6 +1,7 @@
 import type { components, paths } from "../generated/schema";
 
 export type RunView = components["schemas"]["RunView"];
+export type DefinitionAvailability = components["schemas"]["DefinitionAvailabilityView"];
 export type ViewPage = components["schemas"]["ViewPage"];
 export type RunViewPage = components["schemas"]["RunViewPage"];
 export type StepView = components["schemas"]["StepView"];
@@ -21,6 +22,12 @@ export type StepsQuery = NonNullable<
 >;
 export type StepQuery = NonNullable<
   paths["/api/execution-runs/{run_id}/steps/{step_id}"]["get"]["parameters"]["query"]
+>;
+export type ContextsQuery = NonNullable<
+  paths["/api/execution-runs/{run_id}/contexts"]["get"]["parameters"]["query"]
+>;
+export type ContextQuery = NonNullable<
+  paths["/api/execution-runs/{run_id}/contexts/{step_id}"]["get"]["parameters"]["query"]
 >;
 export type TimelineQuery = NonNullable<
   paths["/api/execution-runs/{run_id}/timeline"]["get"]["parameters"]["query"]

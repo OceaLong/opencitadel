@@ -28,7 +28,7 @@ from app.infrastructure.execution.sqlalchemy_orchestrator import SqlAlchemyExecu
 from app.infrastructure.external.llm.base_llm import normalize_usage
 
 
-def command(context, run_id, kind, payload=None, version=1):
+def command(context, run_id, kind, payload=None, version=1, *, lease_proof=None):
     return CommandEnvelope(
         command_id=uuid4(),
         command_type=kind,
@@ -41,6 +41,7 @@ def command(context, run_id, kind, payload=None, version=1):
         causation_id=None,
         issued_at=datetime.now(UTC),
         payload=payload or {},
+        activity_lease_proof=lease_proof,
     )
 
 
@@ -138,6 +139,7 @@ async def budget_and_late_cancel(context):
                     "claim_generation": claim.claim_generation,
                 },
                 version=2,
+                lease_proof=claim.lease_proof,
             )
         )
         assertion("formal_call_started", result.status == "accepted")

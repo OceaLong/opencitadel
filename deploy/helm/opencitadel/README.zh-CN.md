@@ -11,7 +11,7 @@ PostgreSQL/Redis 选项，以及可选的 Ops Collector/Actuator。
 - Helm 3.x
 - `opencitadel-api`、`opencitadel-execution-kernel`、`opencitadel-ui`、
   `opencitadel-sandbox` 镜像
-- 带 pgvector 的全新 PostgreSQL 数据库和 Redis
+- 内置有状态服务需要持久卷供应，或使用外部 PostgreSQL（pgvector）、Redis 与对象存储
 
 Chart 可为自包含安装创建 PostgreSQL、Redis 与 MinIO。内置 PostgreSQL 与 Redis 均为
 单副本、仅评估级；生产请使用外部/托管服务或 CloudNativePG 等 Operator，并设置
@@ -20,23 +20,36 @@ Chart 可为自包含安装创建 PostgreSQL、Redis 与 MinIO。内置 PostgreS
 
 ## 安装
 
-先创建受保护的 Values 文件，配置互不相同的密钥与镜像地址，然后执行：
+自包含安装只需提供公开 HTTPS Origin：
 
 ```bash
-helm lint deploy/helm/opencitadel --values values.production.yaml
+helm lint deploy/helm/opencitadel --set publicUrl=https://citadel.example.com
 helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
-  --values values.production.yaml \
-  --set image.api.repository=REGISTRY/opencitadel-api \
-  --set image.executionKernel.repository=REGISTRY/opencitadel-execution-kernel \
-  --set image.ui.repository=REGISTRY/opencitadel-ui \
-  --set image.sandbox.repository=REGISTRY/opencitadel-sandbox
+  --set publicUrl=https://citadel.example.com
 ```
 
-安装前设置 `env.SANDBOX_K8S_NAMESPACE: opencitadel`（或实际 Release Namespace），与沙箱 Role、配额及 NetworkPolicy 对齐。默认值 `default` 不会随 `--namespace` 自动变化。生产 COS 需要 Bucket/Region 与凭据；内置或外部 MinIO 需要私有 Bucket 和独立强凭据。配置 `env.FRONTEND_BASE_URL`、`env.OAUTH_REDIRECT_BASE` 与实际 HTTPS 域名；Chart 默认不启用 Ingress。
+PostgreSQL、Redis 与 MinIO 默认启用。服务地址、数据库名称/用户名、沙箱 Namespace 与
+出站代理地址从 Chart Values 和 Release 推导。镜像默认使用 GHCR 发布仓库及 Chart 版本。
+首次安装在按角色划分的 Secret 中生成互相独立的随机凭据，升级复用原值。NOTES 提供通过
+`kubectl` 读取初始管理员邮箱/密码的命令；备份、恢复持久数据时保留这些 Secret。
 
-只有确定使用集群内对象存储时，才设置 `minio.enabled=true` 与
-`env.STORAGE_PROVIDER=minio`。
+Migration 在新数据库中初始化基础知识库处理：文本提取与关键词检索，向量检索、重排、
+GraphRAG 和 OCR 关闭。在 **设置 → 推理** 添加 Chat Binding 即可生成 Ask/Agent 回答；
+可选模型与运行时策略开关步骤见
+[知识库教程](../../../docs/tutorials/02-internal-knowledge-base.zh-CN.md)。升级保留已有策略。
+
+Ingress 默认关闭：将公开 Origin 的 `/api` 路由到 API Service、`/` 路由到 UI，或开启
+`ingress.enabled` 并提供 Controller 的 Class/TLS 配置。未设置 `publicUrl` 时，已启用
+Ingress 的明确 `ingress.host` 可作为 Origin 来源。生产渲染拒绝缺失或非 HTTPS 的
+Origin；Chart 无法申请证书或推断真实域名。本地 Chart 体验显式设置
+`--set env.ENV=development`，并通过端口转发或已有路由访问服务。
+
+原有 `env.FRONTEND_BASE_URL`、OAuth 与 Cookie 覆盖继续有效；旧的前端 Origin 覆盖优先于 `publicUrl`。
+未显式设置 `env.STORAGE_PROVIDER` 时，已有完整 `env.COS_REGION` / `env.COS_BUCKET`
+配置继续选择 COS；不需要内置 MinIO 时关闭 `minio.enabled`。
+COS 与外部服务仍作为可选覆盖。分类完整参考见 `values.yaml` / `values.schema.json`。
+内置有状态服务简化启动；生产可用性和备份仍取决于所选存储与服务。
 
 ## 运行拓扑
 
@@ -59,13 +72,13 @@ Schema；内核只有 Append、Claim 与 Projection 所需的运行权限。
 | `executionKernel.replicas`               | `2`                                    | 执行内核副本数                                        |
 | `executionKernel.databaseUser`           | `opencitadel_execution_kernel_runtime` | 专用内核角色                                          |
 | `executionKernel.metricsPort`            | `9108`                                 | 集群内 Prometheus 端口                                |
-| `shutdown.timeoutSeconds`                | `30`                                   | 应用任务有界排空时间                                  |
-| `shutdown.terminationGracePeriodSeconds` | `45`                                   | Pod 宽限期，必须大于排空时间                          |
+| `shutdown.timeoutSeconds`                | `90`                                   | 应用任务有界排空时间                                  |
+| `shutdown.terminationGracePeriodSeconds` | `120`                                   | Pod 宽限期，必须大于排空时间                          |
 | `autoscaling.api.enabled`                | `true`                                 | API HPA                                               |
 | `autoscaling.executionKernel.enabled`    | `true`                                 | 执行内核 HPA                                          |
 | `postgresql.enabled`                     | `true`                                 | Chart 托管的全新 PostgreSQL                           |
 | `redis.enabled`                          | `true`                                 | Chart 托管 Redis                                      |
-| `minio.enabled`                          | `false`                                | 可选的 Chart 托管 MinIO                               |
+| `minio.enabled`                          | `true`                                | Chart 托管 MinIO                               |
 | `networkPolicy.enabled`                  | `true`                                 | Workload 网络隔离                                     |
 | `egressProxy.enabled`                    | `true`                                 | 沙箱出站代理（squid），沙箱 NetworkPolicy 已依赖它    |
 | `pdb.enabled`                            | `false`                                | 为 api/内核配置 PodDisruptionBudget（minAvailable:1） |
@@ -90,25 +103,29 @@ Schema；内核只有 Append、Claim 与 Projection 所需的运行权限。
   `http_requests_total` / `rate_limit_rejected_total`；必须实际抓取才会有数据。
 - `backup.enabled=true` 且 `postgresql.enabled=true` 才渲染 `<release>-postgres-backup` CronJob/PVC，按份数保留 `pg_dump`。此模板不提供 HTTP 状态端点；`opsCollector.registeredBackups` 还需独立提供 `status_url`，不能填 CronJob 名称代替 URL。PVC 转储仅覆盖数据库、仅评估级；生产应采用一致的数据库/对象存储备份。
 
-启用 `monitoring.serviceMonitor.enabled=true` 并配置强 `secrets.metricsToken` 才会通过 Bearer 认证抓取 `/api/metrics`；空 Token 返回 404。ServiceMonitor 当前只抓取 API；内核的 9108 指标 Service 需要另外配置 Prometheus 抓取。所有监控 CRD、Selector 和内核指标 Egress/Ingress 都需与实际 Prometheus 部署匹配。
+启用 `monitoring.serviceMonitor.enabled=true` 后，使用自动生成的强指标 Token（或显式 `secrets.metricsToken` 覆盖）通过 Bearer 认证抓取 `/api/metrics`；空 Token 返回 404。ServiceMonitor 当前只抓取 API；内核的 9108 指标 Service 需要另外配置 Prometheus 抓取。所有监控 CRD、Selector 和内核指标 Egress/Ingress 都需与实际 Prometheus 部署匹配。
 
-## 必填密钥
+## 持久密钥与覆盖
 
-必须覆盖所有占位值，尤其以下值必须互不相同：
+空值在首次安装时生成凭据，升级时复用已有 Secret，包括数据库各角色、Redis、MinIO、
+`secrets.apiKeySecret`、`secrets.auditSigningKey`、`secrets.jwtSecret`、
+`secrets.sessionSecret`、`secrets.databaseAuthorizationSigningSecret`、
+`secrets.publicCursorSecret`、`secrets.bootstrapAdminPassword`、
+`secrets.sandboxTokenSeed`，以及启用 ServiceMonitor 时的指标凭据。首次启用
+Collector/Actuator 时生成各自 Token。
+显式 `secrets.*`、`opsCollector.token` / `opsActuator.token` 覆盖继续优先。
 
-- `secrets.postgresAdminPassword`
-- `secrets.postgresMigrationPassword`
-- `secrets.postgresPassword`
-- `secrets.executionKernelPostgresPassword`
-- `secrets.redisPassword`
-- `secrets.apiKeySecret`、`secrets.auditSigningKey`、`secrets.jwtSecret`、
-  `secrets.sessionSecret`
-- `secrets.bootstrapAdminPassword`
-- `secrets.sandboxTokenSeed`
-- `opsCollector.token` / `opsActuator.token` （启用时必填，至少 32 字符）
+使用 Secret Manager 时，将 `existingSecrets.application`、`postgresBootstrap`、
+`migration`、`executionKernel`、`opsCollector` 或 `opsActuator` 设置为提前创建的 Secret
+名称，Key 使用对应生成模板中的环境变量名。Chart 不再生成选中的 Secret 资源。
+保留角色隔离：PostgreSQL 管理员凭据只属于 Bootstrap 与可选备份，Migration 凭据不得
+进入运行时 API/Kernel 容器。
 
-使用批准的 Secret Manager，不要提交生产 Values 文件。PostgreSQL 管理员凭证用于
-Bootstrap 及可选的数据库备份 Job，不会注入 API 或执行内核容器。
+升级时若预期 Secret 或必需 Key 缺失，会拒绝生成替代密钥。旧 Release 没有独立数据库签名
+Key 时，继续保留原 `SESSION_SECRET` 回退。因此无集群访问的 `helm template --is-upgrade`
+需要显式凭据；实际升级通过 Kubernetes Lookup 读取已有值。首次安装渲染清单包含 Secret，
+应保护输出文件且不得提交。使用 Secret Manager 的轮换流程，并按
+[部署指南](../../../docs/operations/deployment.zh-CN.md)保留加密/签名 Key Ring。
 
 ## 安全要求
 
@@ -121,7 +138,7 @@ Bootstrap 及可选的数据库备份 Job，不会注入 API 或执行内核容�
   `http://<release>-egress-proxy:3128`。关闭它会使沙箱除 DNS 外全部 fail-closed，
   如需外部代理，除覆盖 `env.SANDBOX_*` 地址外，还必须让 NetworkPolicy 允许该精确代理目标。当前 Squid 配置仅使用地址黑名单与 Safe_ports；`egressProxy.allowedDomains` 预留且未生效。
 - Collector 保持只读；Actuator 独立部署并使用明确白名单。
-- 配置公网 HTTPS 前端/OAuth URL 与 `env.COOKIE_SECURE=true`。
+- 提供真实 HTTPS `publicUrl`；OAuth 与安全 Cookie 默认值从它推导。
 - 精确设置可信 Proxy CIDR、出站端口与私网主机白名单。
 - 任何运行时数据库角色都不得拥有 `SUPERUSER` 或 `BYPASSRLS`。
 - 只部署到全新数据库；本 Chart 不包含旧 Catalog 转换路径。
@@ -148,7 +165,7 @@ kubectl -n opencitadel rollout status deployment/opencitadel-execution-kernel
 kubectl -n opencitadel scale deployment/opencitadel-execution-kernel --replicas=4
 
 helm template opencitadel deploy/helm/opencitadel \
-  --namespace opencitadel --values values.production.yaml >/dev/null
+  --namespace opencitadel --set publicUrl=https://citadel.example.com >/dev/null
 kubectl -n opencitadel get networkpolicy
 ```
 

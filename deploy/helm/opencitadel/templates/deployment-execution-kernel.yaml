@@ -1,3 +1,4 @@
+{{- $env := include "opencitadel.deploymentEnv" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,11 +70,9 @@ spec:
             {{- toYaml .Values.resources.executionKernel | nindent 12 }}
           envFrom:
             - secretRef:
-                name: {{ include "opencitadel.fullname" . }}-secret
+                name: {{ include "opencitadel.secretName" (dict "root" . "group" "application") }}
           env:
-            - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
-              value: {{ .Values.shutdown.timeoutSeconds | quote }}
-            {{- range $key, $value := .Values.env }}
+            {{- range $key, $value := $env }}
             {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") (ne $key "SANDBOX_HTTP_PROXY") (ne $key "SANDBOX_HTTPS_PROXY") (ne $key "SANDBOX_CHROME_ARGS") (ne $key "SANDBOX_IMAGE") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -94,7 +93,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-execution-kernel-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "executionKernel") }}
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_HOST
               value: {{ include "opencitadel.postgresHost" . | quote }}

@@ -46,6 +46,9 @@ def main():
     ):
         setattr(cls, method, observe(getattr(cls, method), kind, log))
     install(control, log)
+    from phase1_browser_runtime import install as install_phase1_browser
+
+    install_phase1_browser(control, log)
     from app.execution_kernel_main import main as kernel_main
 
     asyncio.run(kernel_main())

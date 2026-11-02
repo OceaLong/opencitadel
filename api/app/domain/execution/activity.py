@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -16,7 +16,11 @@ from app.domain.execution.commands import (
     require_non_empty,
 )
 from app.domain.execution.context import RunExecutionContext
+from app.domain.execution.definition import ImplementationVersion
 from app.domain.models.scope import OwnerScopeType
+
+if TYPE_CHECKING:
+    from app.domain.execution.commands import ActivityLeaseProof
 
 
 class ActivityRequest(BaseModel):
@@ -31,6 +35,8 @@ class ActivityRequest(BaseModel):
     input_ref: str | None
     input_digest: str
     input_payload: dict[str, JsonValue] = Field(default_factory=dict)
+    definition_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    handler_version: ImplementationVersion | None = None
 
     @field_validator(
         "activity_type",
@@ -71,15 +77,48 @@ class ActivityClaim(BaseModel):
 
     request: ActivityRequest
     claim_generation: int = Field(ge=1)
+    worker_id: str = Field(min_length=1)
+    server_now: datetime
+    lease_deadline: datetime
     owner_user_id: str | None
     team_id: str | None
     recovered_after_call_started: bool = False
+
+    @field_validator("server_now", "lease_deadline")
+    @classmethod
+    def _utc_lease_time(cls, value: datetime) -> datetime:
+        return normalize_utc(value)
+
+    @property
+    def lease_proof(self) -> ActivityLeaseProof:
+        from app.domain.execution.commands import ActivityLeaseProof
+
+        return ActivityLeaseProof(
+            activity_id=self.request.activity_id,
+            request_generation=self.request.generation,
+            claim_generation=self.claim_generation,
+            worker_id=self.worker_id,
+        )
 
     @model_validator(mode="after")
     def _exactly_one_owner_scope(self) -> ActivityClaim:
         if (self.owner_user_id is None) == (self.team_id is None):
             raise ValueError("exactly one owner scope is required")
         return self
+
+
+class ActivityLeaseConfirmation(BaseModel):
+    """A server-clock lease confirmation; receipt time alone never renews a lease."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    server_now: datetime
+    lease_deadline: datetime
+
+    @field_validator("server_now", "lease_deadline")
+    @classmethod
+    def _utc_lease_time(cls, value: datetime) -> datetime:
+        return normalize_utc(value)
 
 
 class ActivityContext(BaseModel):
@@ -97,6 +136,7 @@ class ActivityContext(BaseModel):
         default=None,
         exclude=True,
     )
+    require_active_lease: Callable[[], None] | None = Field(default=None, exclude=True)
     record_citations: Callable[[list], Awaitable[None]] | None = Field(default=None, exclude=True)
     report_progress: Callable[[dict[str, JsonValue]], Awaitable[bool]] | None = Field(
         default=None, exclude=True
@@ -209,6 +249,7 @@ __all__ = [
     "ActivityClaim",
     "ActivityContext",
     "ActivityHandler",
+    "ActivityLeaseConfirmation",
     "ActivityOutcome",
     "ActivityRequest",
 ]

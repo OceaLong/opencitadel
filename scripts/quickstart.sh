@@ -1,260 +1,105 @@
 #!/usr/bin/env bash
-# OpenCitadel quickstart — get a working stack in ~10 minutes (BYO API key path).
-# Pass --demo to additionally bring up the Ops Patrol demo profiles
-# (opencitadel-ops-collector + ops-console) and seed a runnable demo Pack.
+# Start the local Compose stack; --demo additionally seeds the Ops demonstration.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=configure-local.sh
+source "$ROOT/scripts/configure-local.sh"
 
 DEMO_MODE=0
-for arg in "$@"; do
-  case "$arg" in
+for argument in "$@"; do
+  case "$argument" in
     --demo) DEMO_MODE=1 ;;
+    *) printf 'ERROR: Unknown option: %s\n' "$argument" >&2; exit 1 ;;
   esac
 done
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-info() { echo -e "${GREEN}==>${NC} $*"; }
-warn() { echo -e "${YELLOW}==>${NC} $*"; }
-err()  { echo -e "${RED}==>${NC} $*" >&2; }
-
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    err "Missing required command: $1"
-    exit 1
-  fi
+command -v docker >/dev/null 2>&1 || { printf '%s\n' 'ERROR: Docker is required.' >&2; exit 1; }
+docker compose version >/dev/null 2>&1 || { printf '%s\n' 'ERROR: Docker Compose v2 is required.' >&2; exit 1; }
+docker info >/dev/null 2>&1 || {
+  printf '%s\n' 'ERROR: Docker daemon is unavailable. Start Docker Desktop or Docker Engine, then retry make quickstart.' >&2
+  exit 1
 }
 
-wait_for_service_health() {
-  local service="$1"
-  for _ in $(seq 1 60); do
-    local container
-    local status
-    container="$("${COMPOSE_CMD[@]}" ps -q "$service" 2>/dev/null || true)"
-    [[ -z "$container" ]] && sleep 5 && continue
-    status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")"
-    [[ "$status" == "healthy" ]] && return 0
-    sleep 5
-  done
-  return 1
-}
-
-require_cmd docker
-docker compose version >/dev/null 2>&1 || { err "Docker Compose v2 required"; exit 1; }
-
-if [[ ! -f .env ]]; then
-  info "Creating .env from .env.example ..."
-  cp .env.example .env
-
-  # Generate secrets
-  if command -v openssl >/dev/null 2>&1; then
-    API_SECRET="$(openssl rand -hex 32)"
-    JWT_SECRET="$(openssl rand -hex 32)"
-    SESSION_SECRET="$(openssl rand -hex 32)"
-    METRICS_TOKEN="$(openssl rand -hex 32)"
-    sed -i.bak \
-      -e "s|^API_KEY_SECRET=.*|API_KEY_SECRET=${API_SECRET}|" \
-      -e "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" \
-      -e "s|^SESSION_SECRET=.*|SESSION_SECRET=${SESSION_SECRET}|" \
-      -e "s|^METRICS_TOKEN=.*|METRICS_TOKEN=${METRICS_TOKEN}|" \
-      .env
-    rm -f .env.bak
-  fi
-
-  # Sensible defaults for local HTTP quickstart
-  if grep -q '^COOKIE_SECURE=' .env; then
-    sed -i.bak 's|^COOKIE_SECURE=.*|COOKIE_SECURE=false|' .env
-    rm -f .env.bak
-  fi
-  if grep -q '^FRONTEND_BASE_URL=' .env; then
-    sed -i.bak 's|^FRONTEND_BASE_URL=.*|FRONTEND_BASE_URL=http://localhost:8088|' .env
-    rm -f .env.bak
-  fi
-  if grep -q '^OAUTH_REDIRECT_BASE=' .env; then
-    sed -i.bak 's|^OAUTH_REDIRECT_BASE=.*|OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth|' .env
-    rm -f .env.bak
-  fi
-  if grep -q '^ENV=' .env; then
-    sed -i.bak 's|^ENV=.*|ENV=development|' .env
-    rm -f .env.bak
-  fi
-  # Local-first defaults: bundled MinIO for file uploads (override for cloud COS)
-  if grep -q '^COMPOSE_PROFILES=' .env; then
-    if [[ "$DEMO_MODE" -eq 1 ]]; then
-      sed -i.bak 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=local,patrol,demo|' .env
-    else
-      sed -i.bak 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=local|' .env
-    fi
-    rm -f .env.bak
-  fi
-  if grep -q '^STORAGE_PROVIDER=' .env; then
-    sed -i.bak 's|^STORAGE_PROVIDER=.*|STORAGE_PROVIDER=minio|' .env
-    rm -f .env.bak
-  fi
-
-  warn "Edit .env and set BOOTSTRAP_ADMIN_PASSWORD before continuing."
-  warn "After first login, configure an endpoint, model, and chat binding in Settings → Inference."
-  warn "Quickstart defaults: COMPOSE_PROFILES=local + STORAGE_PROVIDER=minio (see .env for cloud COS)."
-  if [[ "$DEMO_MODE" -eq 1 ]]; then
-    warn "To auto-register demo inference, set DEMO_INFERENCE_BASE_URL, DEMO_INFERENCE_CREDENTIAL,"
-    warn "DEMO_INFERENCE_MODEL, and DEMO_INFERENCE_PROVIDER in .env now —"
-    warn "this pause is the only time before containers start (compose reads .env at startup)."
-  fi
-  if [[ -n "${QUICKSTART_NONINTERACTIVE:-}" ]] || [[ ! -t 0 ]]; then
-    info "Non-interactive mode — continuing without prompt."
-  else
-    read -r -p "Press Enter when .env is ready (or Ctrl+C to abort) ..."
-  fi
+configure_local_env "$ROOT" "$DEMO_MODE"
+if [[ "$CONFIG_CREATED" -eq 1 ]]; then
+  printf '%s\n' 'Created private .env with persistent installation credentials.'
 else
-  info ".env already exists — skipping generation"
-  # Idempotent merge, not overwrite: a pre-existing .env may already carry a
-  # customized COMPOSE_PROFILES (e.g. empty, for the cloud/COS path). Running
-  # with --demo against that .env must still land local/patrol/demo in the
-  # *persisted* file — not just in this run's in-memory $PROFILE below — so
-  # that a later bare `docker compose ...` (e.g. tutorial step 4's
-  # `docker compose stop ops-console`, which has no --profile flags of its
-  # own and relies entirely on .env) sees the demo services too.
-  if [[ "$DEMO_MODE" -eq 1 ]] && grep -q '^COMPOSE_PROFILES=' .env; then
-    _existing_profiles="$(grep '^COMPOSE_PROFILES=' .env | head -n1 | cut -d'=' -f2-)"
-    _merged_profiles="$_existing_profiles"
-    IFS=',' read -ra _existing_profile_list <<< "$_existing_profiles"
-    for _want_profile in local patrol demo; do
-      _profile_found=0
-      for _have_profile in "${_existing_profile_list[@]:-}"; do
-        _have_profile="$(echo "$_have_profile" | xargs)"
-        if [[ "$_have_profile" == "$_want_profile" ]]; then
-          _profile_found=1
-          break
-        fi
-      done
-      if [[ "$_profile_found" -eq 0 ]]; then
-        _merged_profiles="${_merged_profiles:+$_merged_profiles,}$_want_profile"
-      fi
-    done
-    if [[ "$_merged_profiles" != "$_existing_profiles" ]]; then
-      sed -i.bak "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=${_merged_profiles}|" .env
-      rm -f .env.bak
-      info "Merged COMPOSE_PROFILES=${_merged_profiles} into existing .env for --demo (was '${_existing_profiles}')."
-    fi
-  fi
+  printf 'Using %s; stored installation credentials are preserved.\n' "$CONFIG_FILE"
 fi
+configure_compose_interpolation
+configure_local_site
+configure_docker_socket_group
 
-if [[ -z "${BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
-  # Intentionally NOT `set -a` (export): exporting re-parses every .env value
-  # as bash syntax and re-exposes it to child processes, including the
-  # `docker compose` invocations below. bash's own quote handling silently
-  # strips embedded double quotes from values like
-  # OPS_COLLECTOR_ALLOWED_NAMESPACES=["opencitadel"] (JSON) when exported
-  # this way, and an exported shell variable then outranks .env in Compose's
-  # own (correct) interpolation, feeding the Collector invalid JSON and
-  # crash-looping it. A plain, unexported `source` still lets this script
-  # read the values below via `${VAR}`, while leaving `docker compose` free
-  # to read `.env` itself with its own dotenv parser.
-  # shellcheck disable=SC1091
-  source .env
-fi
-
-if [[ -z "${BOOTSTRAP_ADMIN_PASSWORD:-}" ]]; then
-  err "BOOTSTRAP_ADMIN_PASSWORD must be set in .env"
-  exit 1
-fi
-
-PROFILE="${COMPOSE_PROFILES:-}"
-if [[ "$DEMO_MODE" -eq 1 ]]; then
-  # Merge in the demo profiles without discarding whatever the operator's
-  # own .env already sets (COMPOSE_PROFILES may be empty for the cloud/COS
-  # path, or already customized) — patrol/demo just need to be present.
-  PROFILE="${PROFILE:+$PROFILE,}patrol,demo"
-fi
-
-_env_compose_project="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | head -n1)"
-COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-${_env_compose_project:-opencitadel}}"
+COMPOSE_PROJECT="$(config_value COMPOSE_PROJECT_NAME)"
+COMPOSE_PROJECT="${COMPOSE_PROJECT:-opencitadel}"
 if [[ ! "$COMPOSE_PROJECT" =~ ^[a-z0-9][a-z0-9-]{2,47}$ ]]; then
-  err "COMPOSE_PROJECT_NAME must match ^[a-z0-9][a-z0-9-]{2,47}$"
+  printf '%s\n' 'ERROR: COMPOSE_PROJECT_NAME must match ^[a-z0-9][a-z0-9-]{2,47}$' >&2
   exit 1
 fi
-_env_sandbox_network="$(sed -n 's/^SANDBOX_NETWORK=//p' .env | head -n1)"
-SANDBOX_NETWORK="${SANDBOX_NETWORK:-${_env_sandbox_network:-${COMPOSE_PROJECT}_opencitadel-sandbox-network}}"
+SANDBOX_NETWORK="$(config_value SANDBOX_NETWORK)"
+SANDBOX_NETWORK="${SANDBOX_NETWORK:-${COMPOSE_PROJECT}_opencitadel-sandbox-network}"
 export SANDBOX_NETWORK
 
-COMPOSE_CMD=(docker compose --project-name "$COMPOSE_PROJECT")
-if [[ -n "$PROFILE" ]]; then
-  info "Using COMPOSE_PROFILES=${PROFILE}$( [[ "$DEMO_MODE" -eq 1 ]] && echo " (--demo)" )"
-  # Split on commas into one `--profile X` flag each. A single profile (the
-  # common, pre-existing case) produces the exact same invocation as before
-  # this option existed; docker compose tolerates a profile listed more than
-  # once (harmless), so no dedup is needed. Avoids `declare -A`, which the
-  # bash 3.2 shipped as /bin/bash on macOS does not support.
-  IFS=',' read -ra _profile_list <<< "$PROFILE"
-  for p in "${_profile_list[@]}"; do
-    p="$(echo "$p" | xargs)"
-    [[ -z "$p" ]] && continue
-    COMPOSE_CMD+=(--profile "$p")
+PROFILE="$(config_value COMPOSE_PROFILES)"
+if [[ "$DEMO_MODE" -eq 1 ]]; then
+  for wanted in local patrol demo; do
+    case ",$PROFILE," in *",$wanted,"*) ;; *) PROFILE="${PROFILE:+$PROFILE,}$wanted" ;; esac
   done
 fi
-
-info "Building sandbox image (required for dynamic Agent tool execution) ..."
-"${COMPOSE_CMD[@]}" build opencitadel-sandbox
-
-info "Building and starting OpenCitadel (this may take several minutes on first run) ..."
-"${COMPOSE_CMD[@]}" up -d --build
-
-info "Waiting for API health ..."
-for _ in $(seq 1 60); do
-  if curl -sf "http://localhost:${NGINX_PORT:-8088}/api/status" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 5
+COMPOSE_CMD=(docker compose --project-name "$COMPOSE_PROJECT")
+COMPOSE_CMD+=(--env-file "$CONFIG_FILE")
+IFS=',' read -ra profiles <<< "$PROFILE"
+for profile in "${profiles[@]:-}"; do
+  profile="${profile// /}"
+  [[ -z "$profile" ]] || COMPOSE_CMD+=(--profile "$profile")
 done
 
-if [[ "$DEMO_MODE" -eq 1 ]]; then
-  info "Waiting for the Ops Patrol demo containers (ops-collector, ops-console) ..."
-  wait_for_service_health opencitadel-ops-collector \
-    || warn "opencitadel-ops-collector did not report healthy in time; seeding below may fail."
-  wait_for_service_health ops-console \
-    || warn "opencitadel-ops-console did not report healthy in time; seeding below may fail."
+WAIT_TIMEOUT="$(config_value QUICKSTART_WAIT_TIMEOUT_SECONDS)"
+WAIT_TIMEOUT="${WAIT_TIMEOUT:-300}"
+if [[ ! "$WAIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  printf '%s\n' 'ERROR: QUICKSTART_WAIT_TIMEOUT_SECONDS must be a positive integer.' >&2
+  exit 1
+fi
 
-  info "Seeding Ops Patrol demo data (feature flag, Collector policies, demo Pack) ..."
-  if "${COMPOSE_CMD[@]}" exec -T opencitadel-api python -m app.seed_demo; then
-    info "Demo data seeded."
-  else
-    err "Demo data seeding failed — see the output above for details. Retry with:"
-    err "  ${COMPOSE_CMD[*]} exec -T opencitadel-api python -m app.seed_demo"
+diagnostics() {
+  printf '%s\n' 'Startup did not reach readiness. Owned service state and recent logs:' >&2
+  "${COMPOSE_CMD[@]}" ps --all >&2 || true
+  "${COMPOSE_CMD[@]}" logs --tail 80 opencitadel-migrate opencitadel-api \
+    opencitadel-execution-kernel opencitadel-nginx >&2 || true
+}
+
+printf '%s\n' 'Building the dynamic sandbox image ...'
+if ! "${COMPOSE_CMD[@]}" build opencitadel-sandbox; then
+  diagnostics
+  exit 1
+fi
+printf '%s\n' 'Building the stack and waiting for service readiness ...'
+if ! "${COMPOSE_CMD[@]}" up -d --build --wait --wait-timeout "$WAIT_TIMEOUT"; then
+  diagnostics
+  if [[ -n "$CONFIG_GENERATED_ADMIN_PASSWORD" ]]; then
+    printf '%s\n' 'Generated login credentials remain saved in .env; retrying preserves them.' >&2
+  fi
+  exit 1
+fi
+
+if [[ "$DEMO_MODE" -eq 1 ]]; then
+  printf '%s\n' 'Seeding the Ops demonstration ...'
+  if ! "${COMPOSE_CMD[@]}" exec -T opencitadel-api python -m app.seed_demo; then
+    printf '%s\n' 'ERROR: Demo seeding failed; the stack is running. Retry bash scripts/quickstart.sh --demo.' >&2
+    exit 1
   fi
 fi
 
-PORT="${NGINX_PORT:-8088}"
-echo ""
-info "OpenCitadel is starting."
-echo ""
-echo "  URL:      http://localhost:${PORT}"
-echo "  Login:    ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
-echo "  Password: (your BOOTSTRAP_ADMIN_PASSWORD from .env)"
-echo ""
-echo "Next steps:"
-if [[ "$DEMO_MODE" -eq 1 ]]; then
-  echo "  1. Log in, open 'Ops Patrol', and run the seeded 'Demo Governance Patrol' Pack"
-  echo "  2. Open http://localhost:${PORT}/admin/governance for the governance dashboard"
-  echo "  3. To manufacture a Finding: docker compose stop ops-console, then Run now again"
-  echo "     (docker compose start ops-console restores it before the next demo)"
-  echo ""
-  echo "See the 'python -m app.seed_demo' output above for the full walkthrough, including"
-  echo "why the demo Finding comes from the demo-console-health check specifically."
+config_consume_initial_login
+printf '\nOpenCitadel is ready.\n  URL: %s\n' "$FRONTEND_BASE_URL"
+ADMIN_EMAIL="$(config_value BOOTSTRAP_ADMIN_EMAIL)"
+if [[ -n "$ADMIN_EMAIL" ]]; then printf '  Login: %s\n' "$ADMIN_EMAIL"; fi
+if [[ -n "$CONFIG_INITIAL_ADMIN_PASSWORD" ]]; then
+  printf '  First administrator password: %s\n' "$CONFIG_INITIAL_ADMIN_PASSWORD"
 else
-  echo "  1. Log in and open Settings → Inference"
-  echo "  2. Add an endpoint and model, then bind the chat purpose"
-  echo "  3. Start a new Agent session from the home page"
+  printf '  Password: stored BOOTSTRAP_ADMIN_PASSWORD in %s (or your configured identity provider).\n' "$CONFIG_FILE"
 fi
-echo ""
-echo "For cloud object storage instead of bundled MinIO:"
-echo "  Set COMPOSE_PROFILES= (empty) and STORAGE_PROVIDER=cos + COS_* in .env, then re-run"
-echo ""
-echo "For fully offline inference (Ollama on host):"
-echo "  Keep COMPOSE_PROFILES=local STORAGE_PROVIDER=minio; install Ollama and configure Settings → Inference"
-echo ""
-info "Logs: ${COMPOSE_CMD[*]} logs -f opencitadel-api opencitadel-execution-kernel"
+printf '%s\n' 'After login, add an endpoint, model and chat binding in Settings → Inference.'
+printf '%s\n' 'Optional deployment settings: deploy/config/.env.reference'

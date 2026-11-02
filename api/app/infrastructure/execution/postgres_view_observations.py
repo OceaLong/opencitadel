@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from sqlalchemy import Boolean, cast, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.application.execution import activity_types
 from app.application.execution.view_facts import (
     ProjectionFact,
     attempt_key,
@@ -159,6 +160,28 @@ async def observe(
                     value = getattr(request, key)
                     if value is not None:
                         patch[key] = str(value) if isinstance(value, UUID) else value
+                if request.kind == "activity" and "context" not in patch:
+                    # Attempt replacement must keep the context stage. Read only
+                    # the formal request type; never project its private input.
+                    requested_type = await session.scalar(
+                        select(ExecutionEventORM.public_payload["activity_type"].astext)
+                        .where(
+                            ExecutionEventORM.stream_type == "run",
+                            ExecutionEventORM.stream_id == str(run_id),
+                            ExecutionEventORM.owner_scope_key
+                            == (f"team:{team_id}" if team_id else f"user:{owner_user_id}"),
+                            ExecutionEventORM.event_type == "ActivityRequested",
+                            ExecutionEventORM.public_payload["activity_id"].astext
+                            == patch["activity_id"],
+                        )
+                        .limit(1)
+                    )
+                    stage = {
+                        activity_types.CONTEXT_PREPARE: "prepare",
+                        activity_types.CONTEXT_COMPACT: "compact",
+                    }.get(requested_type)
+                    if stage is not None:
+                        patch["context"] = {"stage": stage}
             if (
                 request is not None
                 and request.step_id == request_key(patch["activity_id"])
@@ -394,6 +417,11 @@ async def observe_progress(session, record):
     creation = PostgresEventStore._to_stored(created)
     PostgresEventStore._verify_position_read((creation,))
     aggregate = RunAggregate()
+    # Verify the original bytes first, then use the same schema adaptation as
+    # the normal formal projector before folding the immutable origin.
+    (creation,) = PostgresEventStore(
+        session, event_registries={"run": aggregate.event_registry}
+    )._upcast((creation,))
     state = aggregate.evolve(aggregate.initial_state(str(record.run_id)), creation)
     # Reuses the same formal source identity when the normal projector catches
     # up; no invented status and no second ordering authority.

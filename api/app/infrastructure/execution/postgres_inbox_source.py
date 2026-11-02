@@ -2,10 +2,11 @@
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.execution.commands import CommandEnvelope, normalize_utc
+from app.domain.execution.definition import SchemaCompatibility
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.execution.models import ExecutionCommandInboxORM
 from app.infrastructure.security.db_authorization import configure_session_authorization
@@ -18,12 +19,14 @@ class PostgresInboxSource:
         session_factory: async_sessionmaker[AsyncSession],
         authorization: AuthorizationContext,
         claim_ttl: timedelta = timedelta(seconds=30),
+        supported_schemas: tuple[SchemaCompatibility, ...] | None = None,
     ) -> None:
         if claim_ttl <= timedelta(0):
             raise ValueError("claim_ttl must be positive")
         self._session_factory = session_factory
         self._authorization = authorization
         self._claim_ttl = claim_ttl
+        self._supported_schemas = supported_schemas
 
     async def load_pending(
         self,
@@ -34,6 +37,20 @@ class PostgresInboxSource:
         if limit <= 0:
             raise ValueError("limit must be positive")
         resolved_now = normalize_utc(now)
+        compatibility = ()
+        if self._supported_schemas is not None:
+            compatibility = (
+                or_(
+                    false(),
+                    *(
+                        (ExecutionCommandInboxORM.command_type == schema.name)
+                        & ExecutionCommandInboxORM.command_schema_version.between(
+                            schema.minimum, schema.maximum
+                        )
+                        for schema in self._supported_schemas
+                    ),
+                ),
+            )
         async with self._session_factory() as session:
             await configure_session_authorization(session, self._authorization)
             # SKIP LOCKED lets horizontally scaled kernel replicas claim disjoint
@@ -44,11 +61,12 @@ class PostgresInboxSource:
                     await session.scalars(
                         select(ExecutionCommandInboxORM)
                         .where(
+                            *compatibility,
                             or_(
                                 ExecutionCommandInboxORM.status == "received",
                                 (ExecutionCommandInboxORM.status == "processing")
                                 & (ExecutionCommandInboxORM.claim_deadline < resolved_now),
-                            )
+                            ),
                         )
                         .order_by(ExecutionCommandInboxORM.received_at)
                         .limit(limit)
@@ -87,6 +105,7 @@ class PostgresInboxSource:
             issued_at=row.issued_at,
             payload=row.payload,
             payload_digest=row.payload_digest,
+            activity_lease_proof=row.activity_lease_proof,
         )
 
 

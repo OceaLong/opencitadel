@@ -2,15 +2,15 @@
 
 # Documentation Inventory
 
-This inventory covers 116 maintained Markdown files in the current workspace (53 bilingual pairs and 10 single-language files), plus 13 historical specs. Maintained references follow current implementation; archives provide historical context and do not establish current behavior, versions or acceptance status. Update this file when adding, moving or deprecating documentation.
+This inventory covers 116 maintained Markdown files in the current workspace (53 bilingual pairs and 10 single-language files). Maintained references follow current implementation. Update this file when adding, moving or deprecating documentation.
 
-Dependency/cache files, nested worktrees, temporary artifacts and local execution records are outside this inventory (`node_modules/`, `.venv/`, `.pytest_cache/`, `.worktrees/`, `tmp/`, `.superpowers/`, `docs/superpowers/`). The `specs/` files are listed separately as historical archives, not promoted to maintained references.
+Dependency/cache files, nested worktrees, temporary artifacts and local execution records are outside this inventory (`node_modules/`, `.venv/`, `.pytest_cache/`, `.worktrees/`, `tmp/`, `.superpowers/`, `docs/superpowers/`). Retired design plans remain available in Git history.
 
 **Legend**
 
 | Column     | Meaning                                                                                                                                                                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Authority  | `primary` = maintained reference (implementation is authoritative); `index` = navigation; `module` = component entry; `tutorial` = walkthrough; `governance` = OSS policy; `internal` = operator/developer contract; `fixture` = test input; `archive` = historical record |
+| Authority  | `primary` = maintained reference (implementation is authoritative); `index` = navigation; `module` = component entry; `tutorial` = walkthrough; `governance` = OSS policy; `internal` = operator/developer contract; `fixture` = test input record |
 | Bilingual  | `paired` = two existing language files; `single` = one file only                                                                                                                                                                                                           |
 | Diagrams   | `svg/png` = technical asset references under `docs/assets/diagrams/`; `mermaid` = actual Mermaid blocks; `none` = no technical diagram. README demo screenshots do not count                                                                                               |
 | Stale risk | `low` / `medium` / `high`; historical archives and incomplete AC21 capacity references retain `high`                                                                                                                                                                       |
@@ -57,7 +57,7 @@ Dependency/cache files, nested worktrees, temporary artifacts and local executio
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------- | --------- | -------- | ----------------------------------------------------------------------------- | ---------- |
 | [docs/operations/deployment.md](operations/deployment.md)                                                 | Production deployment, probes, bounded drain      | primary   | paired    | none     | `docker-compose.yml`, `deploy/helm/opencitadel/`, `scripts/backup_tool.py`    | low        |
 | [docs/operations/ops-patrol.md](operations/ops-patrol.md)                                                 | Patrol enablement, deployment, evidence, recovery | primary   | paired    | none     | `ops-collector/`, `ops-actuator/`, `deploy/helm/`                             | low        |
-| [docs/operations/https-domain-setup.md](operations/https-domain-setup.md)                                 | HTTPS & domain                                    | primary   | paired    | none     | `nginx/nginx.conf`, `deploy/helm/opencitadel/`                                | low        |
+| [docs/operations/https-domain-setup.md](operations/https-domain-setup.md)                                 | HTTPS & domain                                    | primary   | paired    | none     | `deploy/nginx/nginx.conf`, `deploy/helm/opencitadel/`                                | low        |
 | [docs/tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md)                         | Quick BYO key onboarding                          | tutorial  | paired    | none     | `scripts/quickstart.sh`                                                       | low        |
 | [docs/tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md)                   | Knowledge base RAG                                | tutorial  | paired    | none     | `api/app/interfaces/endpoints/knowledge_base_routes.py`                       | low        |
 | [docs/tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md)                                 | MCP setup                                         | tutorial  | paired    | none     | `api/app/interfaces/endpoints/integration_routes.py`                          | low        |
@@ -74,11 +74,11 @@ Dependency/cache files, nested worktrees, temporary artifacts and local executio
 | [api/README.md](../api/README.md)                                         | Backend routes, SSE, dev                               | module    | paired    | svg/png  | `api/app/interfaces/endpoints/`, `api/app/composition/`                                                 | low        |
 | [ui/README.md](../ui/README.md)                                           | Frontend stack, routes                                 | module    | paired    | svg/png  | `ui/src/app/`                                                                                           | low        |
 | [sandbox/README.md](../sandbox/README.md)                                 | Sandbox service                                        | module    | paired    | none     | `sandbox/`                                                                                              | low        |
-| [nginx/README.md](../nginx/README.md)                                     | Gateway, SSE/WS, upload limits                         | module    | paired    | svg/png  | `nginx/nginx.conf`                                                                                      | low        |
+| [deploy/nginx/README.md](../deploy/nginx/README.md)                                     | Gateway, SSE/WS, upload limits                         | module    | paired    | svg/png  | `deploy/nginx/nginx.conf`                                                                                      | low        |
 | [ops-collector/README.md](../ops-collector/README.md)                     | Fixed read-only probes and configuration               | module    | paired    | none     | `ops-collector/src/`                                                                                    | low        |
 | [ops-actuator/README.md](../ops-actuator/README.md)                       | Fixed patch-only write probes and configuration        | module    | paired    | svg/png  | `ops-actuator/src/`                                                                                     | low        |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install                                           | module    | paired    | none     | `deploy/helm/opencitadel/`                                                                              | low        |
-| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md)           | Disposable Patrol fault lab                            | module    | paired    | none     | `scripts/run-patrol-fixtures.sh`                                                                        | low        |
+| [demo/patrol/README.md](../demo/patrol/README.md)           | Disposable Patrol fault lab                            | module    | paired    | none     | `scripts/run-patrol-fixtures.sh`                                                                        | low        |
 | [demo/ops-console/README.md](../demo/ops-console/README.md)               | Web Operator demo backend                              | module    | paired    | none     | `demo/ops-console/`                                                                                     | low        |
 | [e2e/README.md](../e2e/README.md)                                         | Deterministic full-stack acceptance, evidence, cleanup | module    | paired    | none     | `e2e/playwright.config.ts`, `scripts/acceptance/runner.py`, `contracts/acceptance-evidence.schema.json` | high       |
 | [scripts/README.md](../scripts/README.md)                                 | quickstart, documentation checks, acceptance runner    | module    | paired    | none     | `scripts/`                                                                                              | medium     |
@@ -108,29 +108,9 @@ Dependency/cache files, nested worktrees, temporary artifacts and local executio
 | [api/app/domain/execution/EVOLUTION.md](../api/app/domain/execution/EVOLUTION.md)                 | Event/command evolution rules and snapshot serializer guard                        | internal  | single    | none     | `api/app/domain/execution/run.py`, `api/tests/app/domain/execution/test_schema_guards.py`                                     | low        |
 | [e2e/fixtures/knowledge/acceptance-handbook.md](../e2e/fixtures/knowledge/acceptance-handbook.md) | Canonical searchable fact and degradation assertion test input                     | fixture   | single    | none     | `e2e/resources.spec.ts`                                                                                                       | low        |
 
-## Historical archives (`specs/`; 13 files)
-
-These files preserve their original proposals, versions and results. They do not constrain current implementation or prove current acceptance. Use the maintained references and code anchors above for present contracts.
-
-| Path                                                                                              | Topic                                            | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------ | --------- | --------- | -------- | ----------- | ---------- |
-| [specs/2026-09-03-execution-report.md](../specs/2026-09-03-execution-report.md)                   | 2026-09-03 optimization execution report         | archive   | single    | none     | —           | high       |
-| [specs/2026-09-03-kernel-architecture-audit.md](../specs/2026-09-03-kernel-architecture-audit.md) | 2026-09-03 execution-kernel architecture audit   | archive   | single    | none     | —           | high       |
-| [specs/2026-09-03-kernel-overhaul-spec.md](../specs/2026-09-03-kernel-overhaul-spec.md)           | 2026-09-03 kernel overhaul proposal              | archive   | single    | none     | —           | high       |
-| [specs/2026-09-03-optimization-overview.md](../specs/2026-09-03-optimization-overview.md)         | Historical feature-closure optimization proposal | archive   | single    | none     | —           | high       |
-| [specs/2026-09-04-kernel-overhaul-report.md](../specs/2026-09-04-kernel-overhaul-report.md)       | 2026-09-04 kernel overhaul execution report      | archive   | single    | none     | —           | high       |
-| [specs/plan-a-p0-fixes.md](../specs/plan-a-p0-fixes.md)                                           | Plan A: historical P0 fixes                      | archive   | single    | none     | —           | high       |
-| [specs/plan-b-backend-closure.md](../specs/plan-b-backend-closure.md)                             | Plan B: historical backend closure               | archive   | single    | none     | —           | high       |
-| [specs/plan-c-frontend-closure.md](../specs/plan-c-frontend-closure.md)                           | Plan C: historical frontend closure              | archive   | single    | none     | —           | high       |
-| [specs/plan-d-deploy-observability.md](../specs/plan-d-deploy-observability.md)                   | Plan D: historical deployment/observability      | archive   | single    | none     | —           | high       |
-| [specs/plan-k1-domain-events.md](../specs/plan-k1-domain-events.md)                               | Plan K1: historical domain/events overhaul       | archive   | single    | none     | —           | high       |
-| [specs/plan-k2-runtime-loops.md](../specs/plan-k2-runtime-loops.md)                               | Plan K2: historical runtime loops                | archive   | single    | none     | —           | high       |
-| [specs/plan-k3-plugin-surface.md](../specs/plan-k3-plugin-surface.md)                             | Plan K3: historical extension surfaces           | archive   | single    | none     | —           | high       |
-| [specs/plan-k4-projection-observability.md](../specs/plan-k4-projection-observability.md)         | Plan K4: historical projection/observability     | archive   | single    | none     | —           | high       |
-
 ## Maintenance
 
 - Run `./scripts/check-docs.sh` before documentation PRs.
 - Sync documents and code anchors when routes, configuration, UI or execution contracts change; refresh diagram fields from actual content.
 - Add EN + zh-CN for new architecture topics, link from [docs/README.md](README.md), and update this inventory. Internal single-language contracts can remain `single`.
-- Fixture text can be an asserted test input; inspect its tests before changing it. Historical specs retain their archive classification.
+- Fixture text can be an asserted test input; inspect its tests before changing it.

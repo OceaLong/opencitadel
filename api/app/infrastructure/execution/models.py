@@ -190,6 +190,7 @@ class ExecutionCommandInboxORM(Base):
     )
     payload_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    activity_lease_proof: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="received")
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -330,6 +331,8 @@ class ExecutionActivityTaskORM(Base):
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(255), nullable=False)
     activity_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    definition_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    handler_version: Mapped[str | None] = mapped_column(String(96), nullable=True)
     request_event_position: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey(
@@ -579,6 +582,7 @@ class ExecutionRunProjectionORM(Base):
 
     run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     family: Mapped[str] = mapped_column(String(32), nullable=False)
+    definition_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     source_entity_id: Mapped[str] = mapped_column(String(255), nullable=False)
     execution_policy_revision_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)

@@ -55,6 +55,8 @@ type SharedVersionMessages = BuildCandidateMessages &
 type KnowledgeVersionMessages = SharedVersionMessages & {
   viewBuild: string;
   reindex: string;
+  embeddingSpaceUnverified: string;
+  embeddingSpaceRebuild: string;
 };
 
 function knowledgeVersionMessages(
@@ -79,6 +81,8 @@ function knowledgeVersionMessages(
     capabilityUnavailable: t("capabilityUnavailable"),
     viewBuild: t("viewBuild"),
     reindex: t("reindex"),
+    embeddingSpaceUnverified: t("embeddingSpaceUnverified"),
+    embeddingSpaceRebuild: t("embeddingSpaceRebuild"),
   };
 }
 
@@ -133,6 +137,13 @@ function ResourceVersionStatusCore<
 
   return (
     <div className="space-y-1 text-xs">
+      {viewed &&
+        "revision_assurance" in viewed &&
+        viewed.revision_assurance === "unverified_alias" && (
+          <p className="text-muted-foreground" role="status">
+            {messages.embeddingSpaceUnverified} {messages.embeddingSpaceRebuild}
+          </p>
+        )}
       <BuildCandidatePanel
         active={active}
         viewed={viewed}

@@ -4,7 +4,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.domain.models.authorization import AuthorizationContext
-from app.domain.runtime_policy import ExecutionPolicy, OperationsPolicy
+from app.domain.runtime_policy import OperationsPolicy, initial_execution_policy
 from app.infrastructure.repositories.postgres_runtime_policy_repository import (
     PostgresRuntimePolicyRepository,
 )
@@ -30,7 +30,7 @@ async def seed_runtime_policy_heads(settings: DeploymentSettings) -> bool:
     )
     try:
         return await repository.seed_if_missing(
-            execution_policy=ExecutionPolicy(),
+            execution_policy=initial_execution_policy(),
             operations_policy=OperationsPolicy(),
             actor="migration:runtime-policy-seed",
             note="greenfield initial Runtime Policy",

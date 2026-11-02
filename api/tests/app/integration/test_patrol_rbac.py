@@ -7,7 +7,7 @@ ROOT = Path(__file__).parents[4]
 
 def test_every_collector_rbac_template_excludes_write_secret_exec_and_impersonate():
     manifests = [
-        ROOT / "deploy" / "patrol-demo" / "manifests" / "collector-rbac.yaml",
+        ROOT / "demo" / "patrol" / "manifests" / "collector-rbac.yaml",
         ROOT / "deploy" / "kustomize" / "ops-collector" / "rbac.yaml",
         ROOT / "deploy" / "helm" / "opencitadel" / "templates" / "rbac-ops-collector.yaml",
     ]

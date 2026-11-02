@@ -323,7 +323,7 @@ class EnvironmentService:
 
 
 async def validate_environment(
-    uow, scope, principal, value, registry, *, ceiling=2, enforce_ceiling=False
+    uow, scope, principal, value, registry, *, ceiling=2, enforce_ceiling=False, lock=False
 ):
     await uow.evaluation_dataset.authorize(scope, principal, write=False)
     if enforce_ceiling and value.limits.concurrency > ceiling:
@@ -349,7 +349,7 @@ async def validate_environment(
                 raise ValueError("environment_external_executor_unavailable")
             executor.validate(target)
         if target.connector_id:
-            await repo.validate_connector(scope, target)
+            await repo.validate_connector(scope, target, **({"lock": True} if lock else {}))
     for credential in credentials:
         registry.qualify("credential", credential)
         if credential.target not in value.allowed_targets:

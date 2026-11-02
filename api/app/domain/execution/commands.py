@@ -30,6 +30,22 @@ def normalize_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+class ActivityLeaseProof(BaseModel):
+    """Current worker ownership; the database verifies it at settlement."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    activity_id: UUID
+    request_generation: int = Field(ge=0)
+    claim_generation: int = Field(ge=1)
+    worker_id: str = Field(min_length=1, max_length=255)
+
+    @field_validator("worker_id")
+    @classmethod
+    def _worker_identity(cls, value: str) -> str:
+        return require_non_empty(value, field_name="worker_id")
+
+
 class CommandEnvelope(BaseModel):
     """A tenant-bound, idempotent request addressed to one event stream."""
 
@@ -48,6 +64,7 @@ class CommandEnvelope(BaseModel):
     issued_at: datetime
     payload: dict[str, JsonValue]
     payload_digest: str | None = None
+    activity_lease_proof: ActivityLeaseProof | None = None
 
     @field_validator("command_type", "stream_type", "stream_id")
     @classmethod
@@ -142,6 +159,7 @@ class CommandContext(BaseModel):
     correlation_id: UUID
     causation_id: UUID | None
     issued_at: datetime
+    activity_lease_proof: ActivityLeaseProof | None = None
 
     @field_validator("owner_user_id", "team_id")
     @classmethod
@@ -166,6 +184,7 @@ class CommandContext(BaseModel):
 
 
 __all__ = [
+    "ActivityLeaseProof",
     "CommandContext",
     "CommandEnvelope",
     "JsonValue",

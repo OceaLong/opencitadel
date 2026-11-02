@@ -14,6 +14,7 @@ from app.infrastructure.execution.models import (
     ExecutionPoisonedScopeORM,
     ExecutionRecoveryRequestORM,
 )
+from app.infrastructure.execution.postgres_effect_store import PostgresEffectStore
 from app.infrastructure.execution.postgres_formal_projector import PostgresFormalProjector
 from app.infrastructure.execution.postgres_run_decision_source import PostgresRunDecisionSource
 from app.infrastructure.repositories.db_audit_repository import DBAuditRepository
@@ -36,6 +37,9 @@ class PostgresRecoveryWorker:
             session_factory=session_factory, authorization=authorization
         )
         self._source = PostgresRunDecisionSource(
+            session_factory=session_factory, authorization=authorization
+        )
+        self._effects = PostgresEffectStore(
             session_factory=session_factory, authorization=authorization
         )
 
@@ -64,6 +68,9 @@ class PostgresRecoveryWorker:
             await session.commit()
 
     async def clear(self, scope: OwnerScope) -> None:
+        # Effects are derived from the same formal Run stream. Never release
+        # dispatch quarantine while their operation/receipt indexes are stale.
+        await self._effects.rebuild_scope(scope)
         async with self._sessions() as session:
             await configure_session_authorization(session, self._authorization)
             await session.execute(

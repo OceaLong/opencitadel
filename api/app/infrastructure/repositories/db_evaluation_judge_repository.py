@@ -451,7 +451,7 @@ class DBEvaluationJudgeRepository:
         row = (
             (
                 await self.db.execute(
-                    text("""SELECT c.body,c.content_digest FROM execution_public_content c JOIN execution_content_bindings b ON b.scope_key=c.scope_key AND b.content_id=c.content_id
+                    text("""SELECT c.body,c.content_digest,c.context_dependencies FROM execution_public_content c JOIN execution_content_bindings b ON b.scope_key=c.scope_key AND b.content_id=c.content_id
           WHERE c.scope_key=:scope AND c.run_id=:run AND b.run_id=:run AND c.activity_id=:activity AND c.generation=:generation
           AND c.phase='output' AND b.phase='output' AND b.formal_position<=:terminal_position AND NOT c.redacted"""),
                     params(
@@ -468,6 +468,11 @@ class DBEvaluationJudgeRepository:
         )
         if row is None or hashlib.sha256(row["body"].encode()).hexdigest() != row["content_digest"]:
             raise ValueError("judge_result_unavailable")
+        from app.infrastructure.execution.context_capture_dependencies import (
+            validate_captured_dependencies,
+        )
+
+        await validate_captured_dependencies(self.db, scope, row["context_dependencies"])
         value = json.loads(row["body"])
         if (
             value.get("kind") != "model"

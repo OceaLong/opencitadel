@@ -11,6 +11,7 @@ from app.application.dto.execution_view import (
     ApprovalView,
     ArtifactReference,
     Completeness,
+    DefinitionAvailabilityView,
     MessageView,
     RunView,
     RunViewPage,
@@ -315,6 +316,17 @@ class ExecutionViewService:
             page.steps = steps.items
             page.next_cursor = steps.next_cursor
             return page
+
+    async def definition_availability(self, scope: OwnerScope, run_id: UUID):
+        async with self.port.transaction() as session:
+            # Apply the same current Run visibility rules as every execution read.
+            await self.port.capture_run(session, scope, run_id)
+            row = await self.port.definition_availability(session, scope, run_id)
+            return DefinitionAvailabilityView(
+                run_id=run_id,
+                reason="VERSION_UNAVAILABLE" if row["state"] == "version_unavailable" else None,
+                **row,
+            )
 
     async def get_production_cut(self, scope, run_id, at, rows):
         """Reuse exact reader authority; expose only run-local public observation ordering."""

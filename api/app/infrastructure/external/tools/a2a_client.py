@@ -14,6 +14,12 @@ from app.application.ports.crypto import OutboundNetworkPolicy
 from app.domain.errors import ServerRequestsError
 from app.domain.models.integration_runtime import A2ARuntime
 from app.domain.models.tool_result import ToolResult
+from app.domain.services.tools.a2a_result import (
+    completed_result,
+    final_stream_result,
+    response_result,
+    result_task_id,
+)
 from app.domain.utils.outbound_url import resolve_outbound_url
 from app.infrastructure.security.outbound_http import (
     DEFAULT_OUTBOUND_NETWORK_POLICY,
@@ -170,15 +176,18 @@ class A2AClientManager:
             # 4.根据 AgentCard 能力选择流式或非流式调用
             if agent_card.get("capabilities", {}).get("streaming", False):
                 result = await self._invoke_stream(url, payload)
+                events = result["events"]
+                completed = bool(events) and completed_result(events[-1]["result"], streaming=True)
             else:
                 result = await self._invoke_send(url, payload)
+                completed = completed_result(response_result(result, payload["id"]))
             text = self._extract_text(result)
             return ToolResult(
-                success=True,
-                message="调用远程Agent成功",
+                success=completed,
+                message="调用远程Agent成功" if completed else "远程Agent尚未确认任务成功完成",
                 data={"text": text, "raw": result} if text else result,
             )
-        except (OSError, RuntimeError, ValueError) as e:
+        except (OSError, RuntimeError, ValueError, httpx.HTTPError) as e:
             # failure_kind=transport 供连接池统计连续失败并强制重建（P2-9）。
             logger.error("调用远程Agent[%s:%s]出错: %s", agent_id, url, e)
             return ToolResult(
@@ -208,28 +217,61 @@ class A2AClientManager:
         agent_response = await self._httpx_client.post(url, json=payload)
         agent_response.raise_for_status()
         self._ensure_response_size(agent_response, _MAX_A2A_RESPONSE_BYTES)
-        return agent_response.json()
+        response = agent_response.json()
+        response_result(response, payload["id"])
+        return response
 
     async def _invoke_stream(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         stream_payload = {**payload, "method": "message/stream"}
         events = []
         total_bytes = 0
+        data_lines = []
+        ended = False
+        task_id = None
+
+        def accept_event():
+            nonlocal ended, task_id
+            if not data_lines:
+                return
+            raw = "\n".join(data_lines)
+            data_lines.clear()
+            if raw == "[DONE]":
+                if not ended:
+                    raise ValueError("A2A 流在任务终态前结束")
+                return
+            if ended:
+                raise ValueError("A2A 流在终态后继续返回数据")
+            event = json.loads(raw)
+            result = response_result(event, payload["id"])
+            current_task = result_task_id(result)
+            if current_task is not None:
+                if not isinstance(current_task, str) or not current_task:
+                    raise ValueError("A2A 流任务标识无效")
+                if task_id is not None and task_id != current_task:
+                    raise ValueError("A2A 流任务标识发生变化")
+                task_id = current_task
+            ended = final_stream_result(result)
+            events.append(event)
+
         async with self._httpx_client.stream("POST", url, json=stream_payload) as response:
             response.raise_for_status()
+            if response.headers.get("content-type", "").split(";", 1)[0] != "text/event-stream":
+                raise ValueError("A2A 流式响应类型无效")
             async for line in response.aiter_lines():
-                total_bytes += len(line.encode("utf-8"))
+                total_bytes += len(line.encode("utf-8")) + 1
                 if total_bytes > _MAX_A2A_RESPONSE_BYTES:
                     raise ValueError("A2A 流式响应超过允许大小")
                 if not line:
+                    accept_event()
+                    continue
+                if line.startswith(":"):
                     continue
                 if line.startswith("data:"):
-                    line = line[5:].strip()
-                if not line or line == "[DONE]":
+                    data_lines.append(line[5:].removeprefix(" "))
                     continue
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    events.append({"text": line})
+                if line.split(":", 1)[0] not in {"event", "id", "retry"}:
+                    raise ValueError("A2A 流式事件格式无效")
+            accept_event()
         return {"events": events}
 
     @staticmethod

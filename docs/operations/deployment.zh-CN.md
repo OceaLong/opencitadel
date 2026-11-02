@@ -26,41 +26,61 @@ Provider 和连接池资源完全独立。
 ## Compose 快速启动
 
 ```bash
-cp .env.example .env
-# 替换 .env 中全部必填 Secret 与密码；本地 HTTP 设置 COOKIE_SECURE=false。
-# 设置 FRONTEND_BASE_URL=http://localhost:8088、OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth。
-# 将 OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS 设为 30，与 Compose 45s 宽限期协调。
-docker compose build opencitadel-sandbox
-docker compose --profile local up -d --build
-docker compose ps
+make quickstart
 ```
 
-打开 `http://localhost:8088`。`local` profile 启用内置 MinIO。云部署可设置
-`STORAGE_PROVIDER=cos` 与 `COS_*` 使用 COS。
+首次运行创建权限为 `0600` 的私有 `.env`，生成互相独立的随机密钥与密码，构建沙箱镜像，
+并启动 PostgreSQL、Redis、MinIO、API、执行内核、UI 与 Nginx。就绪检查通过后，终端显示
+初始管理员登录信息，访问 `http://localhost:8088`。再次运行保留已有配置与凭据；健康检查
+失败会返回错误，并给出诊断命令。
 
-配置以下部署项；密码与密钥使用独立强值，ID/用户名/超时不作为密钥：
+只准备配置、不启动容器时运行 `make configure`。精简的
+[`.env.example`](../../.env.example) 只列基础选择；
+[完整参考](../../deploy/config/.env.reference) 分类列出可选集成、外部服务、密钥轮换与高级调优。
+将需要覆盖的项复制到 `.env` 即可，参考文件不参与运行时加载。
+原环境变量名称与显式覆盖继续有效。
 
-- `POSTGRES_ADMIN_USER`、`POSTGRES_ADMIN_PASSWORD`、
-  `POSTGRES_MIGRATION_USER`、`POSTGRES_MIGRATION_PASSWORD`、
-  `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_KERNEL_USER`、
-  `POSTGRES_KERNEL_PASSWORD`
-- `REDIS_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD`
-- `API_KEY_SECRET_ID`、`API_KEY_SECRET`、`API_KEY_PREVIOUS_SECRETS`
-- `AUDIT_SIGNING_KEY_ID`、`AUDIT_SIGNING_KEY`、`AUDIT_PREVIOUS_SIGNING_KEYS`
-- `JWT_SECRET`、`SESSION_SECRET`
-- `SANDBOX_BROKER_TOKEN`、`SANDBOX_TOKEN_SEED`
-- `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS`
+旧安装若把 `OPENCITADEL_ENV_FILE` 错误指向 `.env.example`，Quickstart 会修复该指针。
+已有数据库重启前，须从原 Secret 备份或运行部署的 Secret 来源，确认此前进程实际使用的
+加密/签名凭据已保存在 `.env`。此前被忽略的值不能靠重新启用恢复加密数据；已有数据库
+不得重新生成凭据。
 
-`SANDBOX_TOKEN_SEED` 在生产环境必填且至少 32 个随机字节；API 与执行内核都由它派生每个沙箱的
-数据面 Token。`JWT_PREVIOUS_SECRETS`（默认 `{}`）与 `DATABASE_AUTHORIZATION_SIGNING_SECRET`
-（默认复用 `SESSION_SECRET`）为可选，详见*配置与 Secret*。运行 Ops Patrol Collector/Actuator
-时，还需设置强 `OPS_COLLECTOR_TOKEN` 与 `OPS_ACTUATOR_TOKEN`；缺失时对应 Server 拒绝启动。
+| 分类           | 运维需要提供的内容                                         |
+| -------------- | ---------------------------------------------------------- |
+| 基础启动       | 按需设置站点地址、项目名、Profile、部署模式、存储 Provider |
+| 自动生成凭据   | 新的本地安装无需填写；保留并备份 `.env`                    |
+| 内置服务       | Compose 自动推导数据库、Redis、MinIO 与沙箱地址            |
+| 可选集成       | 使用时填写 COS、外部服务、OAuth 或 Demo 推理输入           |
+| 高级调优       | 需要时才设置连接池、并发、网络例外与超时                   |
+| 运行行为与推理 | 在 **设置 → 运行时策略 / 推理** 管理，持久存入 PostgreSQL  |
 
-密码学密钥至少使用 32 个随机字节。除本地 HTTP 开发外保持 `COOKIE_SECURE=true`，将
-`FRONTEND_BASE_URL` 与 `OAUTH_REDIRECT_BASE` 设置为公网 HTTPS Origin，精确配置
-`TRUSTED_PROXY_CIDRS`，并收紧 `OUTBOUND_ALLOWED_PORTS` 与
-`OUTBOUND_PRIVATE_HOST_ALLOWLIST`。生产环境 `TRUSTED_PROXY_CIDRS` 在启动时校验，拒绝与
-沙箱/Pod 网络重叠的宽 RFC1918 段。
+`FRONTEND_BASE_URL` 是站点公开 Origin，OAuth 回调与 Cookie 安全默认值从它推导。
+`make quickstart` 还会推导 Nginx 域名、TLS 模式与宿主端口；已有
+`OAUTH_REDIRECT_BASE`、`COOKIE_SECURE`、`OPENCITADEL_DOMAIN`、`HTTPS_ENABLED`、
+`NGINX_PORT` 与 `NGINX_HTTPS_PORT` 显式覆盖优先。自定义宿主端口后直接运行
+`docker compose up`，仍需配套高级端口覆盖。生产使用 `ENV=production`、真实 HTTPS
+Origin 与运维提供的证书，见 [HTTPS 配置](https-domain-setup.zh-CN.md)。
+可信代理 CIDR 与外部网络例外仍需符合实际部署拓扑。
+
+新的本地安装自动生成以下独立凭据：
+
+- `POSTGRES_ADMIN_PASSWORD`、`POSTGRES_MIGRATION_PASSWORD`、
+  `POSTGRES_PASSWORD`、`POSTGRES_KERNEL_PASSWORD`、`REDIS_PASSWORD`
+- `API_KEY_SECRET`、`AUDIT_SIGNING_KEY`、`JWT_SECRET`、`SESSION_SECRET`、
+  `DATABASE_AUTHORIZATION_SIGNING_SECRET`、`PUBLIC_CURSOR_SECRET`
+- `SANDBOX_BROKER_TOKEN`、`SANDBOX_TOKEN_SEED`、`MINIO_SECRET_KEY`
+- `OPS_COLLECTOR_TOKEN`、`OPS_ACTUATOR_TOKEN`、`METRICS_TOKEN`、
+  `BOOTSTRAP_ADMIN_PASSWORD`
+
+用户名（`POSTGRES_ADMIN_USER`、`POSTGRES_USER`）、Key ID（`API_KEY_SECRET_ID`、
+`AUDIT_SIGNING_KEY_ID`）、轮换 Map 与 `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS` 均有默认值。
+`SANDBOX_TOKEN_SEED` 供 API 与内核派生每个沙箱的数据面 Token。Ops Server 只在启用时
+校验自身 Token，因此不用的 Profile 不会阻塞基础 Compose 渲染。云存储继续支持
+`STORAGE_PROVIDER=cos` 与 `COS_*` 覆盖。
+
+密码学密钥至少使用 32 个随机字节。生产环境 `TRUSTED_PROXY_CIDRS` 拒绝与沙箱/Pod 网络
+重叠的宽 RFC1918 段；按需精确设置代理 CIDR、`OUTBOUND_ALLOWED_PORTS` 与
+`OUTBOUND_PRIVATE_HOST_ALLOWLIST`。
 
 ## 启动与恢复
 
@@ -76,6 +96,22 @@ docker compose logs -f opencitadel-execution-kernel
 执行内核可安全重启或扩容：Claim 使用数据库 fencing，待处理工作从 PostgreSQL 回收。
 Redis 可被清空或重启；没有提示时内核会轮询 pending 行。不要把 Redis Key 当作备份数据。
 
+重建默认本地安装的容器并保留状态时，保留 `.env`，使用同一个 Compose Project：
+
+```bash
+docker compose down
+make quickstart
+```
+
+保留命名 Volume；`down --volumes` 会删除安装数据。自定义环境文件或项目时，两条命令
+必须使用相同的文件选择与项目。Migration 会再次执行，但已有管理员与 Runtime Policy
+Head 会保留；自动生成的初始登录信息只在第一次成功启动后显示。
+
+2026-10-10 的本地实测覆盖全新 `make quickstart`、删除项目全部容器但保留 Volume，
+以及再次 `make quickstart`。两次均通过 API Liveness/Readiness 并提供 UI；原 HTTP 登录
+Cookie 仍有效，保存的凭据、管理员身份及 PostgreSQL Seed 的基础知识库策略 Revision
+均未改变。该结果验证本地启动与恢复路径，不代表可移植容量基准或完整验收套件通过。
+
 ## 健康探针与有界排空
 
 API 暴露两个无需认证且语义分离的进程探针：
@@ -87,9 +123,9 @@ API 暴露两个无需认证且语义分离的进程探针：
 `python -m app.execution_kernel_health readiness|liveness`；归属明确的 Heartbeat 原子写入
 Marker，并在关闭时删除。Readiness 还会校验 Runtime Policy、Schema 与专用 Kernel 数据库角色。
 
-通过 `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=30` 配置应用有界排空。Compose 使用
-`stop_grace_period: 45s`；Helm 使用 `shutdown.timeoutSeconds: 30` 与
-`shutdown.terminationGracePeriodSeconds: 45`。平台终止宽限必须始终大于应用超时。
+应用有界排空默认 `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=90`。Compose 使用
+`stop_grace_period: 120s`；Helm 使用 `shutdown.timeoutSeconds: 90` 与
+`shutdown.terminationGracePeriodSeconds: 120`。平台终止宽限必须始终大于应用超时。
 
 ## 存储与沙箱
 
@@ -97,8 +133,8 @@ Marker，并在关闭时删除。Readiness 还会校验 Runtime Policy、Schema 
 本地文件系统不适合多副本。
 
 Compose 将 Docker 访问隔离在 `opencitadel-sandbox-broker`。API 和内核只拿到窄化、
-Token 认证的 HTTP 端点，不接触 Docker Socket。原生 Linux 需把 `DOCKER_SOCK_GID`
-设为 Socket Group。Kubernetes 使用执行内核专用 ServiceAccount 与受限 Sandbox Pod RBAC。
+Token 认证的 HTTP 端点，不接触 Docker Socket。Quickstart 自动检测原生 Linux 的
+Socket Group；特殊 Daemon 可显式覆盖 `DOCKER_SOCK_GID`。Kubernetes 使用执行内核专用 ServiceAccount 与受限 Sandbox Pod RBAC。
 保持 Squid 沙箱 Egress Proxy 开启；当前静态配置使用私网/元数据黑名单与 Safe_ports，并没有域名 Allowlist。每个沙箱的数据面 Token 在 API 与内核两侧派生为
 `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`；Seed 绝不进入沙箱容器，任何副本都能无共享 Token 状态
 地重新附着并认证。
@@ -119,9 +155,9 @@ Admin 通过 **设置 → 运行时策略** 或 `/api/runtime-policies` 管理�
 
 审计签名密钥通过 `AUDIT_PREVIOUS_SIGNING_KEYS` 同样轮换，Session JWT 通过
 `JWT_PREVIOUS_SECRETS` 轮换：把旧 Key 按其 ID 移入 previous map，设置新的 `JWT_SECRET`，
-再重启副本；在途 Token 在过期前继续验证。`DATABASE_AUTHORIZATION_SIGNING_SECRET` 默认回退
-`SESSION_SECRET`，保持现有部署与其 Seed 的 RLS `app.rls_signing_secret` 值不变；仅当需要把
-数据库授权信任域与 Session Cookie 拆分时才设置为独立强值。数据库在首次迁移时记录该 Secret；已有数据库的值发生变化时，先执行 `python -m app.rotate_db_signing_secret`（可重复执行，同一事务内更新并校验签名探针），再重启 API 与执行内核。不得
+再重启副本；在途 Token 在过期前继续验证。新安装自动生成独立的
+`DATABASE_AUTHORIZATION_SIGNING_SECRET`；未设置时仍回退 `SESSION_SECRET`，兼容已有部署
+及其 Seed 的 RLS `app.rls_signing_secret` 值。数据库在首次迁移时记录该 Secret；已有数据库的值发生变化时，先执行 `python -m app.rotate_db_signing_secret`（可重复执行，同一事务内更新并校验签名探针），再重启 API 与执行内核。不得
 记录明文 Secret，也不得把它们写进 Runtime Policy。
 
 Bootstrap 后，通过 **设置 → 推理** 或 `/api/inference` 配置 Endpoint、类型化 Model 与用途
@@ -129,9 +165,15 @@ Binding。Chat、Embedding、Rerank 消费者不存在环境变量 Key 回退；
 `/api/capabilities` 报告并 Fail Closed。可选 `DEMO_INFERENCE_*` 变量只供显式 Demo Seed
 命令使用。
 
+Compose 与 Helm 共用相同初始策略 Seed。新数据库的知识库默认文本提取和关键词检索，
+向量检索、重排、GraphRAG 与 OCR 关闭。首次 Ask/Agent 使用只需 Chat 推理，文本索引本身
+无需推理模型。需要增强能力时，先配置可选 Binding，再在 **设置 → 运行时策略** 开启对应
+字段。升级保留已有策略 Head 与历史；开启增强或重建已有知识库前参阅
+[知识库教程](../tutorials/02-internal-knowledge-base.zh-CN.md)。
+
 ## 可观测性
 
-设置 `METRICS_TOKEN` 后开放需认证的 API 指标。设置
+本地初始化自动生成 `METRICS_TOKEN`，供需认证的 API 指标使用；外部部署可显式提供。设置
 `EXECUTION_KERNEL_METRICS_PORT`（默认 `9108`）开放内网 Kernel Prometheus 端点，
 并用网络策略限制抓取方。重点监控：
 
@@ -148,19 +190,23 @@ Binding。Chat、Embedding、Rerank 消费者不存在环境变量 Key 回退；
 Chart 位于 `deploy/helm/opencitadel`。
 
 ```bash
-helm lint deploy/helm/opencitadel --values values.production.yaml
+helm lint deploy/helm/opencitadel --set publicUrl=https://citadel.example.com
 helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
-  --values values.production.yaml
+  --set publicUrl=https://citadel.example.com
 ```
 
-通过 Secret Manager 或受保护 values 文件提供全部 Secret。保持
+自包含首次安装只需提供公开 HTTPS Origin。Chart 默认内置 PostgreSQL、Redis 与 MinIO，
+根据 Release 自动推导服务地址及沙箱 Namespace，互相独立的凭据生成并保存到按角色划分的
+Secret。升级复用已有 Secret；备份数据库和对象存储时也保留它们。Helm NOTES 提供初始管理员
+登录信息的读取命令。Ingress/TLS、外部服务与 Secret Manager 覆盖见
+[Chart 指南](../../deploy/helm/opencitadel/README.zh-CN.md)。保持
 `networkPolicy.enabled=true`，分离 API/Kernel/Migration 数据库用户，并按 Activity 负载
-配置 `executionKernel.replicas` 与 HPA，并把 `env.SANDBOX_K8S_NAMESPACE` 设为 Release Namespace（此例为 `opencitadel`），与沙箱 Role 和 NetworkPolicy 对齐。可选 Ops Collector 与 Actuator 必须网络隔离；
+配置 `executionKernel.replicas` 与 HPA。可选 Ops Collector 与 Actuator 必须网络隔离；
 Actuator 只允许 API/Kernel 到达，且仍要求持久审批。其 RBAC 是按允许 Namespace 渲染的
 Namespaced `Role`/`RoleBinding`，而非集群级 `ClusterRole`。
 
-Chart 提供这些模板，但并非全部默认开启：`networkPolicy.enabled=true` 与 `egressProxy.enabled=true` 默认启用；`pdb.enabled`、`backup.enabled`、`monitoring.serviceMonitor.enabled`、`monitoring.prometheusRule.enabled` 默认关闭。备份 CronJob 还要求 Chart 托管 PostgreSQL。Squid 仅使用当前静态地址/端口 ACL，`egressProxy.allowedDomains` 尚未消费。Prometheus Operator CRD、Selector 与实际抓取必须配置后才有告警数据；API 抓取还需强 `secrets.metricsToken`。Compose Nginx 模板设置 CSP/nosniff 与 HTTPS HSTS；Helm 只在启用 Ingress 时通过 ingress-nginx Annotation 提供安全响应头，Controller 必须允许该配置。
+Chart 提供这些模板，但并非全部默认开启：`networkPolicy.enabled=true` 与 `egressProxy.enabled=true` 默认启用；`pdb.enabled`、`backup.enabled`、`monitoring.serviceMonitor.enabled`、`monitoring.prometheusRule.enabled` 默认关闭。备份 CronJob 还要求 Chart 托管 PostgreSQL。Squid 仅使用当前静态地址/端口 ACL，`egressProxy.allowedDomains` 尚未消费。Prometheus Operator CRD、Selector 与实际抓取必须配置后才有告警数据；启用 ServiceMonitor 时自动生成 API 抓取强 Token，或显式覆盖 `secrets.metricsToken`。Compose Nginx 模板设置 CSP/nosniff 与 HTTPS HSTS；Helm 只在启用 Ingress 时通过 ingress-nginx Annotation 提供安全响应头，Controller 必须允许该配置。
 
 Chart 托管 PostgreSQL 时，`files/postgres/init-app-role.sh` 会在绿地迁移前创建互相独立的
 Migration、API 与 Kernel 角色。外部数据库必须在安装前配置等价角色。验证运行时角色的
@@ -184,7 +230,7 @@ Release Tag 发布八个镜像：`api`、`execution-kernel`、`migrate`、`sandb
 
 ## 确定性验收门禁
 
-运行与 CI 相同的发布阻断全栈门禁：
+运行与 CI 相同的全栈验收入口：
 
 ```bash
 ./scripts/run-acceptance-e2e.sh --disposable
@@ -205,7 +251,14 @@ Schema 为 `contracts/acceptance-evidence.schema.json`；任一必需 ID 缺失�
 重试前检查 Manifest 的 `failure_reason`、`logs/stack.log` 和 Playwright Trace/截图。
 不得用宽泛 Docker Prune 替代 Runner 清理。
 
-完整 Execution 验收还要求 `ACCEPTANCE_CAPACITY_REPORT` 与 `ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` 提供并通过 AC21 实测证据校验；只跑 UI/单元测试不代表容量通过。AC21 全容量验收目前尚未完成，不应把部署成功或其他用例通过描述为全部门禁通过。
+完整 Execution 验收还要求 `ACCEPTANCE_CAPACITY_REPORT`、
+`ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` 提供有效 AC21 实测证据，以及原始私有
+`OfflineProofContext`。常规 CLI 未构造该 Context，完整参考轮次复用与原生采集器也尚未
+完成。AC21 保留为已知失败，不使用替代 Report、Fixture 或较小工作负载使其通过。
+详见[容量工具当前状态](../../scripts/execution_capacity/README.md)。
+
+当前 CI Workflow 报告尚未完整的验收面，不阻断 Job；这不会把失败或跳过的 Requirement
+改成通过。部署验证与其他用例通过，不代表发布门禁全部通过。
 
 ## 发布门禁
 
@@ -228,7 +281,7 @@ npm run build
 
 cd ..
 docker compose config
-helm lint deploy/helm/opencitadel --values values.production.yaml
+helm lint deploy/helm/opencitadel --set publicUrl=https://citadel.example.com
 ./scripts/run-acceptance-e2e.sh --disposable
 ```
 
@@ -307,6 +360,20 @@ python3 -m unittest discover -s scripts/tests -p test_backup_tooling.py -v
 Docker 可能拉取）。
 
 ## 执行异常与校验恢复
+
+外部写入使用独立观测：`execution_effect_rows` 与 `execution_effect_oldest_age_seconds`
+从持久化操作读取，年龄从操作创建开始计算，包含准备时间。请求指标按查询、人工结算、放弃及处理状态分组；
+查询与人工结算指标分别保留 `pending`、`unknown`、`applied`、`not_applied` 记录，采集器重启后仍可读取。
+这些是保留记录数的 gauge，不是终身累计 counter。可选 Helm 告警区分未知操作积压与新发生的核验基础设施失败；
+二者都不代表业务写入失败，也不能授权重发。应在工作台查询原 operation 或提交有证据的人工结算。
+新查询成功不删除旧失败历史，也不释放物理计费 hold。Embedding 拒绝写入有界的
+`embedding_space_mismatch` 日志，原因为 `model_identity` 或 `descriptor_changed`，不包含凭据和正文；
+应按可验证 descriptor 重建相应向量，不能混查维度相同但空间不同的数据。
+
+`execution_effect_integrity_conflict_rows` 统计结论或业务结果存在矛盾的保留操作，
+可选 `OpencitadelEffectIntegrityConflict` 告警提示核查原始证据。
+工作台说明隔离原因并禁用普通核验动作；后续匹配旧结论的回执不能解除隔离。
+如需停止等待，可取消 Run，但不能重发原写入或清除其计费 hold。
 
 管理台展示空间投影滞后、隔离 Run、planner 自动重试时间及持久化恢复结果。
 planner 异常分别在 5 秒、10 秒后重试，第三次失败隔离该 Run，并向所属用户或团队

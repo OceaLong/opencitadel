@@ -19,6 +19,8 @@ from . import (
     evaluation_summary_routes,
     execution_analysis_routes,
     execution_comparison_routes,
+    execution_definition_routes,
+    execution_effect_routes,
     execution_export_routes,
     execution_view_routes,
     file_routes,
@@ -59,6 +61,8 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(service_api_key_routes.router)
     authenticated_router.include_router(file_routes.router)
     authenticated_router.include_router(execution_view_routes.router)
+    authenticated_router.include_router(execution_effect_routes.router)
+    authenticated_router.include_router(execution_definition_routes.router)
     authenticated_router.include_router(execution_comparison_routes.router)
     authenticated_router.include_router(execution_analysis_routes.router)
     authenticated_router.include_router(execution_export_routes.router)

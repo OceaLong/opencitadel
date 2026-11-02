@@ -20,7 +20,14 @@ class WorkloadTarget(BaseModel):
 class ActuatorSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OPS_ACTUATOR_", env_nested_delimiter="__")
 
-    target_ref: str = "opencitadel-local"
+    target_ref: str = Field(default="opencitadel-local", min_length=1, max_length=200)
+    # One static bearer credential represents this configured authority. Rotation
+    # does not change its identity; sharing a token shares this principal.
+    caller_authority: str = Field(default="opencitadel-platform", min_length=1, max_length=200)
+    journal_namespace: str = Field(default="opencitadel", min_length=1, max_length=253)
+    provider_namespace: str = Field(
+        default="opencitadel-ops-actuator", min_length=1, max_length=200
+    )
     allowed_namespaces: list[str] = Field(default_factory=lambda: ["opencitadel"])
     allowed_workloads: dict[str, dict[str, WorkloadTarget]] = Field(default_factory=dict)
     # Static bearer token (env OPS_ACTUATOR_TOKEN). Empty is only tolerated for

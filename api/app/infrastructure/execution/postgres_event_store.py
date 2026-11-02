@@ -20,6 +20,7 @@ from app.domain.execution.store import (
     CorruptEventStreamError,
     OptimisticConcurrencyError,
     PayloadTooLargeError,
+    SnapshotAnchorMismatchError,
     StreamOwnerScopeMismatchError,
     StreamRef,
     calculate_event_hash,
@@ -98,9 +99,12 @@ class PostgresEventStore:
         *,
         after_version: int = 0,
         expected_previous_hash: str | None = None,
+        through_version: int | None = None,
     ) -> tuple[StoredEvent, ...]:
         if after_version < 0:
             raise ValueError("after_version must not be negative")
+        if through_version is not None and through_version < after_version:
+            raise ValueError("through_version must be at least after_version")
         if expected_previous_hash is not None and after_version == 0:
             raise ValueError("expected_previous_hash requires a positive after_version")
         if expected_previous_hash is not None:
@@ -109,16 +113,16 @@ class PostgresEventStore:
                 stream_id,
                 after_version=after_version,
                 expected_previous_hash=expected_previous_hash,
+                through_version=through_version,
             )
+        query = select(ExecutionEventORM).where(
+            ExecutionEventORM.stream_type == stream_type,
+            ExecutionEventORM.stream_id == stream_id,
+        )
+        if through_version is not None:
+            query = query.where(ExecutionEventORM.stream_version <= through_version)
         rows = (
-            await self._session.scalars(
-                select(ExecutionEventORM)
-                .where(
-                    ExecutionEventORM.stream_type == stream_type,
-                    ExecutionEventORM.stream_id == stream_id,
-                )
-                .order_by(ExecutionEventORM.stream_version.asc())
-            )
+            await self._session.scalars(query.order_by(ExecutionEventORM.stream_version.asc()))
         ).all()
         if self._evidence is not None:
             self._evidence.retain("event-source", rows)
@@ -140,43 +144,59 @@ class PostgresEventStore:
         *,
         after_version: int,
         expected_previous_hash: str,
+        through_version: int | None = None,
     ) -> tuple[StoredEvent, ...]:
+        query = select(ExecutionEventORM).where(
+            ExecutionEventORM.stream_type == stream_type,
+            ExecutionEventORM.stream_id == stream_id,
+            ExecutionEventORM.stream_version >= after_version,
+        )
+        if through_version is not None:
+            query = query.where(ExecutionEventORM.stream_version <= through_version)
         rows = (
-            await self._session.scalars(
-                select(ExecutionEventORM)
-                .where(
-                    ExecutionEventORM.stream_type == stream_type,
-                    ExecutionEventORM.stream_id == stream_id,
-                    ExecutionEventORM.stream_version >= after_version,
-                )
-                .order_by(ExecutionEventORM.stream_version.asc())
-            )
+            await self._session.scalars(query.order_by(ExecutionEventORM.stream_version.asc()))
         ).all()
+        if self._evidence is not None:
+            self._evidence.retain("event-source", rows)
+            self._evidence.reserve_state(len(rows), bytes_per_item=1024)
         if not rows or rows[0].stream_version != after_version:
-            raise CorruptEventStreamError(
-                stream_version=after_version,
-                reason="snapshot anchor event is missing",
-            )
+            raise SnapshotAnchorMismatchError("snapshot anchor event is missing")
         anchor = self._to_stored(rows[0])
-        if anchor.event_hash != expected_previous_hash:
-            raise CorruptEventStreamError(
-                stream_version=after_version,
-                reason="snapshot anchor hash mismatch",
-            )
         if calculate_event_hash(anchor) != anchor.event_hash:
+            record_replay_failure("event_hash_mismatch")
             raise CorruptEventStreamError(
                 stream_version=after_version,
                 reason="snapshot anchor event hash mismatch",
             )
+        if anchor.event_hash != expected_previous_hash:
+            raise SnapshotAnchorMismatchError("snapshot anchor hash mismatch")
         tail = tuple(self._to_stored(row) for row in rows[1:])
-        verify_stream(
-            tail,
-            previous_hash=expected_previous_hash,
-            previous_version=after_version,
-            stream_identity=(stream_type, stream_id),
-            stream_owner_scope=(anchor.owner_user_id, anchor.team_id),
-        )
+        try:
+            verify_stream(
+                tail,
+                previous_hash=expected_previous_hash,
+                previous_version=after_version,
+                stream_identity=(stream_type, stream_id),
+                stream_owner_scope=(anchor.owner_user_id, anchor.team_id),
+            )
+        except CorruptEventStreamError:
+            record_replay_failure("event_hash_mismatch")
+            raise
         return self._upcast(tail)
+
+    async def load_origin(self, stream_type: str, stream_id: str) -> StoredEvent | None:
+        row = await self._session.scalar(
+            select(ExecutionEventORM).where(
+                ExecutionEventORM.stream_type == stream_type,
+                ExecutionEventORM.stream_id == stream_id,
+                ExecutionEventORM.stream_version == 1,
+            )
+        )
+        if row is None:
+            return None
+        event = self._to_stored(row)
+        verify_stream((event,), stream_identity=(stream_type, stream_id))
+        return self._upcast((event,))[0]
 
     async def read_all(
         self,

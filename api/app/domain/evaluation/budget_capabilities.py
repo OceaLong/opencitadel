@@ -172,10 +172,7 @@ class BudgetProfile(ImmutableModel):
                     and not isinstance(content, str)
                     and (
                         not isinstance(content, (list, tuple))
-                        or any(
-                            part.get("type") != "text" or set(part) - {"type", "text"}
-                            for part in content
-                        )
+                        or any(not self._openai_part(part) for part in content)
                     )
                 ):
                     raise ValueError("budget_input_mode_unsupported")
@@ -261,6 +258,18 @@ class BudgetProfile(ImmutableModel):
             if all(v is not None for v in [*rates, *output_rates]):
                 money = (ceiling * max(rates) + output * max(output_rates)) / Decimal(1000000)
         return RequestBound(ceiling + output, money, source)
+
+    @staticmethod
+    def _openai_part(part):
+        if isinstance(part, dict) and set(part) == {"type", "text"} and part["type"] == "text":
+            return isinstance(part["text"], str)
+        from app.domain.execution.context_media import validate_inline_image
+
+        try:
+            validate_inline_image(part)
+        except ValueError:
+            return False
+        return True
 
     @classmethod
     def _anthropic_content(cls, content):

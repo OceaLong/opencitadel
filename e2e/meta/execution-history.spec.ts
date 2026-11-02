@@ -1,8 +1,47 @@
 import { expect, test } from "@playwright/test";
 import {
   selectHistoryCuts,
+  selectAssistantMessageForStep,
   type HistoricalView,
 } from "../support/execution-history";
+
+test("final message follows its model step even when earlier tool-request messages come first", () => {
+  const early = {
+    role: "assistant",
+    step_id: "tool-request",
+    message_id: "early",
+  };
+  const final = {
+    role: "assistant",
+    step_id: "final-model",
+    message_id: "final",
+  };
+  const user = { role: "user", step_id: "final-model", message_id: "user" };
+  for (const messages of [
+    [early, user, final],
+    [final, early, user],
+  ])
+    expect(selectAssistantMessageForStep(messages, "final-model")).toBe(final);
+});
+
+test("final message selection rejects missing or ambiguous producer identity", () => {
+  const early = {
+    message_id: "early",
+    role: "assistant",
+    step_id: "tool-request",
+  };
+  const final = {
+    message_id: "final",
+    role: "assistant",
+    step_id: "final-model",
+  };
+  expect(() => selectAssistantMessageForStep([early], "final-model")).toThrow(
+    "exact final model assistant message required",
+  );
+  expect(() =>
+    selectAssistantMessageForStep([final, { ...final }], "final-model"),
+  ).toThrow("exact final model assistant message required");
+});
 const view = (
   at: string,
   status: string,

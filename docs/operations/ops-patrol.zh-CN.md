@@ -36,7 +36,7 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 docker compose --profile actuator up -d --build opencitadel-ops-actuator
 ```
 
-先设置强且独立的 `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN`（至少 32 字符），并在集成加密 Headers 中配置对应 `Authorization: Bearer <token>`。Helm Values 使用 `opsCollector.token` / `opsActuator.token`；Kustomize Base 的 Secret 默认空，必须填充。Compose Actuator 未注入 Workload 白名单，只支持传输/认证检查。
+新的 Compose 安装通过 `make configure` 自动生成强且独立的 `OPS_COLLECTOR_TOKEN` / `OPS_ACTUATOR_TOKEN`，将保存的值填入集成加密 Headers 的对应 `Authorization: Bearer <token>`。Helm 自动生成并复用按角色划分的 Token Secret，`opsCollector.token` / `opsActuator.token` 继续支持显式覆盖；Kustomize Base 的 Secret 默认空，必须填充。Compose Actuator 未注入 Workload 白名单，只支持传输/认证检查。
 
 Compose 不挂载宿主 Kubernetes 凭证。真实集群检查必须通过 Helm 或 Kustomize 使用专用
 ServiceAccount。
@@ -106,6 +106,19 @@ Actuator 工具只能由修复 Activity 调用；不得加入 Agent Skill 或模
 Pack 变更会生成新版本，必须重新验证和激活。Scheduled Admission、Patrol 执行、修复
 审批与复核都生成正式 Run。
 
+## 修复结果待核验
+
+Actuator 响应丢失时保留原 `rem:{id}`、operation ID、payload digest 与 target UID，
+通过工作台的原操作查询调用 `get_operation`；当前副本数相同不是执行证据。
+先修复 journal 权限或存储故障，再允许新的物理写；目标标记缺失或目标被重建时仍保持 unknown。
+
+工作台在刷新/登录后保留查询历史，并提供经授权、有证据的人工结算。已 applied 但缺所需完整结果时等待材料。
+确认 not_applied 后原操作终结；新尝试必须重新提案、创建新 Invocation 并审批。
+取消或放弃 Run 不证明效果不存在，也不清除计费 hold。备份 Actuator journal namespace 及稳定 provider/caller 身份。
+Prepared/unknown journal 和终态 key tombstone 没有自动删除路径，应规划容量与 namespace 配额。
+详见 [Actuator 契约](../../ops-actuator/README.zh-CN.md) 与
+[执行恢复指标](deployment.zh-CN.md#执行异常与校验恢复)。
+
 ## 验证命令
 
 ```bash
@@ -118,7 +131,7 @@ helm template opencitadel deploy/helm/opencitadel \
   --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
 kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
-docker compose --env-file .env.example config --quiet
+docker compose --env-file .env config --quiet
 ```
 
 部署后确认 Collector 能读 Pod，但不能写 Pod 或读 Secret。Actuator 的 Namespaced Role 对 Namespace 内 Deployment/StatefulSet 授予 Patch，而精确 Workload 白名单由服务校验；分别验证 RBAC 跨 Namespace 拒绝、服务对未注册 Workload 的 `TARGET_DENIED`，以及无 Secret 权限。TCP 探针成功后还必须做认证能力发现与真实目标检查。

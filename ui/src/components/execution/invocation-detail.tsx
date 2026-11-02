@@ -10,6 +10,7 @@ import type { DetailBodyState } from "@/hooks/use-execution-detail-body";
 import type { StepView } from "@/lib/api/types/execution-view";
 export function InvocationDetail({ detail }: { detail: StepView }) {
   const t = useTranslations("executionDetail");
+  const te = useTranslations("executionEffects");
   const statuses = {
     new: t("statusValue.new"),
     queued: t("statusValue.queued"),
@@ -32,6 +33,18 @@ export function InvocationDetail({ detail }: { detail: StepView }) {
         {detail.tool_name ?? detail.invocation_id ?? detail.step_id}
       </h3>
       {detail.public_summary && <MarkdownContent content={detail.public_summary} />}
+      {detail.contract_drift && (
+        <div role="alert" className="space-y-1 rounded border p-2">
+          <p>{te("contractDrift")}</p>
+          <p>{detail.contract_drift.reason}</p>
+          <dl className="text-xs">
+            <dt>{t("subject")}</dt>
+            <dd className="break-all" translate="no">
+              {detail.contract_drift.subject_digest}
+            </dd>
+          </dl>
+        </div>
+      )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt>{t("status")}</dt>
         <dd

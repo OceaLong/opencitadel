@@ -151,6 +151,7 @@ export type PatrolRemediationAction = "restart_workload" | "scale_workload" | "r
 export type PatrolRemediationStatus =
   | "proposed"
   | "executing"
+  | "unknown"
   | "executed"
   | "verified"
   | "failed"
@@ -174,6 +175,10 @@ export type PatrolRemediation = {
   rollback_hint: string;
   idempotency_key: string;
   actuator_capability_hash?: string | null;
+  actuator_operation_id?: string | null;
+  actuator_payload_digest?: string | null;
+  actuator_target_uid?: string | null;
+  actuator_target_ref?: string | null;
   status: PatrolRemediationStatus;
   before_observation?: Record<string, unknown> | null;
   after_observation?: Record<string, unknown> | null;

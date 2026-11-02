@@ -66,10 +66,15 @@ class UnitOfWork:
 
 
 class Admission:
-    def __init__(self):
+    def __init__(self, definition=None):
         self.calls = []
+        self.definition = definition
 
     async def admit(self, **kwargs):
+        if "input_adapter" in kwargs:
+            kwargs["private_input"] = await kwargs["input_adapter"](
+                kwargs["private_input"], self.definition
+            )
         self.calls.append(kwargs)
         return UUID("10000000-0000-0000-0000-000000000001")
 
@@ -94,6 +99,99 @@ class Projection:
         return PublicEventPage(
             events=(event,), next_cursor=None, prev_cursor=None, has_earlier=False
         )
+
+
+@pytest.mark.asyncio
+async def test_context_boundary_is_frozen_under_lock_without_public_history_reads():
+    from app.domain.execution.context_models import AcceptedContextCut
+    from app.domain.execution.run import RunFamily
+    from tests.app.application.execution.test_context_decisions import state_for
+
+    session = Session(id="session-1", owner_user_id="user-1")
+    uow = UnitOfWork(session, None)
+    admission = Admission(state_for(RunFamily.AGENT).definition_manifest)
+    calls = []
+    request = uuid4()
+
+    class Catalog:
+        async def freeze(self, scope, collection, *, request_id):
+            calls.append((scope.user_id, collection, request_id))
+            return AcceptedContextCut(
+                scope_key="user:user-1", collection_id="session-1", through_position=450
+            )
+
+    class NoHistoryProjection(Projection):
+        async def list_events(self, **kwargs):
+            assert not (kwargs.get("latest") is True and kwargs.get("limit") == 100)
+            return await super().list_events(**kwargs)
+
+    service = AgentService(
+        uow_factory=lambda: uow,
+        admission_service=admission,
+        command_ingress=SimpleNamespace(),
+        public_projection=NoHistoryProjection(admission),
+        run_projection=SimpleNamespace(),
+        context_sources_factory=lambda work: Catalog(),
+        poll_interval_seconds=0.001,
+        idle_timeout_seconds=0.01,
+    )
+    events = [
+        event
+        async for event in service.chat(
+            "session-1",
+            owner_scope=OwnerScope.personal("user-1"),
+            message="new question",
+            request_id=request,
+        )
+    ]
+    assert events[-1].event_type == "done"
+    assert calls == [("user-1", "session-1", request)]
+    private = admission.calls[0]["private_input"]
+    assert private["conversation"] == []
+    assert private["_context_boundary"]["through_position"] == 450
+
+
+@pytest.mark.asyncio
+async def test_context_adapter_keeps_legacy_history_when_the_pinned_definition_is_legacy():
+    from tests.app.domain.execution.test_definition import manifest
+
+    session = Session(id="session-1", owner_user_id="user-1")
+    uow = UnitOfWork(session, None)
+    admission = Admission(manifest())
+    calls = []
+
+    class Catalog:
+        async def freeze(self, *_args, **_kwargs):
+            pytest.fail("a legacy definition must not acquire a private context cut")
+
+        async def legacy_conversation(self, scope, collection):
+            calls.append((scope.user_id, collection))
+            return [{"role": "user", "content": "old legacy question"}]
+
+    service = AgentService(
+        uow_factory=lambda: uow,
+        admission_service=admission,
+        command_ingress=SimpleNamespace(),
+        public_projection=Projection(admission),
+        run_projection=SimpleNamespace(),
+        context_sources_factory=lambda work: Catalog(),
+        poll_interval_seconds=0.001,
+        idle_timeout_seconds=0.01,
+    )
+    events = [
+        event
+        async for event in service.chat(
+            "session-1",
+            owner_scope=OwnerScope.personal("user-1"),
+            message="new question",
+            request_id=uuid4(),
+        )
+    ]
+    assert events[-1].event_type == "done"
+    assert calls == [("user-1", "session-1")]
+    private = admission.calls[0]["private_input"]
+    assert private["conversation"] == [{"role": "user", "content": "old legacy question"}]
+    assert "_context_boundary" not in private
 
 
 @pytest.mark.asyncio

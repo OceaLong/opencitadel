@@ -330,10 +330,18 @@ export async function prepareStrictDriver(
       maxBuffer: 1024 * 1024,
     },
   );
-  if (result.error || result.status !== 0)
+  if (result.error || result.status !== 0) {
+    // Keep diagnostic details private; never include bootstrap credentials or
+    // subprocess output in the public Playwright report.
+    writeFileSync(
+      resolve(root, "strict-bridge.stderr.log"),
+      result.stderr ?? result.error?.message ?? "No subprocess diagnostic",
+      { mode: 0o600 },
+    );
     throw new Error(
       "controlled strict driver failed; runner evidence and cleanup journal retained",
     );
+  }
   const receipt = JSON.parse(
     readFileSync(resolve(root, "strict-consumer.json"), "utf8"),
   );

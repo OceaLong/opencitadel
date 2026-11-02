@@ -12,6 +12,27 @@ export type RetryFact = {
   activity_type: string | null;
 };
 
+export function validateOwnedRetryProject(
+  lifecycle: { run_id?: string; project_name?: string; state?: string },
+  bootstrap: { run_id?: string; cleanup_completed?: boolean },
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  acceptanceId("retry-proof", environment);
+  const invocation = environment.ACCEPTANCE_RUN_ID!;
+  const project = environment.ACCEPTANCE_PROJECT_ID;
+  if (!project || !/^[a-z0-9][a-z0-9-]{2,47}$/.test(project))
+    throw new Error("validated acceptance project required");
+  if (bootstrap.run_id !== invocation || bootstrap.cleanup_completed)
+    throw new Error("active matching bootstrap required");
+  if (
+    lifecycle.run_id !== invocation ||
+    lifecycle.project_name !== project ||
+    lifecycle.state !== "stack_ready"
+  )
+    throw new Error("active owned stack required");
+  return project;
+}
+
 /** Read only the current runner-owned database; never a URL supplied by a caller. */
 export function readOwnedRunRetry(
   run: RunView,
@@ -46,17 +67,7 @@ export function readOwnedRunRetry(
   const bootstrap = JSON.parse(
     readFileSync(resolve(evidence, "bootstrap.json"), "utf8"),
   );
-  if (bootstrap.run_id !== invocation || bootstrap.cleanup_completed)
-    throw new Error("active matching bootstrap required");
-  const project = `opencitadel-acceptance-${invocation}`
-    .slice(0, 48)
-    .replace(/-+$/, "");
-  if (
-    lifecycle.run_id !== invocation ||
-    lifecycle.project_name !== project ||
-    lifecycle.state !== "stack_ready"
-  )
-    throw new Error("active owned stack required");
+  const project = validateOwnedRetryProject(lifecycle, bootstrap);
   const container = `${project}-opencitadel-postgres-1`;
   const docker = (args: string[]) =>
     execFileSync("docker", args, {

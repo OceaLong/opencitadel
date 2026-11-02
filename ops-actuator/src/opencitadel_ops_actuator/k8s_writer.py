@@ -1,24 +1,9 @@
-"""Narrow write-only Kubernetes adapter for the three registered actions.
+"""Kubernetes preparation and fixed resourceVersion-conditional main-resource patches.
 
-In-cluster/kubeconfig loading mirrors
-ops-collector/src/opencitadel_ops_collector/k8s_client.py:13-16. Unlike the
-Collector's KubernetesReader (CoreV1/AppsV1/BatchV1, read-only), this
-adapter touches only AppsV1 and only ever issues get/list/patch calls
-(never list on Secrets, never exec/attach, never create/delete). Every
-mutating call carries the caller-supplied idempotency key so a duplicate
-request patches the same annotation value instead of re-triggering a
-rollout or a redundant scale/rollback.
-
-All three actions (restart/scale/rollback) patch the *main* Deployment or
-StatefulSet resource in a single merge patch that carries both the action's
-spec change and the idempotency annotation atomically. scale() deliberately
-does NOT use the apps/v1 `/scale` subresource: that subresource's Scale
-object only round-trips `spec.replicas` on the built-in workload types --
-`metadata.annotations` patched through it is a read-only projection and is
-not persisted back to the parent Deployment/StatefulSet, which would make
-the idempotency key silently fail to stick on a real cluster (it would
-still appear to succeed in a naive fake). Patching the main resource keeps
-the atomicity guarantee real.
+The journal owns key deduplication. Each mutation atomically carries its operation
+ID and payload digest together with the business spec. Recovery may submit only
+this persisted patch; a conflict never causes a read-and-rebase. Workload reads
+are limited to registered targets and owned ReplicaSets; Secrets are never read.
 """
 
 from __future__ import annotations
@@ -27,9 +12,13 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-IDEMPOTENCY_ANNOTATION = "opencitadel.io/remediation-key"
+from kubernetes.client.exceptions import ApiException
+
 RESTARTED_AT_ANNOTATION = "opencitadel.io/restarted-at"
+OPERATION_ANNOTATION = "opencitadel.io/operation-id"
+PAYLOAD_ANNOTATION = "opencitadel.io/payload-digest"
 REVISION_ANNOTATION = "deployment.kubernetes.io/revision"
+KUBERNETES_TIMEOUT = (5, 30)
 
 
 class NoRollbackRevision(Exception):
@@ -42,11 +31,17 @@ class WorkloadNotFound(Exception):
 
 def load_incluster_config() -> None:
     from kubernetes import config
+    from kubernetes.config.config_exception import ConfigException
 
     try:
         config.load_incluster_config()
-    except (OSError, RuntimeError, ValueError):
-        config.load_kube_config(context=os.getenv("PATROL_DEMO_CONTEXT") or None)
+    except (ConfigException, OSError, RuntimeError, ValueError):
+        context = os.getenv("PATROL_DEMO_CONTEXT")
+        if not context:
+            raise RuntimeError(
+                "explicit PATROL_DEMO_CONTEXT is required outside a cluster"
+            ) from None
+        config.load_kube_config(context=context)
 
 
 class KubernetesWriter:
@@ -65,20 +60,30 @@ class KubernetesWriter:
     def _read(self, namespace: str, name: str, kind: str) -> Any:
         try:
             if kind == "deployment":
-                return self.apps.read_namespaced_deployment(name, namespace)
-            return self.apps.read_namespaced_stateful_set(name, namespace)
-        except (OSError, RuntimeError, ValueError) as exc:
+                return self.apps.read_namespaced_deployment(
+                    name, namespace, _request_timeout=KUBERNETES_TIMEOUT
+                )
+            return self.apps.read_namespaced_stateful_set(
+                name, namespace, _request_timeout=KUBERNETES_TIMEOUT
+            )
+        except ApiException as exc:
             if getattr(exc, "status", None) == 404:
                 raise WorkloadNotFound(f"{kind}/{name} not found in {namespace}") from exc
             raise
 
     def _patch(self, namespace: str, name: str, kind: str, body: dict[str, Any]) -> Any:
+        options = {
+            "_content_type": "application/strategic-merge-patch+json",
+            "_request_timeout": KUBERNETES_TIMEOUT,
+        }
         if kind == "deployment":
-            return self.apps.patch_namespaced_deployment(name, namespace, body)
-        return self.apps.patch_namespaced_stateful_set(name, namespace, body)
+            return self.apps.patch_namespaced_deployment(name, namespace, body, **options)
+        return self.apps.patch_namespaced_stateful_set(name, namespace, body, **options)
 
     def _list_replica_sets(self, namespace: str, deployment_name: str) -> list[Any]:
-        items = self.apps.list_namespaced_replica_set(namespace).items
+        items = self.apps.list_namespaced_replica_set(
+            namespace, _request_timeout=KUBERNETES_TIMEOUT
+        ).items
         return [
             item
             for item in items
@@ -95,74 +100,92 @@ class KubernetesWriter:
 
     @staticmethod
     def _snapshot(item: Any) -> dict[str, Any]:
-        status = item.status
+        status = getattr(item, "status", None)
         return {
-            "replicas": int(getattr(status, "replicas", 0) or 0),
+            "uid": str(item.metadata.uid),
+            "resource_version": str(item.metadata.resource_version),
+            "replicas": int(getattr(item.spec, "replicas", 0) or 0),
             "ready_replicas": int(getattr(status, "ready_replicas", 0) or 0),
             "generation": int(item.metadata.generation or 0),
         }
 
-    # -- business-level surface used by actuator.py --------------------------
-    def read_marker(self, namespace: str, name: str, kind: str) -> str | None:
-        item = self._read(namespace, name, kind)
-        return self._object_annotations(item).get(IDEMPOTENCY_ANNOTATION)
+    def observe(self, target: dict[str, str]) -> dict[str, Any]:
+        item = self._read(target["namespace"], target["workload"], target["kind"])
+        return {"snapshot": self._snapshot(item), "annotations": self._object_annotations(item)}
 
-    def snapshot(self, namespace: str, name: str, kind: str) -> dict[str, Any]:
-        return self._snapshot(self._read(namespace, name, kind))
-
-    def restart(self, namespace: str, name: str, kind: str, idempotency_key: str) -> dict[str, Any]:
-        before = self._snapshot(self._read(namespace, name, kind))
-        restarted_at = datetime.now(UTC).isoformat()
-        body = {
-            "metadata": {"annotations": {IDEMPOTENCY_ANNOTATION: idempotency_key}},
-            "spec": {
-                "template": {"metadata": {"annotations": {RESTARTED_AT_ANNOTATION: restarted_at}}}
-            },
-        }
-        after_item = self._patch(namespace, name, kind, body)
-        after = self._snapshot(after_item)
-        after["restarted_at"] = restarted_at
-        return {"before": before, "after": after}
-
-    def scale(
-        self, namespace: str, name: str, kind: str, replicas: int, idempotency_key: str
+    def prepare(
+        self,
+        action: str,
+        target: dict[str, str],
+        operation_id: str,
+        payload_digest: str,
+        parameters: dict[str, Any],
     ) -> dict[str, Any]:
-        before_item = self._read(namespace, name, kind)
-        before = {"replicas": int(getattr(before_item.spec, "replicas", 0) or 0)}
-        body = {
-            "spec": {"replicas": replicas},
-            "metadata": {"annotations": {IDEMPOTENCY_ANNOTATION: idempotency_key}},
+        """Read once and return a serializable patch; recovery never calls this again."""
+        item = self._read(target["namespace"], target["workload"], target["kind"])
+        before = self._snapshot(item)
+        if before["uid"] != target["uid"]:
+            raise ValueError("TARGET_UID_MISMATCH")
+        if not before["resource_version"] or before["resource_version"] == "None":
+            raise ValueError("target has no resourceVersion")
+        body: dict[str, Any] = {
+            "metadata": {
+                "uid": target["uid"],
+                "resourceVersion": before["resource_version"],
+                "annotations": {
+                    OPERATION_ANNOTATION: operation_id,
+                    PAYLOAD_ANNOTATION: payload_digest,
+                },
+            }
         }
-        # Main-resource patch, not the /scale subresource -- see module
-        # docstring for why the subresource cannot carry the idempotency
-        # annotation on real clusters.
-        after_item = self._patch(namespace, name, kind, body)
-        after = {
-            "replicas": int(
-                getattr(getattr(after_item, "spec", None), "replicas", replicas) or replicas
+        hint: dict[str, Any] = {}
+        if action == "restart_workload":
+            hint["restarted_at"] = datetime.now(UTC).isoformat()
+            body["spec"] = {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            RESTARTED_AT_ANNOTATION: hint["restarted_at"],
+                        }
+                    }
+                }
+            }
+        elif action == "scale_workload":
+            body["spec"] = {"replicas": parameters["replicas"]}
+        elif action == "rollback_workload":
+            sets = self._list_replica_sets(target["namespace"], target["workload"])
+            sets = [
+                rs
+                for rs in sets
+                if any(
+                    str(getattr(ref, "uid", "")) == target["uid"]
+                    for ref in (rs.metadata.owner_references or [])
+                )
+            ]
+            ranked = sorted(
+                sets,
+                key=lambda rs: (
+                    -int(self._object_annotations(rs).get(REVISION_ANNOTATION, "0") or "0")
+                ),
             )
-        }
-        return {"before": before, "after": after}
+            if len(ranked) < 2:
+                raise NoRollbackRevision("NO_ROLLBACK_REVISION")
+            previous = ranked[1]
+            # Kubernetes' serializer preserves wire camelCase. Model.to_dict()
+            # produces snake_case and is not a valid pod-template wire payload.
+            from kubernetes import client
 
-    def rollback(self, namespace: str, name: str, idempotency_key: str) -> dict[str, Any]:
-        deployment = self._read(namespace, name, "deployment")
-        before = self._snapshot(deployment)
-        replica_sets = self._list_replica_sets(namespace, name)
-        ranked = sorted(
-            replica_sets,
-            key=lambda rs: -int(self._object_annotations(rs).get(REVISION_ANNOTATION, "0") or "0"),
-        )
-        if len(ranked) < 2:
-            raise NoRollbackRevision("NO_ROLLBACK_REVISION")
-        target_rs = ranked[1]
-        template = target_rs.spec.template
-        body = {
-            "metadata": {"annotations": {IDEMPOTENCY_ANNOTATION: idempotency_key}},
-            "spec": {"template": template.to_dict() if hasattr(template, "to_dict") else template},
-        }
-        after_item = self._patch(namespace, name, "deployment", body)
-        after = self._snapshot(after_item)
-        after["rolled_back_to_revision"] = self._object_annotations(target_rs).get(
-            REVISION_ANNOTATION
-        )
-        return {"before": before, "after": after}
+            template = client.ApiClient().sanitize_for_serialization(previous.spec.template)
+            # Replace the whole template; merge alone leaves fields introduced
+            # after the selected revision and is not an actual rollback.
+            body["spec"] = {"template": {**template, "$patch": "replace"}}
+            hint["rolled_back_to_revision"] = self._object_annotations(previous).get(
+                REVISION_ANNOTATION
+            )
+        else:
+            raise ValueError("unsupported action")
+        return {"patch": body, "before": before, "after_hint": hint}
+
+    def apply_prepared(self, target: dict[str, str], patch: dict[str, Any]) -> dict[str, Any]:
+        item = self._patch(target["namespace"], target["workload"], target["kind"], patch)
+        return self._snapshot(item)

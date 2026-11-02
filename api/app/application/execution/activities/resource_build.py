@@ -33,6 +33,7 @@ class KnowledgeBuildPipeline(Protocol):
         policy: KnowledgeBaseExecutionPolicy,
         embedding_model_id: str | None,
         embedding_dimensions: int | None,
+        embedding_space_digest: str | None,
         graph_llm: LLM | None = None,
         ocr_llm: LLM | None = None,
     ) -> AsyncIterator[BuildProgress]: ...
@@ -49,7 +50,7 @@ class _ResourceBuildActivity:
     async def _build_input(
         self,
         request: ActivityRequest,
-    ) -> tuple[str, str | None, int | None] | None:
+    ) -> tuple[str, str | None, int | None, str | None] | None:
         if request.input_ref is None:
             return None
         payload = await self._objects.load_input(
@@ -61,15 +62,19 @@ class _ResourceBuildActivity:
             return None
         model_id = payload.get("embedding_model_id")
         dimensions = payload.get("embedding_dimensions")
+        space_digest = payload.get("embedding_space_digest")
         if model_id is None and dimensions is None:
-            return build_id, None, None
+            return (build_id, None, None, None) if space_digest is None else None
         if (
             not isinstance(model_id, str)
             or not model_id
             or dimensions != PLATFORM_EMBEDDING_DIMENSIONS
+            or not isinstance(space_digest, str)
+            or len(space_digest) != 64
+            or any(char not in "0123456789abcdef" for char in space_digest)
         ):
             return None
-        return build_id, model_id, dimensions
+        return build_id, model_id, dimensions, space_digest
 
     async def _consume(
         self,
@@ -118,6 +123,7 @@ class _ResourceBuildActivity:
         result_ref = await self._objects.put_result(
             request.activity_id,
             {"status": "published"},
+            run_id=context.run.run_id,
         )
         return ActivityOutcome.succeeded(
             result_ref=result_ref,
@@ -195,7 +201,7 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         build_input = await self._build_input(request)
         if build_input is None:
             return ActivityOutcome.failed(failure_code="RESOURCE_BUILD_INPUT_INVALID")
-        build_id, embedding_model_id, embedding_dimensions = build_input
+        build_id, embedding_model_id, embedding_dimensions, embedding_space_digest = build_input
         family_policy = context.run.policy_snapshot.family_policy
         if family_policy.kind != "kb_ingest":
             return ActivityOutcome.failed(failure_code="POLICY_SNAPSHOT_INVALID")
@@ -209,6 +215,7 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
                     policy=family_policy.knowledge_base,
                     embedding_model_id=embedding_model_id,
                     embedding_dimensions=embedding_dimensions,
+                    embedding_space_digest=embedding_space_digest,
                     graph_llm=graph_llm,
                     ocr_llm=ocr_llm,
                 ),

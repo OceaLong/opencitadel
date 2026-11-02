@@ -66,7 +66,7 @@ class Objects:
     async def load_result(self, key):
         return self.results[key]
 
-    async def put_result(self, activity_id, payload):
+    async def put_result(self, activity_id, payload, **_ownership):
         self.written.append((activity_id, payload))
         return f"result://{activity_id}"
 

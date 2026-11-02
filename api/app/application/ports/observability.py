@@ -29,6 +29,13 @@ class ExecutionMetricsSnapshot:
     activity_rows: dict[str, int]
     activity_oldest_age_seconds: dict[str, float]
     projector_cursor_lag: dict[str, int]
+    effect_rows: dict[str, int] = field(default_factory=dict)
+    effect_oldest_age_seconds: dict[str, float] = field(default_factory=dict)
+    effect_request_rows: dict[str, int] = field(default_factory=dict)
+    effect_query_observations: dict[str, int] = field(default_factory=dict)
+    effect_manual_resolutions: dict[str, int] = field(default_factory=dict)
+    effect_resolution_unavailable_rows: int = 0
+    effect_integrity_conflict_rows: int = 0
 
 
 @runtime_checkable

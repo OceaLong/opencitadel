@@ -27,6 +27,7 @@ def run_gate(tmp_path, override=None):
         "query = [identity, namespace, verb, resource]\n"
         "with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(query) + '\\n')\n"
         "allowed = namespace == 'opencitadel-patrol-demo' and verb == 'patch' and resource in ['deployments', 'statefulsets']\n"
+        "allowed = allowed or (namespace == 'opencitadel-patrol-demo' and resource == 'configmaps' and verb in ['get', 'create', 'update'])\n"
         "override = json.loads(os.environ['OVERRIDE'])\n"
         "if override and query == override[:4]: allowed = override[4]\n"
         "print('yes' if allowed else 'no')\n"
@@ -34,7 +35,7 @@ def run_gate(tmp_path, override=None):
     )
     binary.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(ROOT / "deploy/patrol-demo/scripts/assert-actuator-write-scope.sh")],
+        ["bash", str(ROOT / "demo/patrol/scripts/assert-actuator-write-scope.sh")],
         env={
             **os.environ,
             "PATH": f"{tmp_path}:{os.environ['PATH']}",
@@ -68,6 +69,9 @@ def test_both_actuator_identities_and_namespace_boundaries_are_checked(tmp_path)
         [REAL, DEMO, "patch", "deployments", False],
         [REAL, DEMO, "delete", "deployments", True],
         [REAL, DEMO, "get", "secrets", True],
+        [REAL, DEMO, "update", "configmaps", False],
+        [REAL, DEMO, "delete", "configmaps", True],
+        [REAL, "default", "create", "configmaps", True],
         [REAL, "default", "patch", "statefulsets", True],
         [REAL, "kube-system", "patch", "deployments", True],
         [REAL, "default", "list", "secrets", True],

@@ -1,4 +1,4 @@
-"""FastMCP registration for the four fixed operations.
+"""FastMCP registration for the fixed write and recovery operations.
 
 Structure mirrors ops-collector/src/opencitadel_ops_collector/server.py.
 Unlike the Collector (every tool annotated READ_ONLY), the three write
@@ -49,15 +49,32 @@ def create_server(settings: ActuatorSettings | None = None) -> FastMCP:
         """Return deterministic tool and schema hashes without mutating any target."""
         return capability_manifest(cfg.target_ref)
 
+    @server.tool(name="get_operation", annotations=READ_ONLY)
+    async def get_operation(operation_id: str) -> dict:
+        """Read the original operation receipt; never invoke a workload write."""
+        return await actuator.get_operation(operation_id)
+
+    @server.tool(name="get_target", annotations=READ_ONLY)
+    async def get_target(
+        namespace: str, workload: str, kind: Literal["deployment", "statefulset"]
+    ) -> dict:
+        """Read a registered workload's current UID for a new approval; never patch it."""
+        return await actuator.get_target(namespace, workload, kind)
+
     @server.tool(name="restart_workload", annotations=WRITE)
     async def restart_workload(
         namespace: str,
         workload: str,
         kind: Literal["deployment", "statefulset"],
         idempotency_key: str,
+        operation_id: str,
+        payload_digest: str,
+        target_uid: str,
     ) -> dict:
         """Roll a registered Deployment or StatefulSet by patching its pod template restart annotation."""
-        return await actuator.restart_workload(namespace, workload, kind, idempotency_key)
+        return await actuator.restart_workload(
+            namespace, workload, kind, idempotency_key, operation_id, payload_digest, target_uid
+        )
 
     @server.tool(name="scale_workload", annotations=WRITE)
     async def scale_workload(
@@ -66,9 +83,21 @@ def create_server(settings: ActuatorSettings | None = None) -> FastMCP:
         kind: Literal["deployment", "statefulset"],
         replicas: int,
         idempotency_key: str,
+        operation_id: str,
+        payload_digest: str,
+        target_uid: str,
     ) -> dict:
         """Scale a registered Deployment or StatefulSet to a replica count within its registered bounds."""
-        return await actuator.scale_workload(namespace, workload, kind, replicas, idempotency_key)
+        return await actuator.scale_workload(
+            namespace,
+            workload,
+            kind,
+            replicas,
+            idempotency_key,
+            operation_id,
+            payload_digest,
+            target_uid,
+        )
 
     @server.tool(name="rollback_workload", annotations=WRITE)
     async def rollback_workload(
@@ -76,9 +105,14 @@ def create_server(settings: ActuatorSettings | None = None) -> FastMCP:
         workload: str,
         kind: Literal["deployment", "statefulset"],
         idempotency_key: str,
+        operation_id: str,
+        payload_digest: str,
+        target_uid: str,
     ) -> dict:
         """Roll a registered Deployment back to its previous ReplicaSet template. StatefulSets are not supported."""
-        return await actuator.rollback_workload(namespace, workload, kind, idempotency_key)
+        return await actuator.rollback_workload(
+            namespace, workload, kind, idempotency_key, operation_id, payload_digest, target_uid
+        )
 
     return server
 

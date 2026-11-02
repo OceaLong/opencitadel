@@ -1030,7 +1030,7 @@ def test_fixed_public_lookup_preserves_first_key_last_row_and_closed(tmp_path, m
 def test_actual_baseline_round_lookup_keeps_old_binding_gate(tmp_path, physical):
     from scripts.acceptance.capacity_models import Plan
     from scripts.acceptance.capacity_physical import join_round_windows
-    from scripts.execution_capacity.test_inventory_contract import fixture, parse, sample_plan
+    from scripts.execution_capacity.tests.test_inventory_contract import fixture, parse, sample_plan
 
     roles = small_roles()
     _, _, row = fixture()
@@ -1059,7 +1059,7 @@ def test_actual_baseline_round_lookup_keeps_old_binding_gate(tmp_path, physical)
 @pytest.mark.parametrize("kind", ["live", "admission"])
 def test_retained_run_id_sets_preserve_window_error_layer(tmp_path, kind):
     from scripts.acceptance.capacity_derive import validate_windows
-    from scripts.execution_capacity.test_inventory_contract import fixture, parse
+    from scripts.execution_capacity.tests.test_inventory_contract import fixture, parse
 
     roles = small_roles()
     roles["workload"]["errors"] = []

@@ -43,6 +43,10 @@ from app.infrastructure.execution.postgres_formal_projector import PostgresForma
 from app.infrastructure.execution.postgres_owner_scope_source import PostgresOwnerScopeSource
 from app.infrastructure.security.db_authorization import configure_session_authorization
 from core.config import load_deployment_settings
+from tests.app.alembic.test_execution_view_migration import isolated_database  # noqa: F401
+from tests.app.execution_database_fixture import (
+    isolated_execution_database as _db_schema,  # noqa: F401
+)
 from tests.app.execution_test_support import (
     authenticated_session_factory,
     execution_admin_session,
@@ -126,7 +130,7 @@ async def _cleanup_scope(owner_user_id: str) -> None:
 
 
 @pytest.fixture
-async def kernel_factory(_db_schema):
+async def kernel_factory(_db_schema):  # noqa: F811 -- imported isolated pytest fixture
     engine = create_async_engine(execution_kernel_database_uri())
     factory = authenticated_session_factory(
         engine,

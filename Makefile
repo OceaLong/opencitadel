@@ -1,9 +1,12 @@
-.PHONY: quickstart build lint quality-check test test-api test-api-strict test-ui test-sandbox test-patrol test-patrol-fixtures test-actuator acceptance-e2e
+.PHONY: configure quickstart build lint quality-check test test-api test-api-strict test-capacity test-ui test-sandbox test-patrol test-patrol-fixtures test-actuator acceptance-e2e
 
 # Single source of truth for first-party Python lint scope (paths relative to
 # api/, where the ruff-carrying venv lives). CI calls `make lint` — extend the
 # scope here, not in .github/workflows/ci.yml.
 PY_LINT_PATHS := . ../ops-actuator ../ops-collector ../sandbox ../scripts ../demo
+
+configure:
+	@bash scripts/configure-local.sh
 
 quickstart:
 	@bash scripts/quickstart.sh
@@ -37,6 +40,11 @@ test-api:
 # services are unavailable — the anti-false-green variant CI relies on.
 test-api-strict:
 	cd api && OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 OPENCITADEL_REQUIRE_REDIS_TESTS=1 uv run pytest -q --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
+
+# Capacity evidence helpers use API dependencies but live with their tooling.
+# This suite includes large local proof fixtures; run it explicitly.
+test-capacity:
+	cd api && ENV=test PYTHONPATH=.:tests/scripts:.. uv run pytest -q ../scripts/execution_capacity/tests
 
 test-ui:
 	cd ui && npm run test

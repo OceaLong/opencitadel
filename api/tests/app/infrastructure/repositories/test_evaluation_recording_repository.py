@@ -244,6 +244,62 @@ async def test_durable_ledger_concurrent_claim_recovery_and_api_binding_denial(
         with pytest.raises(ReplayMismatch, match="current_approval_required"):
             await match()
         assert reads == []
+        from datetime import UTC, datetime
+
+        from app.domain.execution.commands import CommandEnvelope
+        from app.domain.execution.run import RunAggregate
+        from app.infrastructure.execution.sqlalchemy_orchestrator import (
+            SqlAlchemyExecutionOrchestrator,
+        )
+        from tests.app.execution_test_support import authenticated_session_factory
+
+        orchestrator = SqlAlchemyExecutionOrchestrator(
+            session_factory=authenticated_session_factory(
+                kernel, signing_secret=settings.database_authorization_signing_secret
+            ),
+            aggregates={"run": RunAggregate()},
+            authorization=AuthorizationContext.system("execution-kernel"),
+        )
+
+        async def formal(name, payload):
+            result = await orchestrator.handle(
+                CommandEnvelope(
+                    command_id=uuid4(),
+                    command_type=name,
+                    command_schema_version=1,
+                    stream_type="run",
+                    stream_id=str(run_id),
+                    owner_user_id=scope.user_id,
+                    team_id=scope.team_id,
+                    correlation_id=run_id,
+                    causation_id=None,
+                    issued_at=datetime.now(UTC),
+                    payload=payload,
+                )
+            )
+            assert result.status == "accepted", result
+
+        async def approve(activity_id):
+            approval_id = uuid4()
+            await formal(
+                "RequestApproval",
+                {
+                    "approval_id": str(approval_id),
+                    "subject_activity_id": str(activity_id),
+                    "approval_kind": "tool_effect",
+                    "subject_label": "write_file",
+                    "risk_summary": "simulated recorded write",
+                },
+            )
+            await formal(
+                "DecideApproval",
+                {
+                    "approval_id": str(approval_id),
+                    "decision": "approved",
+                    "actor_user_id": principal.user_id,
+                },
+            )
+
         from tests.app.execution_test_support import execution_admin_session
 
         async with execution_admin_session() as db:
@@ -259,25 +315,29 @@ async def test_durable_ledger_concurrent_claim_recovery_and_api_binding_denial(
                 },
             )
             await db.commit()
+        # A fabricated/lagging UI view is never physical approval authority.
+        with pytest.raises(ReplayMismatch, match="current_approval_required"):
+            await match()
+        assert reads == []
+        await formal(
+            "CreateRun",
+            {
+                "family": "agent",
+                "source_entity_type": "evaluation_recorded_case",
+                "source_entity_id": "case-one",
+                "semantic_payload": {},
+                "policy_snapshot": snapshot.model_dump(mode="json"),
+            },
+        )
+        await formal("StartRun", {})
+        await approve(context.activity_id)
         first, second = await asyncio.gather(match(), match())
         assert first.simulated_effect
 
         assert first == second
         assert await match() == first  # crash after durable consume, before handler settlement
         another = SimpleNamespace(activity_id=uuid4(), run=context.run)
-        async with execution_admin_session() as db:
-            await db.execute(
-                text(
-                    """INSERT INTO execution_approval_projection(approval_id,run_id,source_entity_type,source_entity_id,approval_kind,subject_activity_id,subject_label,risk_summary,status,owner_user_id,request_event_position,requested_at) VALUES(:id,:run,'evaluation_recorded_case','case-one','tool_effect',:activity,'write_file','simulated write','approved',:owner,2,CURRENT_TIMESTAMP)"""
-                ),
-                {
-                    "id": uuid4(),
-                    "run": run_id,
-                    "activity": another.activity_id,
-                    "owner": scope.user_id,
-                },
-            )
-            await db.commit()
+        await approve(another.activity_id)
         with pytest.raises(ReplayMismatch, match="slot_already_consumed"):
             await adapter.match(another, "write_file", contract.digest, arguments, "root", 0)
         async with uow(auth) as work:

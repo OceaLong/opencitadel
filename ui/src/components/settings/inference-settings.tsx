@@ -73,6 +73,11 @@ export function InferenceSettings({ embedded = false, isAdmin = false, userId }:
   const state = useInferenceSettings();
   const t = useTranslations("settingsInference");
   const tCommon = useTranslations("common");
+  const purposeHints: Record<InferencePurpose, string> = {
+    chat: t("purposeHint_chat"),
+    embedding: t("purposeHint_embedding"),
+    rerank: t("purposeHint_rerank"),
+  };
   const modelsByEndpoint = useMemo(() => {
     const grouped = new Map<string, InferenceModel[]>();
     for (const model of state.models) {
@@ -149,6 +154,7 @@ export function InferenceSettings({ embedded = false, isAdmin = false, userId }:
         <CardHeader>
           <CardTitle>{t("bindingsTitle")}</CardTitle>
           <CardDescription>{t("bindingsDescription")}</CardDescription>
+          <CardDescription>{t("knowledgeBindingsHint")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           {purposes.map((purpose) => {
@@ -161,6 +167,7 @@ export function InferenceSettings({ embedded = false, isAdmin = false, userId }:
                   <Label className="capitalize">{t(`purpose_${purpose}`)}</Label>
                   {inherited ? <Badge variant="outline">{t("inheritedGlobal")}</Badge> : null}
                 </div>
+                <p className="text-muted-foreground mb-2 text-xs">{purposeHints[purpose]}</p>
                 <Select
                   value={bindingSelectionValue(binding)}
                   onValueChange={(modelId) => {

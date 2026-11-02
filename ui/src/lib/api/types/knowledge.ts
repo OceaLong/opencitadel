@@ -112,6 +112,8 @@ export type KnowledgeVersion = {
   parent_version_id?: string | null;
   build_id: string;
   state: KnowledgeVersionState;
+  embedding_space_digest?: string | null;
+  revision_assurance?: "unverified_alias" | null;
   capabilities: Record<string, unknown>;
   degraded_reasons: string[];
   metrics: Record<string, unknown>;

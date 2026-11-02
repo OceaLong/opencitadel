@@ -5,12 +5,15 @@ from __future__ import annotations
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import ClassVar
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
+from uuid import UUID
 
 import pytest
 
 from app.application.execution.agent_tool_catalog import AgentToolCatalog, _SessionSandbox
+from app.domain.evaluation.configuration import digest
 from app.domain.execution.activity import ActivityContext
+from app.domain.execution.tool_contract import ToolApprovalSubject, ToolContractChanged
 from app.domain.models.inference import (
     ChatModelSettings,
     InferenceCapabilities,
@@ -18,10 +21,13 @@ from app.domain.models.inference import (
     InferenceModel,
     ResolvedInferenceModel,
 )
-from app.domain.models.integration_runtime import A2ARuntime, MCPRuntime
+from app.domain.models.integration_runtime import A2ARuntime
+from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.skill import Skill
 from app.domain.models.tool_policy import CONSERVATIVE_TOOL_POLICY
+from app.domain.runtime_policy import KnowledgeRerankPolicy, initial_execution_policy
 from app.domain.services.tools.errors import ToolInvocationError
+from app.domain.utils.integration_runtime_builder import mcp_records_to_runtime
 from tests.app.execution_test_support import run_execution_context_for
 
 CONTEXT = ActivityContext(
@@ -32,6 +38,9 @@ CONTEXT = ActivityContext(
     team_id=None,
     run=run_execution_context_for("agent"),
 )
+
+
+_MCP_RECORD = MCPServerRecord(id="collector", name="collector", url="https://example.com/mcp")
 
 
 class _Skills:
@@ -48,6 +57,22 @@ class _Skills:
 class _Uow(AbstractAsyncContextManager):
     def __init__(self, skill: Skill | None) -> None:
         self.skill = _Skills(skill)
+        self.execution_usage = SimpleNamespace(
+            invocation_authority=AsyncMock(
+                return_value={
+                    "scope": CONTEXT.run.owner_scope.model_dump(mode="json"),
+                    "authorization_epoch": "a" * 64,
+                }
+            ),
+            authorize_tool=AsyncMock(),
+        )
+        self.evaluation_recording = SimpleNamespace(
+            connector_binding=AsyncMock(return_value="b" * 64)
+        )
+        self.mcp_server = SimpleNamespace(get_by_id=AsyncMock(return_value=_MCP_RECORD))
+
+    async def commit(self):
+        pass
 
     async def __aenter__(self):
         return self
@@ -58,6 +83,9 @@ class _Uow(AbstractAsyncContextManager):
 
 class _MCPManager:
     connection_errors: ClassVar[dict] = {}
+
+    def get_tool_source(self, name):
+        return ("collector", "read")
 
     async def get_all_tools(self):
         return [
@@ -98,7 +126,7 @@ class _MCPServers:
 
     async def resolve_mcp_runtime(self, scope, *, server_refs=None):
         self.refs = server_refs
-        return MCPRuntime()
+        return mcp_records_to_runtime([_MCP_RECORD])
 
 
 class _A2AServers:
@@ -178,6 +206,25 @@ def _payload(skill_id: str):
     }
 
 
+async def _bound(catalog, payload, context, name, arguments):
+    snapshot = await catalog.definitions(payload, context)
+    contract = next(value.contract for value in snapshot.definitions if value.name == name)
+    subject = ToolApprovalSubject(
+        invocation_id=UUID(int=101),
+        originating_activity_id=UUID(int=100),
+        tool_call_id="call",
+        tool_name=name,
+        contract_ref="private-ref",
+        contract_object_digest="a" * 64,
+        contract_digest=contract.digest,
+        arguments_digest=digest(arguments),
+        target_digest=digest({"rule": "all_arguments_v1", "arguments": arguments}),
+        scope_digest=digest(snapshot.authority["scope"]),
+        authorization_epoch=snapshot.authority["authorization_epoch"],
+    )
+    return {"invocation": subject, "contract": contract}
+
+
 @pytest.mark.asyncio
 async def test_skill_filters_tool_exposure_and_execution() -> None:
     skill = Skill(
@@ -239,14 +286,13 @@ async def test_image_generation_is_a_governed_formal_tool() -> None:
 
     assert list(snapshot.tool_names) == ["generate_image"]
     assert snapshot.definitions[0].requires_approval is True
-    result = await catalog.invoke(
-        _payload(skill.id),
-        CONTEXT,
-        name="generate_image",
-        arguments={"prompt": "draw a citadel"},
-    )
-    assert result["success"] is True
-    assert result["data"]["image_url"] == "https://example.com/generated.png"
+    with pytest.raises(ToolContractChanged, match="invocation_binding_required"):
+        await catalog.invoke(
+            _payload(skill.id),
+            CONTEXT,
+            name="generate_image",
+            arguments={"prompt": "draw a citadel"},
+        )
 
 
 @pytest.mark.asyncio
@@ -291,7 +337,8 @@ async def test_session_sandbox_allocation_passes_verified_owner_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rerank_llm_is_wired_when_kb_bound() -> None:
+@pytest.mark.parametrize("selected_model_id", [None, "selected-chat-model"])
+async def test_rerank_llm_is_wired_when_kb_bound(selected_model_id) -> None:
     # Regression: rerank stayed a no-op because the catalog never built a chat
     # client for the KnowledgeBaseTool. With a bound KB and rerank enabled the
     # llm_factory must be invoked so retrieval can actually rerank.
@@ -303,10 +350,23 @@ async def test_rerank_llm_is_wired_when_kb_bound() -> None:
         return SimpleNamespace(invoke=AsyncMock())
 
     catalog, _, _ = _catalog(skill, llm_factory=_factory)
+    catalog._models.resolve_chat = AsyncMock(wraps=catalog._models.resolve_chat)
+    initial = initial_execution_policy()
+    enhanced = initial.model_copy(
+        update={
+            "knowledge_base": initial.knowledge_base.model_copy(
+                update={"rerank": KnowledgeRerankPolicy(enabled=True)}
+            )
+        }
+    )
+    context = CONTEXT.model_copy(
+        update={"run": run_execution_context_for("agent", policy=enhanced)}
+    )
     payload = {
         "session_id": "session-1",
         "mode": "agent",
         "skill_id": "skill-1",
+        "model_id": selected_model_id,
         "resource_bindings": [
             {
                 "resource_kind": "knowledge_base",
@@ -316,10 +376,37 @@ async def test_rerank_llm_is_wired_when_kb_bound() -> None:
         ],
     }
 
-    await catalog.definitions(payload, CONTEXT)
+    await catalog.definitions(payload, context)
 
     assert len(calls) == 1
     assert calls[0]["thinking_enabled"] is False
+    # Agent tool assembly also resolves its selected chat model for vision.
+    # Both lookups must stay bound to the selected model and owner scope.
+    assert catalog._models.resolve_chat.await_args_list == [
+        call(selected_model_id, scope=context.run.owner_scope),
+        call(selected_model_id, scope=context.run.owner_scope),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_basic_knowledge_tool_never_resolves_a_rerank_chat_model() -> None:
+    factory = Mock(side_effect=AssertionError("rerank disabled"))
+    catalog, _, _ = _catalog(None, llm_factory=factory)
+    catalog._models.resolve_chat = AsyncMock(side_effect=AssertionError("rerank disabled"))
+    context = CONTEXT.model_copy(
+        update={"run": run_execution_context_for("agent", policy=initial_execution_policy())}
+    )
+
+    client = await catalog._rerank_llm(
+        {"model_id": "selected-chat-model"},
+        context=context,
+        scope=context.run.owner_scope,
+        bindings=[{"resource_kind": "knowledge_base", "resource_id": "kb-1", "version_id": "v1"}],
+    )
+
+    assert client is None
+    catalog._models.resolve_chat.assert_not_awaited()
+    factory.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -353,7 +440,8 @@ async def test_policy_wrapped_knowledge_tool_records_exact_citations(monkeypatch
 
     result = await catalog.retrieve(payload, context, query="beacon")
     assert len(result["sources"]) == 1
-    await catalog.invoke(payload, context, name="kb_search", arguments={"query": "beacon"})
+    bound = await _bound(catalog, payload, context, "kb_search", {"query": "beacon"})
+    await catalog.invoke(payload, context, name="kb_search", arguments={"query": "beacon"}, **bound)
     assert record.await_count == 2
     assert all(call.args == ([citation],) for call in record.await_args_list)
 
@@ -479,7 +567,8 @@ async def test_invoke_runs_on_cancel_hook_before_propagating(monkeypatch) -> Non
 
     monkeypatch.setattr(catalog, "_build", fake_build)
 
+    bound = await _bound(catalog, {}, CONTEXT, "hang_forever", {})
     with pytest.raises(asyncio.CancelledError):
-        await catalog.invoke({}, CONTEXT, name="hang_forever", arguments={})
+        await catalog.invoke({}, CONTEXT, name="hang_forever", arguments={}, **bound)
 
     assert pack.cancelled is True

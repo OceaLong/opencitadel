@@ -2,6 +2,8 @@ import logging
 from collections.abc import Callable
 
 from app.domain.errors import BadRequestError, NotFoundError
+from app.domain.execution.context_models import context_digest
+from app.domain.execution.context_resources import ContextMemoryRecall, ContextMemoryVersion
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.uow import IUnitOfWork
@@ -76,7 +78,7 @@ class MemoryService:
         policy: MemoryExecutionPolicy,
     ) -> MemoryEntry:
         await self._validate_entry(entry, owner_scope=owner_scope)
-        vector = await self._embed(
+        vector, space_digest = await self._embed(
             f"{entry.title}\n{entry.content}",
             owner_scope or self._entry_scope(entry),
             policy=policy,
@@ -85,8 +87,10 @@ class MemoryService:
         await self._validate_entry(entry, owner_scope=owner_scope)
         async with self._uow_factory() as uow:
             await uow.memory_entry.save(entry)
-            if vector:
-                await uow.memory_entry.update_embedding(entry.id, vector)
+            await uow.memory_entry.update_embedding(
+                entry.id, vector or None, embedding_space_digest=space_digest
+            )
+            entry.embedding_space_digest = space_digest
             await uow.commit()
         return entry
 
@@ -103,7 +107,7 @@ class MemoryService:
             existing = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
             if not existing:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
-        vector = await self._embed(
+        vector, space_digest = await self._embed(
             f"{updates.title}\n{updates.content}",
             owner_scope or self._entry_scope(updates),
             policy=policy,
@@ -118,8 +122,10 @@ class MemoryService:
             await uow.memory_entry.save(
                 updates, expected_updated_at=existing.updated_at, owner_scope=owner_scope
             )
-            if vector:
-                await uow.memory_entry.update_embedding(entry_id, vector)
+            await uow.memory_entry.update_embedding(
+                entry_id, vector or None, embedding_space_digest=space_digest
+            )
+            updates.embedding_space_digest = space_digest
             await uow.commit()
         return updates
 
@@ -138,19 +144,33 @@ class MemoryService:
         owner_scope: OwnerScope,
         policy: MemoryExecutionPolicy,
     ) -> str:
-        """召回长期记忆并格式化为system块（时间衰减 + 可选向量混合检索）"""
-        query_text = ""
+        """Compatibility entry point for callers without an accepted query cut."""
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id, scope=owner_scope)
             if session is None:
                 raise NotFoundError(f"会话[{session_id}]不存在")
             query_text = session.latest_message or ""
-        query_vector = (
-            await self._embed(
-                query_text, owner_scope, policy=policy, purpose_context="memory.query"
-            )
-            if policy.vector_enabled and query_text.strip()
-            else []
+        recall = await self.recall_context(
+            session_id, query=query_text, owner_scope=owner_scope, policy=policy
+        )
+        return recall.content
+
+    async def recall_context(
+        self,
+        session_id: str,
+        *,
+        query: str,
+        owner_scope: OwnerScope,
+        policy: MemoryExecutionPolicy,
+    ) -> ContextMemoryRecall:
+        """Bind retrieval to the accepted input and each selected content revision."""
+        async with self._uow_factory() as uow:
+            if await uow.session.get_by_id(session_id, scope=owner_scope) is None:
+                raise NotFoundError(f"会话[{session_id}]不存在")
+        query_vector, space_digest = (
+            await self._embed(query, owner_scope, policy=policy, purpose_context="memory.query")
+            if policy.vector_enabled and query.strip()
+            else ([], None)
         )
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id, scope=owner_scope)
@@ -167,6 +187,7 @@ class MemoryService:
                         query_vector,
                         session_id=session_id,
                         limit=policy.recall_limit,
+                        embedding_space_digest=space_digest,
                     )
                     if query_vector
                     else []
@@ -185,13 +206,18 @@ class MemoryService:
             async with self._uow_factory() as uow:
                 await uow.memory_entry.touch_used([e.id for e in entries])
                 await uow.commit()
-        if not entries:
-            return ""
         lines = []
         for e in entries:
             tags_str = ",".join(e.tags) if e.tags else ""
             lines.append(f"- [{tags_str}] {e.title}: {e.content}")
-        return "<long_term_memory>\n" + "\n".join(lines) + "\n</long_term_memory>"
+        return ContextMemoryRecall(
+            query_digest=context_digest(query),
+            query_embedding_space_digest=space_digest,
+            content="<long_term_memory>\n" + "\n".join(lines) + "\n</long_term_memory>"
+            if entries
+            else "",
+            entries=tuple(ContextMemoryVersion.from_entry(entry) for entry in entries),
+        )
 
     async def save_from_tool(
         self,
@@ -226,17 +252,19 @@ class MemoryService:
         *,
         policy: MemoryExecutionPolicy,
         purpose_context: str,
-    ) -> list[float]:
+    ) -> tuple[list[float], str | None]:
         if not policy.vector_enabled or not content.strip():
-            return []
+            return [], None
         if self._embeddings is None:
             raise RuntimeError("memory vector search requires EmbeddingService")
+        space = await self._embeddings.resolve_space(scope=scope)
         vectors = await self._embeddings.embed(
             [content],
             scope=scope,
             purpose_context=purpose_context,
+            expected_space=space,
         )
-        return vectors[0] if vectors else []
+        return (vectors[0], space.digest) if vectors and vectors[0] else ([], None)
 
     @staticmethod
     def _entry_scope(entry: MemoryEntry) -> OwnerScope | None:

@@ -16,7 +16,7 @@ from app.domain.models.patrol import (
 )
 from app.domain.services.patrol_assertion_engine import PatrolAssertionEngine
 
-FIXTURES = Path(__file__).parents[4] / "deploy" / "patrol-demo" / "fixtures"
+FIXTURES = Path(__file__).parents[4] / "demo" / "patrol" / "fixtures"
 
 # This suite replays PatrolAssertionEngine (a pure, read-only check
 # classifier) against synthesized observations and asserts the result

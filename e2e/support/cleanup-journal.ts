@@ -10,6 +10,10 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
+import {
+  validatePublishedTeamRetention,
+  type PublishedTeamRetention,
+} from "./published-team-retention";
 
 type RuntimePolicyCleanup = {
   action: "restore-runtime-policy";
@@ -52,6 +56,7 @@ type ResourceCleanup = {
     | "inference-model"
     | "inference-binding"
     | "memory"
+    | "skill"
     | "evaluation-dataset"
     | "evaluation-config"
     | "evaluation-rubric"
@@ -70,6 +75,7 @@ type ResourceCleanup = {
   created_at?: string;
   retained_accounting?: boolean;
   expected_unknown_retention?: true;
+  expected_team_retention?: PublishedTeamRetention;
   expected_retention?: {
     resource_version: string;
     owners: { owner_kind: string; owner_id: string }[];
@@ -124,7 +130,21 @@ function journalRoot(environment: NodeJS.ProcessEnv): string {
   return resolve(evidenceDir, "cleanup-journal");
 }
 
-function validateAction(value: CleanupAction): void {
+function validateAction(value: CleanupAction, runId: string): void {
+  if ("expected_team_retention" in value) {
+    if (
+      value.action !== "delete-resource" ||
+      value.resource !== "team" ||
+      value.workspace_id !== undefined ||
+      !value.expected_team_retention
+    )
+      throw new Error("published retention requires an exact owned team");
+    validatePublishedTeamRetention(
+      value.expected_team_retention,
+      value.resource_id,
+      runId,
+    );
+  }
   if (
     "expected_unknown_retention" in value &&
     (value.action !== "delete-resource" ||
@@ -183,7 +203,7 @@ export function registerCleanupAction(
   value: CleanupAction,
   environment: NodeJS.ProcessEnv = process.env,
 ): CleanupEntry {
-  validateAction(value);
+  validateAction(value, environment.ACCEPTANCE_RUN_ID ?? "");
   const root = journalRoot(environment);
   const pending = join(root, "pending");
   mkdirSync(pending, { recursive: true });
@@ -222,7 +242,7 @@ export function readCleanupActions(
       ) {
         throw new Error(`cleanup journal identity mismatch: ${name}`);
       }
-      validateAction(document.value);
+      validateAction(document.value, document.run_id);
       return { ...document, path };
     })
     .sort((left, right) => right.order.localeCompare(left.order));
@@ -296,6 +316,29 @@ export function bindExpectedRetention(
     { mode: 0o600 },
   );
   renameSync(temporary, entry.path);
+}
+
+export function bindPublishedTeamRetention(
+  entry: CleanupEntry,
+  retention: PublishedTeamRetention,
+): void {
+  if (
+    entry.value.action !== "delete-resource" ||
+    entry.value.resource !== "team" ||
+    entry.value.workspace_id !== undefined
+  )
+    throw new Error("published retention requires an exact owned team");
+  validatePublishedTeamRetention(
+    retention,
+    entry.value.resource_id,
+    entry.run_id,
+  );
+  entry.value.expected_team_retention = retention;
+  const temporary = entry.path + "." + randomUUID() + ".tmp";
+  const { path: _path, ...document } = entry;
+  durableFile(temporary, JSON.stringify(document));
+  renameSync(temporary, entry.path);
+  syncDirectory(dirname(entry.path));
 }
 
 /** A failed scope retains its access dependencies, including on journal replay. */

@@ -40,6 +40,12 @@ Supervisor manages multiple processes:
 
 Every `/api/*` request requires `Authorization: Bearer <SANDBOX_ACCESS_TOKEN>`; an unconfigured token returns 503 and a wrong/missing header returns 401. API/kernel derive and inject each dynamic sandbox token with `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)`; the seed stays outside the sandbox. `/openapi.json` is outside that prefix. CDP/VNC ports do not use this HTTP middleware and must remain behind internal networks and the API proxy.
 
+### Shell completion and output
+
+`exec-command` returns `completed` after the process exits and its output reader finishes; the return code reports command success or failure. Both stages share the existing five-second total wait budget. If either is still pending, the response is `running`; use `read-shell-output` for output collected so far or `wait-process` to wait again within its requested timeout.
+
+A timeout or cancellation of the waiting request leaves background output collection active. Replacing or removing the Shell session retires its previous reader, and previous output cannot enter the new command's output or console record. An output read failure makes `exec-command` and `wait-process` fail explicitly instead of reporting `completed` with partial output.
+
 ### Path containment and sudo escaping
 
 `FileService` normalizes every file/directory path against

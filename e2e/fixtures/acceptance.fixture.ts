@@ -1,6 +1,7 @@
 import { expect, type Page, test as base } from "@playwright/test";
 
 import { appApi } from "../support/api";
+import { useWithSessionRetirement } from "../support/session-retirement";
 import {
   readBootstrapState,
   type BootstrapState,
@@ -41,9 +42,17 @@ async function loginAsAcceptanceAdmin(page: Page): Promise<void> {
 }
 
 export const test = base.extend<AcceptanceFixtures>({
-  operatorPage: async ({ page }, use) => {
+  operatorPage: async ({ page }, use, info) => {
     await loginAsAcceptanceAdmin(page);
-    await use(page);
+    // Bootstrap strict sources and patrol scenarios are shared across cases.
+    // Execution/resource cases complete their history and citation reads here.
+    if (
+      ["execution", "resources", "phase1-execution", "phase2-context"].includes(
+        info.project.name,
+      )
+    )
+      await useWithSessionRetirement(page, use);
+    else await use(page);
   },
   bootstrapState: async ({}, use) => {
     const state = readBootstrapState();

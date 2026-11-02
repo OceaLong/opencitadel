@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.application.execution.content_sanitization import sanitize_content
 from app.domain.execution.commands import JsonValue, RegisteredCommand
 from app.domain.execution.run import RunState, RunStatus
+from app.domain.execution.tool_contract import ToolApprovalSubject
 
 
 class ActivityStep(BaseModel):
@@ -141,6 +144,8 @@ def request_activity(
     input_payload: dict[str, JsonValue],
     public_data: dict[str, JsonValue] | None = None,
     parent_activity_id: UUID | None = None,
+    invocation_id: UUID | None = None,
+    subject_digest: str | None = None,
 ) -> RegisteredCommand:
     return command(
         state,
@@ -154,7 +159,8 @@ def request_activity(
             "input_payload": input_payload,
             "public_data": public_data or {},
             "parent_activity_id": str(parent_activity_id) if parent_activity_id else None,
-            "invocation_id": None,
+            "invocation_id": str(invocation_id) if invocation_id else None,
+            "subject_digest": subject_digest,
         },
     )
 
@@ -168,6 +174,8 @@ def request_approval(
     risk_summary: str,
     subject_label: str,
     choices: list[str] | None = None,
+    subject: ToolApprovalSubject | None = None,
+    public_preview: dict | None = None,
 ) -> RegisteredCommand:
     payload: dict[str, JsonValue] = {
         "approval_id": str(approval_id),
@@ -175,10 +183,27 @@ def request_approval(
         "approval_kind": approval_kind,
         "risk_summary": risk_summary[:1024],
         "subject_label": subject_label[:128],
+        "subject": subject.model_dump(mode="json") if subject else None,
+        "subject_digest": subject.digest if subject else None,
     }
     if choices:
         # Clarification card options (already normalized by model.call).
         payload["choices"] = [choice[:200] for choice in choices[:6]]
+    if public_preview is not None:
+        cleaned = sanitize_content(public_preview)
+        encoded_preview = json.dumps(
+            cleaned, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        if len(encoded_preview.encode()) > 131_072:
+            return command(
+                state,
+                "FailRun",
+                {"failure_code": "TOOL_APPROVAL_PREVIEW_TOO_LARGE", "retryable": False},
+            )
+        payload["public_preview"] = {
+            "arguments_json": encoded_preview,
+            "redacted": cleaned != public_preview,
+        }
     return command(state, "RequestApproval", payload)
 
 
@@ -203,11 +228,24 @@ def fail_for_activity(
     *,
     activity_id: UUID | None = None,
     max_retries: int,
-) -> RegisteredCommand:
+) -> RegisteredCommand | None:
     if not isinstance(max_retries, int) or isinstance(max_retries, bool):
         raise TypeError("max_retries must be an integer")
     if max_retries < 0 or max_retries > 10:
         raise ValueError("max_retries must be between 0 and 10")
+    if status == "unknown":
+        return None
+    failure = activity_failure_code(state, activity_id) if activity_id is not None else None
+    if failure in {"TOOL_CONTRACT_CHANGED", "TOOL_AUTHORIZATION_CHANGED"}:
+        return command(
+            state,
+            "WaitRun",
+            {
+                "reason": "authorization_changed"
+                if failure == "TOOL_AUTHORIZATION_CHANGED"
+                else "contract_changed"
+            },
+        )
     return command(
         state,
         "FailRun",
@@ -290,10 +328,15 @@ def activity_result(
 
 
 def result_refs(state: RunState) -> list[str]:
+    # Renewal output is private planner metadata, not a model conversation
+    # message. Only the eventually approved tool result belongs in history.
+    preparation_ids = {item.prepare_activity_id for item in state.tool_intent_refreshes}
     return [
         result_ref
-        for _, generation, result_ref, _, _ in state.activity_results
-        if generation == state.retry_generation and result_ref is not None
+        for activity_id, generation, result_ref, _, _ in state.activity_results
+        if generation == state.retry_generation
+        and result_ref is not None
+        and activity_id not in preparation_ids
     ]
 
 
@@ -313,7 +356,11 @@ def command(
             f"opencitadel:{state.run_id}:{state.stream_version}:{command_type}",
         ),
         command_type=command_type,
-        command_schema_version=2 if command_type == "RequestActivity" else 1,
+        command_schema_version={
+            "RequestActivity": 4,
+            "RequestApproval": 2,
+            "DecideApproval": 2,
+        }.get(command_type, 1),
         run_id=state.run_id,
         expected_stream_version=state.stream_version,
         payload=payload,

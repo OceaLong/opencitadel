@@ -37,6 +37,15 @@ spec:
               {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "redis") | nindent 14 }}
       ports:
         - {protocol: TCP, port: 6379}
+    {{- if .Values.minio.enabled }}
+    # Required for kernel storage initialization and artifact uploads.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "opencitadel.selectorLabels" (dict "root" $ "component" "minio") | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 9000}
+    {{- end }}
     {{- if .Values.opsCollector.enabled }}
     # 只读巡检 Collector 的推送端口。
     - to:

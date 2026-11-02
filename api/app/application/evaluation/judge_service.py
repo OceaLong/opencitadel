@@ -1,6 +1,7 @@
 """Executable durable model-scoring consumer; provider work stays in restricted ASK."""
 
 import logging
+from contextlib import asynccontextmanager
 from uuid import NAMESPACE_URL, uuid5
 
 from app.application.evaluation.budget_admission import (
@@ -165,9 +166,7 @@ class JudgeService:
             _, principal = await work.evaluation_judge.current(scope, intent)
             subject = await work.evaluation_budget_control.binding(scope, candidate.run_id)
 
-        async def resolver(owner, run_id, actual_policy):
-            if actual_policy != pair.execution.revision.policy:
-                raise ValueError("judge_policy_changed")
+        async def capture_configuration(run_id):
             evidence = f07_configuration_evidence(
                 scope, config, pair.execution, purpose="evaluation_judge"
             )
@@ -177,73 +176,91 @@ class JudgeService:
                 evidence["physical_requester"] = await work.execution_usage.capture_requester(
                     scope, authorization, run_id=run_id
                 )
-                saved = await work.execution_usage.admission_snapshot(
+                identity = await work.execution_usage.admission_snapshot(
                     scope, run_id, evidence, "evaluation_judge"
                 )
                 await work.commit()
-                return saved
+                return identity
+
+        async def resolver(owner, run_id, actual_policy, *, inference_read_context):
+            if actual_policy != pair.execution.revision.policy:
+                raise ValueError("judge_policy_changed")
+            return configuration_id
 
         class Sink:
+            def __init__(self, work=None):
+                self.work = work
+                self._session = work.db_session if work is not None else None
+
+            @asynccontextmanager
+            async def admission_transaction(self):
+                async with service.uow_factory(KERNEL) as work:
+                    yield Sink(work), work
+                    await work.commit()
+
             async def receive(self, envelope, *, max_active_runs=0):
+                if self.work is None:
+                    async with self.admission_transaction() as (bound, _):
+                        return await bound.receive(envelope, max_active_runs=max_active_runs)
+                work = self.work
                 if envelope.payload["policy_snapshot"] != snapshot.model_dump(mode="json"):
                     raise ValueError("judge_policy_changed")
-                async with service.uow_factory(KERNEL) as work:
-                    await work.evaluation_batch.lock(scope, candidate.batch_id)
-                    saved = await work.evaluation_judge.get(scope, intent["run_id"])
-                    if saved["status"] != "pending":
-                        return None
-                    await work.evaluation_judge.current(scope, intent, lock=True)
-                    if intent["rescore"]:
-                        await prepare_rescore_namespace(
-                            work,
-                            service.suites,
-                            scope,
-                            principal,
-                            intent,
-                            suite,
-                            config,
-                            pair,
-                            subject,
-                        )
-                    else:
-                        await prepare_budget_namespace(
-                            work,
-                            service.suites,
-                            scope,
-                            principal,
-                            namespace_id=intent["namespace_id"],
-                            suite_version_id=suite.id,
-                            policy_pair=pair,
-                        )
-                    await prepare_budget_binding(
+                await work.evaluation_batch.lock(scope, candidate.batch_id)
+                saved = await work.evaluation_judge.get(scope, intent["run_id"])
+                if saved["status"] != "pending":
+                    return None
+                await work.evaluation_judge.current(scope, intent, lock=True)
+                if intent["rescore"]:
+                    await prepare_rescore_namespace(
                         work,
                         service.suites,
                         scope,
                         principal,
-                        selection=BudgetBindingSelection(
-                            namespace_id=intent["namespace_id"],
-                            run_id=intent["run_id"],
-                            source_entity_id=str(intent["id"]),
-                            case_id=candidate.case_revision_id,
-                            config_version_id=config.id,
-                            subject_config_version_id=candidate.config_version_id,
-                            repeat=subject.repeat,
-                        ),
+                        intent,
+                        suite,
+                        config,
+                        pair,
+                        subject,
+                    )
+                else:
+                    await prepare_budget_namespace(
+                        work,
+                        service.suites,
+                        scope,
+                        principal,
+                        namespace_id=intent["namespace_id"],
+                        suite_version_id=suite.id,
                         policy_pair=pair,
-                        policy_snapshot=snapshot,
                     )
-                    await work.evaluation_execution.prepare(
-                        scope, intent["run_id"], service.execution_policy
-                    )
-                    received = await work.execution_commands.receive(
-                        envelope, max_active_runs=max_active_runs
-                    )
-                    await work.evaluation_judge.update(
-                        scope, intent, status="submitted", envelope=envelope
-                    )
-                    await work.commit()
-                    return received
+                await prepare_budget_binding(
+                    work,
+                    service.suites,
+                    scope,
+                    principal,
+                    selection=BudgetBindingSelection(
+                        namespace_id=intent["namespace_id"],
+                        run_id=intent["run_id"],
+                        source_entity_id=str(intent["id"]),
+                        case_id=candidate.case_revision_id,
+                        config_version_id=config.id,
+                        subject_config_version_id=candidate.config_version_id,
+                        repeat=subject.repeat,
+                    ),
+                    policy_pair=pair,
+                    policy_snapshot=snapshot,
+                )
+                await work.evaluation_execution.prepare(
+                    scope, intent["run_id"], service.execution_policy
+                )
+                received = await work.execution_commands.receive(
+                    envelope, max_active_runs=max_active_runs
+                )
+                await work.evaluation_judge.update(
+                    scope, intent, status="submitted", envelope=envelope
+                )
+                return received
 
+        configuration_id = await capture_configuration(intent["run_id"])
         await self.admission.admit(
             family=RunFamily.ASK,
             source_entity_type="evaluation_judge",

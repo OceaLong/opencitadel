@@ -1,11 +1,18 @@
 """Trusted isolated catalog dispatch. Never constructs an ordinary session catalog."""
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from uuid import UUID
 
 from app.application.evaluation.environment_service import validate_environment
 from app.application.execution.tool_catalog import CatalogSnapshot, ToolDefinition
-from app.domain.evaluation.configuration import ConfigVersion
+from app.domain.evaluation.configuration import ConfigVersion, digest
+from app.domain.evaluation.recording import validate_typed
+from app.domain.execution.tool_contract import (
+    RecordedContract,
+    ToolContractChanged,
+    execution_contract,
+)
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import OwnerScope, Principal
 from app.domain.services.tools.base import ToolExecutionPolicy
@@ -33,8 +40,14 @@ class EnvironmentRuntime:
             raise ValueError("environment_binding_missing")
         return binding is not None
 
-    async def access(self, context, *, tool=None):
-        binding = await self.binding(context.run)
+    async def access(
+        self, context, *, tool=None, uow=None, locked=False, approval_subject_digest=None
+    ):
+        binding = (
+            await uow.evaluation_environment.binding(context.run.owner_scope, context.run.run_id)
+            if uow is not None
+            else await self.binding(context.run)
+        )
         if binding is None:
             raise ValueError("environment_binding_missing")
         principal = Principal.model_validate(binding["principal"])
@@ -53,11 +66,17 @@ class EnvironmentRuntime:
             or admission["policy_digest"] != context.run.policy_snapshot.snapshot_digest
         ):
             raise ValueError("environment_admission_binding_invalid")
-        async with self.uow_factory(
-            AuthorizationContext.for_principal(principal, scope=scope)
+        async with (
+            nullcontext(uow)
+            if uow is not None
+            else self.uow_factory(AuthorizationContext.for_principal(principal, scope=scope))
         ) as uow:
             repo = uow.evaluation_environment
-            lease = await repo.lease(scope, binding["lease_id"])
+            if locked:
+                await uow.execution_usage.authorize_principal(scope, principal, lock=True)
+            lease = await repo.lease(
+                scope, binding["lease_id"], **({"lock": True} if locked else {})
+            )
             if (
                 lease.state != "leased"
                 or lease.generation != binding["generation"]
@@ -65,8 +84,18 @@ class EnvironmentRuntime:
             ):
                 raise ValueError("environment_lease_unavailable")
             value = await repo.registered(scope, "environment", lease.environment_version)
+            if locked:
+                await repo.lock_registrations(
+                    scope,
+                    [
+                        ("environment", lease.environment_version),
+                        *[("target", ref.id) for ref in value.allowed_targets],
+                        *[("credential", ref.id) for ref in value.credential_refs],
+                    ],
+                )
+                value = await repo.registered(scope, "environment", lease.environment_version)
             adapter, targets, credentials = await validate_environment(
-                uow, scope, principal, value, self.registry, ceiling=self.ceiling
+                uow, scope, principal, value, self.registry, ceiling=self.ceiling, lock=locked
             )
             config = await uow.evaluation_configuration.get_version(
                 scope, "config", UUID(admission["config_version_id"])
@@ -79,6 +108,18 @@ class EnvironmentRuntime:
             await self.validate_current_tool_policy(
                 uow, scope, ConfigVersion.model_validate(config)
             )
+            if locked and tool is not None:
+                selected = next(c for c in admission["contracts"] if c["name"] == tool)
+                await uow.execution_usage.authorize_tool(
+                    scope,
+                    skill_id=ConfigVersion.model_validate(config).selection.skill_id,
+                    name=tool,
+                    pack=selected["pack"],
+                    connector_ids=(selected["connector_id"],)
+                    if selected.get("connector_id")
+                    else (),
+                    lock=True,
+                )
             if tool is not None:
                 if tool not in admission["tool_names"]:
                     raise ValueError("environment_tool_not_selected")
@@ -89,7 +130,10 @@ class EnvironmentRuntime:
                     raise ValueError("environment_contract_unavailable")
                 policy = ToolExecutionPolicy.model_validate(contracts[0]["policy"])
                 if policy.requires_approval() and not await uow.evaluation_recording.approved(
-                    scope, context.run.run_id, context.activity_id
+                    scope,
+                    context.run.run_id,
+                    context.activity_id,
+                    subject_digest=approval_subject_digest,
                 ):
                     raise PermissionError("current_approval_required")
         return adapter, lease, targets, credentials, admission, scope, principal
@@ -124,7 +168,7 @@ class EnvironmentRuntime:
                 raise PermissionError("environment_current_tool_policy_denied")
 
     async def definitions(self, context):
-        _, _, _, _, admission, _, _ = await self.access(context)
+        adapter, lease, targets, _, admission, scope, principal = await self.access(context)
         definitions = []
         for contract in admission["contracts"]:
             policy = ToolExecutionPolicy.model_validate(contract["policy"])
@@ -137,58 +181,128 @@ class EnvironmentRuntime:
                     approval_kind=policy.approval_kind,
                     approval_prompt_param=policy.approval_prompt_param,
                     approval_choices_param=policy.approval_choices_param,
+                    approval_feedback_param=policy.approval_feedback_param,
+                    contract=_execution_contract(contract, adapter, lease, targets),
                 )
             )
         return CatalogSnapshot(
-            definitions=tuple(definitions), fingerprint=admission["config_fingerprint"]
+            definitions=tuple(definitions),
+            fingerprint=admission["config_fingerprint"],
+            authority=_authority(scope, principal, lease, admission),
         )
 
     async def invoke(
-        self, context, *, name, arguments, expected_fingerprint=None, approval_feedback=None
+        self,
+        context,
+        *,
+        name,
+        arguments,
+        expected_fingerprint=None,
+        approval_feedback=None,
+        invocation=None,
+        contract=None,
+        execute=None,
     ):
-        adapter, lease, targets, credentials, admission, scope, principal = await self.access(
-            context, tool=name
-        )
-        if (
-            expected_fingerprint is not None
-            and expected_fingerprint != admission["config_fingerprint"]
-        ):
-            raise ValueError("environment_catalog_changed")
-        expected = next(c for c in admission["contracts"] if c["name"] == name)
-        policy = ToolExecutionPolicy.model_validate(expected["policy"])
-        if approval_feedback and policy.approval_feedback_param:
-            arguments = {**arguments, policy.approval_feedback_param: approval_feedback}
-        await adapter.check_runtime(lease)
-        matching = [
-            target
-            for target in targets
-            if any(contract.name == name for contract in target.contracts)
-        ]
-        if matching:
-            if len(matching) != 1:
-                raise ValueError("environment_external_binding_ambiguous")
-            target = matching[0]
-            executor = self.registry.executors.get(target.id)
-            if executor is None:
-                raise ValueError("environment_external_executor_unavailable")
-            executor = executor.bind(adapter, lease)
-            return await executor.invoke(target, credentials, scope, principal, name, arguments)
-        if name not in adapter.tool_names:
-            raise ValueError("environment_tool_binding_unavailable")
-        pack = await adapter.tool_pack(lease, name, targets, self.sandbox_factory)
+        if invocation is None or contract is None:
+            raise ToolContractChanged("invocation_binding_required")
+        if approval_feedback:
+            raise ToolContractChanged("approval_arguments_not_final")
         try:
-            descriptor = next(d for d in pack.get_tool_descriptors() if d.name == name)
-            if (
-                descriptor.schema != expected["schema"]
-                or descriptor.policy.model_dump(mode="json") != expected["policy"]
-            ):
-                raise ValueError("environment_tool_contract_changed")
-            result = await pack.invoke(name, **arguments)
-            return result.model_dump(mode="json")
-        finally:
-            sandbox = getattr(pack, "sandbox", None)
-            if sandbox is not None and hasattr(sandbox, "client"):
-                await sandbox.client.aclose()
+            approval_digest = None if contract.is_pure_clarification else invocation.digest
+            access = await self.access(context, tool=name, approval_subject_digest=approval_digest)
+            adapter, lease, targets, credentials, admission, scope, principal = access
+            expected = next(c for c in admission["contracts"] if c["name"] == name)
+            current = _execution_contract(expected, adapter, lease, targets)
+            if current.digest != contract.digest:
+                raise ToolContractChanged()
+            _verify_invocation(invocation, contract, arguments, scope, principal, lease, admission)
+            validate_typed(arguments, contract.arguments_schema)
+        except ToolContractChanged:
+            raise
+        except PermissionError as error:
+            raise ToolContractChanged("authorization_changed") from error
+        except (ValueError, StopIteration) as error:
+            raise ToolContractChanged() from error
+        if contract.requires_operation and execute is None:
+            raise ToolContractChanged("effect_service_required")
+
+        async def preflight(uow):
+            try:
+                fresh = await self.access(
+                    context,
+                    tool=name,
+                    uow=uow,
+                    locked=True,
+                    approval_subject_digest=approval_digest,
+                )
+                new_adapter, new_lease, new_targets, _, new_admission, new_scope, new_principal = (
+                    fresh
+                )
+                selected = next(c for c in new_admission["contracts"] if c["name"] == name)
+                if (
+                    _execution_contract(selected, new_adapter, new_lease, new_targets).digest
+                    != contract.digest
+                ):
+                    raise ToolContractChanged()
+                _verify_invocation(
+                    invocation,
+                    contract,
+                    arguments,
+                    new_scope,
+                    new_principal,
+                    new_lease,
+                    new_admission,
+                )
+                if context.require_active_lease:
+                    context.require_active_lease()
+            except ToolContractChanged:
+                raise
+            except PermissionError as error:
+                raise ToolContractChanged("authorization_changed") from error
+            except (ValueError, StopIteration) as error:
+                raise ToolContractChanged() from error
+
+        async def send():
+            if context.require_active_lease:
+                context.require_active_lease()
+            await adapter.check_runtime(lease)
+            matching = [
+                target for target in targets if any(c.name == name for c in target.contracts)
+            ]
+            if matching:
+                if len(matching) != 1:
+                    raise ValueError("environment_external_binding_ambiguous")
+                target = matching[0]
+                executor = self.registry.executors.get(target.id)
+                if executor is None:
+                    raise ValueError("environment_external_executor_unavailable")
+                return await executor.bind(adapter, lease).invoke(
+                    target, credentials, scope, principal, name, arguments
+                )
+            if name not in adapter.tool_names:
+                raise ValueError("environment_tool_binding_unavailable")
+            pack = await adapter.tool_pack(lease, name, targets, self.sandbox_factory)
+            try:
+                descriptor = next(d for d in pack.get_tool_descriptors() if d.name == name)
+                if (
+                    descriptor.schema != expected["schema"]
+                    or descriptor.policy.model_dump(mode="json") != expected["policy"]
+                ):
+                    raise ValueError("environment_tool_contract_changed")
+                if context.require_active_lease:
+                    context.require_active_lease()
+                return (await pack.invoke(name, **arguments)).model_dump(mode="json")
+            finally:
+                sandbox = getattr(pack, "sandbox", None)
+                if sandbox is not None and hasattr(sandbox, "client"):
+                    await sandbox.client.aclose()
+
+        if execute is not None:
+            return await execute(send, preflight)
+        async with self.uow_factory() as uow:
+            await preflight(uow)
+            await uow.commit()
+        return await send()
 
     async def retrieval(self, context, query):
         await self.access(context)
@@ -199,3 +313,59 @@ class EnvironmentRuntime:
         # current conversational admission supports no remediation activity contract.
         await self.access(context)
         raise ValueError("environment_remediation_binding_unavailable")
+
+
+def _authority(scope, principal, lease, admission):
+    return {
+        "scope": scope.model_dump(mode="json"),
+        "authorization_epoch": digest(
+            {
+                "kind": "evaluation_environment",
+                "principal": principal.model_dump(mode="json"),
+                "lease_id": str(lease.id),
+                "generation": lease.generation,
+                "config_fingerprint": admission["config_fingerprint"],
+            }
+        ),
+    }
+
+
+def _execution_contract(item, adapter, lease, targets):
+    selected = [c for target in targets for c in target.contracts if c.name == item["name"]]
+    if len(selected) > 1:
+        raise ValueError("environment_external_binding_ambiguous")
+    base = (
+        selected[0]
+        if selected
+        else RecordedContract(
+            name=item["name"],
+            pack=item["pack"],
+            schema_body=item["schema"],
+            policy=item["policy"],
+            connector_id=item.get("connector_id"),
+            binding_revision=item.get("binding_revision") or digest(item),
+            authority_revision=item.get("authority_revision") or digest(item),
+        )
+    )
+    value = execution_contract(base)
+    revision = digest(
+        {
+            "contract": value.digest,
+            "adapter_revision": adapter.revision,
+            "environment_version": str(lease.environment_version),
+            "lease_id": str(lease.id),
+            "generation": lease.generation,
+        }
+    )
+    return value.model_copy(update={"binding_revision": revision, "authority_revision": revision})
+
+
+def _verify_invocation(subject, contract, arguments, scope, principal, lease, admission):
+    authority = _authority(scope, principal, lease, admission)
+    if subject.contract_digest != contract.digest or subject.arguments_digest != digest(arguments):
+        raise ToolContractChanged()
+    if (
+        subject.scope_digest != digest(authority["scope"])
+        or subject.authorization_epoch != authority["authorization_epoch"]
+    ):
+        raise ToolContractChanged("authorization_changed")

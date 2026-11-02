@@ -2,18 +2,18 @@
 
 # 文档清单
 
-本清单覆盖当前工作区 116 份维护 Markdown 文档（53 对双语与 10 份单语言）及 13 份历史 specs。维护文档按当前代码同步；历史归档只提供当时的背景，不能作为当前行为、版本或验收状态的依据。新增、移动或废弃文档时同步更新。
+本清单覆盖当前工作区 116 份维护 Markdown 文档（53 对双语与 10 份单语言）。维护参考按当前代码同步。新增、移动或废弃文档时同步更新。
 
-本清单排除依赖、缓存、嵌套 Worktree、临时产物和本地执行记录（`node_modules/`、`.venv/`、`.pytest_cache/`、`.worktrees/`、`tmp/`、`.superpowers/`、`docs/superpowers/`）。`specs/` 单独列为历史归档；不把它们提升为维护参考。
+本清单排除依赖、缓存、嵌套 Worktree、临时产物和本地执行记录（`node_modules/`、`.venv/`、`.pytest_cache/`、`.worktrees/`、`tmp/`、`.superpowers/`、`docs/superpowers/`）。已退役的设计计划可从 Git 历史查阅。
 
 **图例**
 
-| 列       | 含义                                                                                                                                                                                                |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 权威性   | `primary` = 维护参考（以实现代码为准）；`index` = 导航；`module` = 模块入口；`tutorial` = 操作教程；`governance` = 开源治理；`internal` = 运维/开发契约；`fixture` = 测试输入；`archive` = 历史归档 |
-| 双语     | `paired` = 两个真实存在的语言文件；`single` = 仅一个文件（不虚称双语）                                                                                                                              |
-| 图示     | `svg/png` = `docs/assets/diagrams/` 技术图引用；`mermaid` = 实际 Mermaid 块；`none` = 无技术图。README 演示截图不计入                                                                               |
-| 过期风险 | `low` / `medium` / `high`；归档与尚未完成 AC21 的容量文档保留 `high`                                                                                                                                |
+| 列       | 含义                                                                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 权威性   | `primary` = 维护参考（以实现代码为准）；`index` = 导航；`module` = 模块入口；`tutorial` = 操作教程；`governance` = 开源治理；`internal` = 运维/开发契约；`fixture` = 测试输入 |
+| 双语     | `paired` = 两个真实存在的语言文件；`single` = 仅一个文件（不虚称双语）                                                                                                        |
+| 图示     | `svg/png` = `docs/assets/diagrams/` 技术图引用；`mermaid` = 实际 Mermaid 块；`none` = 无技术图。README 演示截图不计入                                                         |
+| 过期风险 | `low` / `medium` / `high`；归档与尚未完成 AC21 的容量文档保留 `high`                                                                                                          |
 
 ## 根目录与文档中心
 
@@ -23,6 +23,7 @@
 | [docs/README.md](README.zh-CN.md)                                   | 文档导航中枢                 | index      | paired | none    | —                       | low      |
 | [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.zh-CN.md)     | PR 清单、同步规则            | governance | paired | none    | `scripts/check-docs.sh` | low      |
 | [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.zh-CN.md) | 本清单                       | governance | paired | none    | `scripts/check-docs.sh` | low      |
+
 
 ## 架构（`docs/architecture/`）
 
@@ -57,8 +58,8 @@
 | --------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------- | ------ | ---- | ----------------------------------------------------------------------------- | -------- |
 | [docs/operations/deployment.md](operations/deployment.zh-CN.md)                                                 | 生产部署、探针、有界排空      | primary  | paired | none | `docker-compose.yml`, `deploy/helm/opencitadel/`, `scripts/backup_tool.py`    | low      |
 | [docs/operations/ops-patrol.md](operations/ops-patrol.zh-CN.md)                                                 | Patrol 启用、部署、证据与恢复 | primary  | paired | none | `ops-collector/`, `ops-actuator/`, `deploy/helm/`                             | low      |
-| [docs/operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md)                                 | HTTPS 与域名                  | primary  | paired | none | `nginx/nginx.conf`, `deploy/helm/opencitadel/`                                | low      |
-| [docs/tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md)                         | 10 分钟自托管                 | tutorial | paired | none | `scripts/quickstart.sh`                                                       | low      |
+| [docs/operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md)                                 | HTTPS 与域名                  | primary  | paired | none | `deploy/nginx/nginx.conf`, `deploy/helm/opencitadel/`                         | low      |
+| [docs/tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md)                         | 自托管教程                    | tutorial | paired | none | `scripts/quickstart.sh`                                                       | low      |
 | [docs/tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md)                   | 知识库 RAG                    | tutorial | paired | none | `api/app/interfaces/endpoints/knowledge_base_routes.py`                       | low      |
 | [docs/tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.zh-CN.md)                                 | MCP 集成                      | tutorial | paired | none | `api/app/interfaces/endpoints/integration_routes.py`                          | low      |
 | [docs/tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.zh-CN.md)                       | Web Operator 教程             | tutorial | paired | none | `scripts/quickstart.sh`, `api/app/domain/models/tool_policy.py`               | low      |
@@ -74,11 +75,11 @@
 | [api/README.md](../api/README.zh-CN.md)                                         | 后端路由、SSE、开发               | module | paired | svg/png | `api/app/interfaces/endpoints/`, `api/app/composition/`                                                 | low      |
 | [ui/README.md](../ui/README.zh-CN.md)                                           | 前端栈、路由                      | module | paired | svg/png | `ui/src/app/`                                                                                           | low      |
 | [sandbox/README.md](../sandbox/README.zh-CN.md)                                 | 沙箱服务                          | module | paired | none    | `sandbox/`                                                                                              | low      |
-| [nginx/README.md](../nginx/README.zh-CN.md)                                     | 网关、SSE/WS、上传限制            | module | paired | svg/png | `nginx/nginx.conf`                                                                                      | low      |
+| [deploy/nginx/README.md](../deploy/nginx/README.zh-CN.md)                       | 网关、SSE/WS、上传限制            | module | paired | svg/png | `deploy/nginx/nginx.conf`                                                                               | low      |
 | [ops-collector/README.md](../ops-collector/README.zh-CN.md)                     | 固定只读探针与配置                | module | paired | none    | `ops-collector/src/`                                                                                    | low      |
 | [ops-actuator/README.md](../ops-actuator/README.zh-CN.md)                       | 固定仅 patch 的写探针与配置       | module | paired | svg/png | `ops-actuator/src/`                                                                                     | low      |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.zh-CN.md) | Helm 安装                         | module | paired | none    | `deploy/helm/opencitadel/`                                                                              | low      |
-| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.zh-CN.md)           | 一次性 Patrol 故障实验室          | module | paired | none    | `scripts/run-patrol-fixtures.sh`                                                                        | low      |
+| [demo/patrol/README.md](../demo/patrol/README.zh-CN.md)                         | 一次性 Patrol 故障实验室          | module | paired | none    | `scripts/run-patrol-fixtures.sh`                                                                        | low      |
 | [demo/ops-console/README.md](../demo/ops-console/README.zh-CN.md)               | Web Operator 演示后端             | module | paired | none    | `demo/ops-console/`                                                                                     | low      |
 | [e2e/README.md](../e2e/README.zh-CN.md)                                         | 确定性全栈验收、证据与清理        | module | paired | none    | `e2e/playwright.config.ts`, `scripts/acceptance/runner.py`, `contracts/acceptance-evidence.schema.json` | high     |
 | [scripts/README.md](../scripts/README.zh-CN.md)                                 | quickstart、文档检查、验收 Runner | module | paired | none    | `scripts/`                                                                                              | medium   |
@@ -108,29 +109,9 @@
 | [api/app/domain/execution/EVOLUTION.md](../api/app/domain/execution/EVOLUTION.md)                 | 事件/命令演进规则与快照序列化守卫                  | internal | single | none | `api/app/domain/execution/run.py`, `api/tests/app/domain/execution/test_schema_guards.py`                                     | low      |
 | [e2e/fixtures/knowledge/acceptance-handbook.md](../e2e/fixtures/knowledge/acceptance-handbook.md) | 规范可检索事实与降级断言测试输入                   | fixture  | single | none | `e2e/resources.spec.ts`                                                                                                       | low      |
 
-## 历史归档（`specs/`；13 份）
-
-下列文件保留原始内容与当时的版本/结果；它们不约束当前实现，也不证明当前验收通过。当前契约应查看上面的维护参考及其代码锚点。
-
-| 路径                                                                                              | 主题                           | 权威性  | 双语   | 图示 | 代码锚点 | 过期风险 |
-| ------------------------------------------------------------------------------------------------- | ------------------------------ | ------- | ------ | ---- | -------- | -------- |
-| [specs/2026-09-03-execution-report.md](../specs/2026-09-03-execution-report.md)                   | 2026-09-03 优化计划执行报告    | archive | single | none | —        | high     |
-| [specs/2026-09-03-kernel-architecture-audit.md](../specs/2026-09-03-kernel-architecture-audit.md) | 2026-09-03 执行内核架构审计    | archive | single | none | —        | high     |
-| [specs/2026-09-03-kernel-overhaul-spec.md](../specs/2026-09-03-kernel-overhaul-spec.md)           | 2026-09-03 执行内核改造提案    | archive | single | none | —        | high     |
-| [specs/2026-09-03-optimization-overview.md](../specs/2026-09-03-optimization-overview.md)         | 历史功能闭环优化提案           | archive | single | none | —        | high     |
-| [specs/2026-09-04-kernel-overhaul-report.md](../specs/2026-09-04-kernel-overhaul-report.md)       | 2026-09-04 执行内核改造报告    | archive | single | none | —        | high     |
-| [specs/plan-a-p0-fixes.md](../specs/plan-a-p0-fixes.md)                                           | Plan A：历史 P0 修复计划       | archive | single | none | —        | high     |
-| [specs/plan-b-backend-closure.md](../specs/plan-b-backend-closure.md)                             | Plan B：历史后端闭环计划       | archive | single | none | —        | high     |
-| [specs/plan-c-frontend-closure.md](../specs/plan-c-frontend-closure.md)                           | Plan C：历史前端闭环计划       | archive | single | none | —        | high     |
-| [specs/plan-d-deploy-observability.md](../specs/plan-d-deploy-observability.md)                   | Plan D：历史部署与可观测性计划 | archive | single | none | —        | high     |
-| [specs/plan-k1-domain-events.md](../specs/plan-k1-domain-events.md)                               | Plan K1：历史领域/事件改造计划 | archive | single | none | —        | high     |
-| [specs/plan-k2-runtime-loops.md](../specs/plan-k2-runtime-loops.md)                               | Plan K2：历史运行时循环计划    | archive | single | none | —        | high     |
-| [specs/plan-k3-plugin-surface.md](../specs/plan-k3-plugin-surface.md)                             | Plan K3：历史扩展面计划        | archive | single | none | —        | high     |
-| [specs/plan-k4-projection-observability.md](../specs/plan-k4-projection-observability.md)         | Plan K4：历史投影/观测计划     | archive | single | none | —        | high     |
-
 ## 维护
 
 - 文档 PR 前运行 `./scripts/check-docs.sh`。
 - 路由、配置、UI 或执行契约变化时，同步文档与代码锚点；图示列按实际内容刷新。
 - 新架构主题添加中英文，在 [docs/README.md](README.zh-CN.md) 建链并更新本清单。内部单语言契约可以保持 `single`。
-- Fixture 文字可能是测试断言；修改前核对测试契约。历史 specs 保持归档分类。
+- Fixture 文字可能是测试断言；修改前核对测试契约。

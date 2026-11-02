@@ -4,7 +4,10 @@
 
 > **前提条件**：已完成基础部署，服务正常运行在 `http://YOUR_SERVER_IP:8088`
 
-Nginx 站点配置由容器启动时根据 `.env` 自动生成，**无需手动编辑** `nginx/conf.d/` 或 `docker-compose.yml`。
+`make quickstart` 从 `FRONTEND_BASE_URL` 推导 Nginx 域名、TLS 模式与宿主端口，
+OAuth 回调及 Cookie 安全属性也跟随该 Origin。容器再渲染 Nginx 站点配置。高级显式覆盖
+继续有效；修改 Origin 后使用该启动命令，使推导的环境参数传入 Compose。
+**无需手动编辑** `/etc/nginx/conf.d/` 或 `docker-compose.yml`。
 
 ---
 
@@ -12,7 +15,7 @@ Nginx 站点配置由容器启动时根据 `.env` 自动生成，**无需手动�
 
 - [ ] 域名已解析到服务器 IP（A 记录）
 - [ ] SSL 证书已准备（Let's Encrypt 或商业证书，路径见下文）
-- [ ] 防火墙已开放 `8088/tcp`（HTTP）与 `443/tcp`（HTTPS）
+- [ ] 防火墙开放所选 HTTP 端口（本地 HTTP 为 `8088`，HTTPS 的重定向为 `80`）与 `443/tcp`（HTTPS）
 
 ---
 
@@ -26,15 +29,13 @@ vim .env
 ```
 
 ```ini
-OPENCITADEL_DOMAIN=your-domain.com
-HTTPS_ENABLED=false
-NGINX_PORT=8088
+FRONTEND_BASE_URL=http://your-domain.com:8088
 ```
 
 重启 Nginx：
 
 ```bash
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
 访问：`http://your-domain.com:8088`
@@ -64,22 +65,16 @@ sudo certbot certonly --standalone \
 
 证书续期由部署者自行维护；续期后执行 `docker compose restart opencitadel-nginx` 即可。
 
-HTTP-01 standalone 校验需要宿主 `80/tcp` 可从公网到达，且无其他进程占用；只开放 `8088/tcp` 不满足 Certbot 校验。默认 Compose 挂载仓库内空目录 `nginx/letsencrypt`，必须设置下面的 `LETSENCRYPT_DIR` 才能使用宿主证书。证书必须已有完整链与私钥；生成配置不会申请证书。
+HTTP-01 standalone 校验需要宿主 `80/tcp` 可从公网到达，且无其他进程占用；只开放 `8088/tcp` 不满足 Certbot 校验。默认 Compose 挂载仓库内空目录 `deploy/nginx/letsencrypt`，必须设置下面的 `LETSENCRYPT_DIR` 才能使用宿主证书。证书必须已有完整链与私钥；生成配置不会申请证书。
 
 ### 2. 修改 .env
 
 ```ini
-OPENCITADEL_DOMAIN=your-domain.com
-HTTPS_ENABLED=true
-NGINX_PORT=8088
-NGINX_HTTPS_PORT=443
 LETSENCRYPT_DIR=/etc/letsencrypt
 
 # ENV=production 时 API 启动校验必填
 ENV=production
-COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
-OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
 ```
 
 **本地 HTTP 快速体验**（`make quickstart`）请使用 `ENV=development`、`COOKIE_SECURE=false`、`FRONTEND_BASE_URL=http://localhost:8088`。
@@ -87,18 +82,16 @@ OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
 ### 3. 重启 Nginx
 
 ```bash
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
-若修改了 `ENV`、Cookie 或前端/OAuth URL，还需重建 API 与执行内核容器，以加载新的 `env_file`：
-
-```bash
-docker compose up -d --force-recreate opencitadel-api opencitadel-execution-kernel
-```
+该命令也会重建部署环境发生变化的服务，证书须事先存在。如果希望旧配置自动跟随新的
+Origin，移除已有显式 `COOKIE_SECURE`、`OAUTH_REDIRECT_BASE`、`HTTPS_ENABLED`、域名
+或端口覆盖。
 
 启用 HTTPS 后：
 
-- HTTP：`http://your-domain.com:8088` → 自动跳转至 `https://your-domain.com`
+- HTTP：`http://your-domain.com` → 自动跳转至 `https://your-domain.com`
 - HTTPS：`https://your-domain.com`
 
 ---
@@ -106,8 +99,8 @@ docker compose up -d --force-recreate opencitadel-api opencitadel-execution-kern
 ## 三、验证
 
 ```bash
-# HTTP 重定向（8088 端口）
-curl -I http://your-domain.com:8088
+# HTTP 重定向（80 端口）
+curl -I http://your-domain.com
 
 # HTTPS
 curl -I https://your-domain.com
@@ -119,7 +112,8 @@ docker compose exec opencitadel-nginx nginx -t
 
 ---
 
-HTTPS 模板的 HTTP 重定向固定使用标准 443；若宿主 `NGINX_HTTPS_PORT` 不是 443，必须使用对应端口的入口/模板。
+HTTPS 模板重定向到 `FRONTEND_BASE_URL`，保留显式非标准 HTTPS 端口；未提供 Origin 时，
+仍支持原域名/HTTPS 端口覆盖。
 
 ## 四、回滚
 
@@ -127,10 +121,11 @@ HTTPS 模板的 HTTP 重定向固定使用标准 443；若宿主 `NGINX_HTTPS_PO
 
 ```bash
 # .env 中设置
-HTTPS_ENABLED=false
-# 本地 HTTP 开发还需 ENV=development、COOKIE_SECURE=false，并同步前端/OAuth URL。
+ENV=development
+FRONTEND_BASE_URL=http://your-domain.com:8088
+# 移除已有显式 HTTPS_ENABLED、Cookie、OAuth 与端口覆盖，让它们跟随 Origin。
 
-docker compose up -d --force-recreate opencitadel-nginx
+make quickstart
 ```
 
 ---
@@ -144,7 +139,7 @@ docker compose up -d --force-recreate opencitadel-nginx
 ### 防火墙
 
 ```bash
-sudo ufw allow 8088/tcp
+sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 ```

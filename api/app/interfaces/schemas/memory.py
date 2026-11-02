@@ -31,6 +31,7 @@ class MemoryEntryResponse(BaseModel):
     source: MemorySource
     last_used_at: datetime | None
     use_count: int
+    embedding_space_digest: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -46,6 +46,8 @@ class KnowledgeVersionProjection(BaseModel):
     parent_version_id: str | None = None
     build_id: str | None = None
     state: KnowledgeVersionState
+    embedding_space_digest: str | None = None
+    revision_assurance: str | None = None
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)

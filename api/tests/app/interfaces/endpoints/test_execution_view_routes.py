@@ -50,6 +50,65 @@ def test_not_logged_in_is_denied(client):
     assert http.get("/api/execution-runs").status_code == 401
 
 
+def test_context_routes_preserve_fixed_cut_cursor_and_reject_non_context_steps(client):
+    from types import SimpleNamespace
+
+    from app.application.dto.execution_view import Completeness, StepView, StepViewPage
+
+    http, _app, _port, service = client
+    run = uuid4()
+    context_step = StepView(
+        step_id="context-step",
+        run_id=run,
+        kind="activity",
+        status="completed",
+        context={"stage": "prepare", "state": "ready", "original_sources": 150},
+        projection_revision=5,
+        completeness=Completeness(state="complete", missing_fields=[], missing_intervals=[]),
+    )
+    ordinary_step = context_step.model_copy(update={"step_id": "ordinary", "context": None})
+
+    async def list_steps(scope, identity, **kwargs):
+        assert scope == OwnerScope.personal("u")
+        assert identity == run
+        assert kwargs["filters"] == {"kind": "activity"}
+        assert kwargs["at"] == "fixed-cut"
+        return StepViewPage(
+            items=[ordinary_step, context_step],
+            next_cursor="next-scan",
+            revision=5,
+            completeness=context_step.completeness,
+            hidden_count=0,
+            at="fixed-cut",
+        )
+
+    async def get_step_cut(scope, identity, step_id, at):
+        assert scope == OwnerScope.personal("u")
+        assert identity == run
+        assert at == "fixed-cut"
+        return SimpleNamespace(
+            step=context_step if step_id == context_step.step_id else ordinary_step,
+            at=at,
+        )
+
+    service.list_steps = list_steps
+    service.get_step_cut = get_step_cut
+    response = http.get(f"/api/execution-runs/{run}/contexts", params={"at": "fixed-cut"})
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert [item["step_id"] for item in data["items"]] == [context_step.step_id]
+    assert data["next_cursor"] == "next-scan"
+    assert data["at"] == "fixed-cut"
+    assert response.headers["Cache-Control"] == "no-store"
+    detail = http.get(
+        f"/api/execution-runs/{run}/contexts/{context_step.step_id}", params={"at": "fixed-cut"}
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["data"]["context"]["original_sources"] == 150
+    rejected = http.get(f"/api/execution-runs/{run}/contexts/ordinary", params={"at": "fixed-cut"})
+    assert rejected.status_code == 404
+
+
 @pytest.mark.parametrize(
     "path",
     [

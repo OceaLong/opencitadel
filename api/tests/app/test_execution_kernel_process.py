@@ -61,8 +61,8 @@ class _IdleRuntime:
     async def run_decisions_once(self, **_kwargs):
         return SimpleNamespace(submitted=0)
 
-    async def run_activities_once(self, **_kwargs):
-        return SimpleNamespace(claimed=0)
+    async def serve_activities(self, *, stop, **_kwargs):
+        await stop.wait()
 
     async def run_timers_once(self, **_kwargs):
         return SimpleNamespace(fired=0)
@@ -97,10 +97,9 @@ class _BlockingActivityRuntime(_IdleRuntime):
             return SimpleNamespace(loaded=1)
         return SimpleNamespace(loaded=0)
 
-    async def run_activities_once(self, **_kwargs):
+    async def serve_activities(self, *, stop, **_kwargs):
         self._activity_started.set()
-        await self._stopping.wait()
-        return SimpleNamespace(claimed=1)
+        await stop.wait()
 
 
 class _FailingLaneRuntime(_IdleRuntime):
@@ -353,7 +352,7 @@ class _DrainingActivityRuntime(_IdleRuntime):
             self._stopping.set()
         return SimpleNamespace(loaded=0)
 
-    async def run_activities_once(self, **_kwargs):
+    async def serve_activities(self, **_kwargs):
         self._activity_started.set()
         try:
             await self._release.wait()
@@ -361,7 +360,6 @@ class _DrainingActivityRuntime(_IdleRuntime):
             self.activity_cancelled = True
             raise
         self.activity_finished = True
-        return SimpleNamespace(claimed=1)
 
 
 @pytest.mark.asyncio
@@ -396,9 +394,11 @@ async def test_shutdown_drains_in_flight_activity_batch_without_cancelling() -> 
 
 
 @pytest.mark.asyncio
-async def test_activity_plane_survives_a_failing_batch() -> None:
-    """K2-2 (D5): a raising activity batch must not tear down the plane."""
+async def test_unresponsive_activity_failure_reaches_process_supervisor() -> None:
+    """The Worker handles ordinary faults; loss of supervision must stop the process."""
     import asyncio
+
+    from app.application.execution.activity_worker import ActivityWorkerUnresponsiveError
 
     stopping = asyncio.Event()
 
@@ -411,11 +411,9 @@ async def test_activity_plane_survives_a_failing_batch() -> None:
             # Keep the control plane idle; the activity plane drives the stop.
             return SimpleNamespace(loaded=0)
 
-        async def run_activities_once(self, **_kwargs):
+        async def serve_activities(self, **_kwargs):
             self.activity_calls += 1
-            if self.activity_calls >= 3:
-                self._stopping.set()
-            raise RuntimeError("poison activity batch")
+            raise ActivityWorkerUnresponsiveError("handler ignored cancellation")
 
     runtime = _FailingActivityRuntime(stopping)
     process = ExecutionKernelProcess(
@@ -426,9 +424,10 @@ async def test_activity_plane_survives_a_failing_batch() -> None:
         idle_poll_seconds=0,
     )
 
-    await asyncio.wait_for(process.run(), timeout=1)
+    with pytest.raises(ActivityWorkerUnresponsiveError, match="ignored cancellation"):
+        await asyncio.wait_for(process.run(), timeout=1)
 
-    assert runtime.activity_calls >= 3
+    assert runtime.activity_calls == 1
 
 
 @pytest.mark.asyncio
@@ -462,8 +461,17 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
 
     class _ImmediateProcess:
         def __init__(
-            self, *, runtime, wakeup, policy_reader, stopping, batch_size, idle_poll_seconds
+            self,
+            *,
+            runtime,
+            wakeup,
+            policy_reader,
+            stopping,
+            batch_size,
+            idle_poll_seconds,
+            activity_shutdown_grace_seconds,
         ):
+            assert activity_shutdown_grace_seconds > 0
             observed.append(
                 ("process", runtime, wakeup, policy_reader, batch_size, idle_poll_seconds)
             )
@@ -501,6 +509,61 @@ async def test_run_kernel_uses_typed_runtime_and_supervisor(monkeypatch):
     assert set(observed[3:-1]) == {"run", "heartbeat"}
     assert observed[-1] == "closed"
     assert supervisor.pending_names == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_shutdown", [False, True])
+async def test_uncancellable_activity_requests_os_exit_before_asyncio_cleanup(
+    monkeypatch, during_shutdown
+):
+    import asyncio
+    from contextlib import asynccontextmanager, suppress
+
+    from app.application.execution.activity_worker import ActivityWorkerUnresponsiveError
+    from app.composition.tasks import TaskSupervisor
+
+    supervisor = TaskSupervisor()
+    exit_codes = []
+
+    def record_exit(code):
+        exit_codes.append(code)
+        raise RuntimeError("simulated hard exit")
+
+    @asynccontextmanager
+    async def runtime_factory(settings):
+        try:
+            yield SimpleNamespace(
+                supervisor=supervisor,
+                execution=object(),
+                wakeup=object(),
+                policy_reader=_ReadyPolicyReader(),
+            )
+        finally:
+            await supervisor.stop()
+
+    class FatalProcess:
+        def __init__(self, **kwargs):
+            self.stopping = kwargs["stopping"]
+
+        async def run(self):
+            if during_shutdown:
+                self.stopping.set()
+            await asyncio.sleep(0.01)
+            raise ActivityWorkerUnresponsiveError("handler did not stop")
+
+        async def run_heartbeat(self):
+            await self.stopping.wait()
+
+    monkeypatch.setattr(kernel_main, "ExecutionKernelProcess", FatalProcess)
+    monkeypatch.setattr(kernel_main, "install_signal_handlers", lambda callback: None)
+    monkeypatch.setattr(kernel_main.os, "_exit", record_exit)
+    # The stub raises instead of terminating pytest. A failure before stop is
+    # surfaced by run_kernel; after stop it is recorded during supervisor drain.
+    with suppress(RuntimeError):
+        await kernel_main.run_kernel(
+            DeploymentSettings(env="test"), runtime_factory=runtime_factory
+        )
+    assert exit_codes == [70]
 
 
 class _CaptureStart:

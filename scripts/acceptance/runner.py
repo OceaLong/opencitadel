@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Collection, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,6 +72,7 @@ _BUILD_SERVICES = (
     "opencitadel-ops-collector",
     "opencitadel-ops-actuator",
     "acceptance-inference",
+    "ops-console",
 )
 
 
@@ -98,6 +100,34 @@ class SandboxEventRecorder(Protocol):
 
 
 class SubprocessCommandRunner:
+    _CANCEL_GRACE_SECONDS = 5.0
+
+    def __init__(self) -> None:
+        self._process: subprocess.Popen[str] | None = None
+        self._cancelled_at: float | None = None
+        self._cancel_probe: Callable[[], bool] = lambda: False
+
+    def set_cancel_probe(self, probe: Callable[[], bool]) -> None:
+        self._cancel_probe = probe
+
+    @staticmethod
+    def _signal_owned(process: subprocess.Popen[str], signum: int) -> None:
+        with suppress(ProcessLookupError):
+            if os.name == "posix":
+                os.killpg(process.pid, signum)
+            elif signum == signal.SIGINT:
+                process.terminate()
+            else:
+                process.kill()
+
+    def cancel_pending(self) -> None:
+        """Interrupt only this runner's current command and its descendants."""
+        process = self._process
+        if process is None or self._cancelled_at is not None:
+            return
+        self._cancelled_at = time.monotonic()
+        self._signal_owned(process, signal.SIGINT)
+
     def run(
         self,
         args: Sequence[str],
@@ -106,18 +136,46 @@ class SubprocessCommandRunner:
         env: Mapping[str, str] | None = None,
         timeout: float | None = None,
     ) -> CommandResult:
-        completed = subprocess.run(
+        started = time.monotonic()
+        self._cancelled_at = None
+        process = subprocess.Popen(
             list(args),
             cwd=cwd,
             env=None if env is None else dict(env),
-            timeout=timeout,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="surrogateescape",
+            start_new_session=True,
         )
-        return CommandResult(tuple(args), completed.returncode, completed.stdout, completed.stderr)
+        self._process = process
+        try:
+            while True:
+                if self._cancel_probe():
+                    self.cancel_pending()
+                now = time.monotonic()
+                if (
+                    self._cancelled_at is not None
+                    and now - self._cancelled_at >= self._CANCEL_GRACE_SECONDS
+                ):
+                    self._signal_owned(process, signal.SIGKILL)
+                remaining = None if timeout is None else timeout - (now - started)
+                if remaining is not None and remaining <= 0:
+                    self._signal_owned(process, signal.SIGKILL)
+                    stdout, stderr = process.communicate()
+                    raise subprocess.TimeoutExpired(args, timeout, output=stdout, stderr=stderr)
+                try:
+                    stdout, stderr = process.communicate(
+                        timeout=0.25 if remaining is None else min(0.25, remaining)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            return CommandResult(tuple(args), process.returncode, stdout, stderr)
+        finally:
+            self._process = None
+            self._cancelled_at = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,6 +635,8 @@ class AcceptanceRunner:
         repository_root: Path,
         readiness_probe: Callable[[str], bool],
         playwright_projects: Sequence[str] = (),
+        phase1_browser: bool = False,
+        phase2_context: bool = False,
         readiness_timeout_seconds: int = 300,
         shutdown_timeout_seconds: int = 45,
         fault: str = "none",
@@ -597,12 +657,22 @@ class AcceptanceRunner:
         self.repository_root = repository_root.resolve()
         self.readiness_probe = readiness_probe
         self.playwright_projects = tuple(playwright_projects)
+        if phase1_browser and self.playwright_projects != ("execution",):
+            raise ValueError("Phase 1 browser evidence requires only the execution selection")
+        self.phase1_browser = phase1_browser
+        if phase2_context and (phase1_browser or self.playwright_projects != ("execution",)):
+            raise ValueError("Phase 2 context evidence requires only its execution selection")
+        self.phase2_context = phase2_context
         self.readiness_timeout_seconds = readiness_timeout_seconds
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.fault = fault
         self.capacity_proof_context = capacity_proof_context
         self._sandbox_event_recorder_factory = sandbox_event_recorder_factory
         self._cancel_requested = False
+        self._cleanup_in_progress = False
+        set_cancel_probe = getattr(self.commands, "set_cancel_probe", None)
+        if callable(set_cancel_probe):
+            set_cancel_probe(lambda: self._cancel_requested and not self._cleanup_in_progress)
         self._started = False
         self._environment = self._build_environment()
         self._secrets = {
@@ -648,6 +718,14 @@ class AcceptanceRunner:
                 ),
             }
         )
+        if self.phase1_browser:
+            environment["ACCEPTANCE_PHASE1_BROWSER"] = "1"
+        else:
+            environment.pop("ACCEPTANCE_PHASE1_BROWSER", None)
+        if self.phase2_context:
+            environment["ACCEPTANCE_PHASE2_CONTEXT"] = "1"
+        else:
+            environment.pop("ACCEPTANCE_PHASE2_CONTEXT", None)
         return environment
 
     @property
@@ -674,7 +752,14 @@ class AcceptanceRunner:
         ]
 
     def request_cancel(self) -> None:
+        if self._cancel_requested:
+            return
         self._cancel_requested = True
+        if self._cleanup_in_progress:
+            return
+        cancel_pending = getattr(self.commands, "cancel_pending", None)
+        if callable(cancel_pending):
+            cancel_pending()
 
     def _raise_if_cancelled(self) -> None:
         if self._cancel_requested:
@@ -700,6 +785,7 @@ class AcceptanceRunner:
         )
 
     def _run(self, args: Sequence[str], stage: str, *, cwd: Path | None = None) -> CommandResult:
+        self._raise_if_cancelled()
         result = self.commands.run(
             args,
             cwd=cwd or self.repository_root,
@@ -713,6 +799,7 @@ class AcceptanceRunner:
             ]
             detail = redact("\n".join(streams) or "command failed", self._secrets)
             raise RunnerFailure(stage, detail)
+        self._raise_if_cancelled()
         return result
 
     def _preflight(self) -> None:
@@ -753,8 +840,13 @@ class AcceptanceRunner:
         if self.fault == "playwright":
             raise RunnerFailure("playwright", "fault injection")
         args = ["npx", "playwright", "test"]
-        for project in self.playwright_projects:
-            args.extend(("--project", project))
+        if self.phase1_browser:
+            args.extend(("--config", "phase1.config.ts"))
+        elif self.phase2_context:
+            args.extend(("--config", "phase2-context.config.ts"))
+        else:
+            for project in self.playwright_projects:
+                args.extend(("--project", project))
         self._run(args, "playwright", cwd=self.repository_root / "e2e")
         self._raise_if_cancelled()
 
@@ -1141,6 +1233,38 @@ class AcceptanceRunner:
         residue: OwnedResources,
         sandboxes: SandboxEvidence,
     ) -> list[str]:
+        if self.phase2_context:
+            from scripts.acceptance.phase2_evidence import write_phase2_evidence
+
+            return write_phase2_evidence(
+                root=self.config.evidence_dir,
+                config=self.config,
+                started_at=started_at,
+                duration_ms=max(0, int((time.monotonic() - started_monotonic) * 1000)),
+                failure_reason=failure_reason,
+                images=images,
+                git=git,
+                migration=migration,
+                services=services,
+                residue=residue,
+                sandboxes=sandboxes,
+            )
+        if self.phase1_browser:
+            from scripts.acceptance.phase1_evidence import write_phase1_evidence
+
+            return write_phase1_evidence(
+                root=self.config.evidence_dir,
+                config=self.config,
+                started_at=started_at,
+                duration_ms=max(0, int((time.monotonic() - started_monotonic) * 1000)),
+                failure_reason=failure_reason,
+                images=images,
+                git=git,
+                migration=migration,
+                services=services,
+                residue=residue,
+                sandboxes=sandboxes,
+            )
         projects, coverage = self._read_playwright()
         artifacts = tuple(
             ArtifactInput(kind=kind, path=path)
@@ -1257,14 +1381,22 @@ class AcceptanceRunner:
             # `up --wait` reports an unhealthy service. Cleanup ownership
             # therefore begins with the attempt, not with a successful return.
             self._started = True
-            self._run([*self._compose, "up", "-d", "--build", "--wait"], "start stack")
+            # Start the captured build exactly. Rebuilding after image capture
+            # can replace a tag even with identical source and invalidates the
+            # kernel identity and every provider/build evidence binding.
+            self._run([*self._compose, "up", "-d", "--no-build", "--wait"], "start stack")
             self._write_lifecycle("stack_started")
             self._raise_if_cancelled()
             self._wait_ready()
             self._write_lifecycle("stack_ready")
             self._raise_if_cancelled()
-            if not self.playwright_projects or "execution" in self.playwright_projects:
+            if not self.phase2_context and (
+                not self.playwright_projects or "execution" in self.playwright_projects
+            ):
                 self._prepare_strict_binding(git_evidence, images)
+            if not (self.phase1_browser or self.phase2_context) and (
+                not self.playwright_projects or "execution" in self.playwright_projects
+            ):
                 report = self._environment.get("ACCEPTANCE_CAPACITY_REPORT")
                 fixture = self._environment.get("ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST")
                 capacity_receipt = prepare_capacity_evidence(
@@ -1281,15 +1413,38 @@ class AcceptanceRunner:
                     proof_context=self.capacity_proof_context,
                 )
                 capacity_errors = capacity_receipt["errors"]
-            self._run_playwright()
-            if not self.playwright_projects or "execution" in self.playwright_projects:
-                self._validate_strict_receipt()
-                self._run_strict_consumers()
+            check_errors: list[str] = []
+            try:
+                self._run_playwright()
+            except (OSError, RuntimeError, ValueError) as exc:
+                if self._cancel_requested:
+                    raise
+                check_errors.append(str(exc))
+            if (
+                not self.phase2_context
+                and not self._cancel_requested
+                and (not self.playwright_projects or "execution" in self.playwright_projects)
+            ):
+                # Independent browser failures must not hide the actual current
+                # producer's consumers. An invalid/missing producer or restoration
+                # receipt still prevents those consumers from running.
+                try:
+                    self._validate_strict_receipt()
+                except (OSError, RuntimeError, ValueError) as exc:
+                    check_errors.append(f"strict receipt: {exc}")
+                else:
+                    try:
+                        self._run_strict_consumers()
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        check_errors.append(str(exc))
             if capacity_errors:
-                raise RuntimeError("AC21 capacity: " + "; ".join(capacity_errors))
+                check_errors.append("AC21 capacity: " + "; ".join(capacity_errors))
+            if check_errors:
+                raise RuntimeError("; ".join(check_errors))
         except (OSError, RuntimeError, ValueError) as exc:
             failure_reason = str(exc)
         finally:
+            self._cleanup_in_progress = True
             if evidence_created:
                 self._write_lifecycle("cleanup")
             if self._started:
@@ -1424,6 +1579,16 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
     )
     parser.add_argument("--disposable", action="store_true")
+    parser.add_argument(
+        "--phase2-context",
+        action="store_true",
+        help="Run focused Phase 2 context browser evidence, not the full release gate",
+    )
+    parser.add_argument(
+        "--phase1-browser",
+        action="store_true",
+        help="Run focused Phase 1 browser evidence; does not claim full AC acceptance",
+    )
     parser.add_argument("--readiness-timeout-seconds", type=int, default=300)
     parser.add_argument("--shutdown-timeout-seconds", type=int, default=45)
     parser.add_argument("--evidence-root", default="tmp/acceptance")
@@ -1433,6 +1598,12 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.phase2_context and (args.phase1_browser or args.playwright_project):
+        print("--phase2-context cannot be combined with another browser selection", file=sys.stderr)
+        return 2
+    if args.phase1_browser and args.playwright_project:
+        print("--phase1-browser cannot be combined with --playwright-project", file=sys.stderr)
+        return 2
     repository_root = Path(__file__).resolve().parents[2]
     for executable in ("docker", "npm", "npx"):
         if shutil.which(executable) is None:
@@ -1459,7 +1630,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         commands=SubprocessCommandRunner(),
         repository_root=repository_root,
         readiness_probe=_probe,
-        playwright_projects=args.playwright_project,
+        playwright_projects=["execution"]
+        if (args.phase1_browser or args.phase2_context)
+        else args.playwright_project,
+        phase1_browser=args.phase1_browser,
+        phase2_context=args.phase2_context,
         readiness_timeout_seconds=args.readiness_timeout_seconds,
         shutdown_timeout_seconds=args.shutdown_timeout_seconds,
         fault=args.fault,

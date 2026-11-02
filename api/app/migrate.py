@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, text
 
 from alembic import command
 from app.infrastructure.logging import setup_logging
+from app.migrate_execution_definitions import seed_execution_definition_heads
 from app.migrate_runtime_policy_seed import seed_runtime_policy_heads
 from core.config import (
     DeploymentSettings,
@@ -53,6 +54,8 @@ def migration_lock(settings: DeploymentSettings) -> Iterator[None]:
 async def run_data_migrations(settings: DeploymentSettings) -> None:
     seeded = await seed_runtime_policy_heads(settings)
     print(f"Runtime Policy seed complete: seeded={seeded}")
+    definitions = await seed_execution_definition_heads(settings)
+    print(f"Execution definition seed complete: definitions={definitions}")
 
 
 def main() -> None:

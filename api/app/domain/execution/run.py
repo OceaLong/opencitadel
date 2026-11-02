@@ -17,11 +17,25 @@ from app.domain.execution.commands import (
     JsonValue,
     deep_freeze_json,
 )
+from app.domain.execution.definition import DefinitionManifest, DefinitionPin, ImplementationVersion
+from app.domain.execution.effect import (
+    EFFECT_COMMAND_MODELS,
+    EFFECT_EVENT_TYPES,
+    EffectDispatchInternal,
+    EffectFact,
+    EffectPreparedInternal,
+    EffectReceiptInternal,
+    EffectState,
+    decide_effect,
+    evolve_effect,
+)
 from app.domain.execution.events import NewEvent, StoredEvent
 from app.domain.execution.family import RunFamily
 from app.domain.execution.registry import CommandRegistry, EventPayloads, EventRegistry
 from app.domain.execution.serialization import canonical_json_bytes
 from app.domain.execution.timer import ScheduledCommandRequest
+from app.domain.execution.tool_contract import ToolApprovalSubject
+from app.domain.execution.tool_intent_refresh import RefreshToolIntent, ToolIntentRefreshRecord
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from app.domain.runtime_policy.snapshot import (
     RunPolicySnapshot,
@@ -97,6 +111,11 @@ class RunState(BaseModel):
     # The full decision payload lives off-stream on the operational activity
     # task row; the digest here binds it to the hash-chained event history.
     activity_results: tuple[tuple[UUID, int, str | None, str | None, str | None], ...] = ()
+    effect_operations: tuple[EffectState, ...] = ()
+    pending_approval_subject_digest: str | None = None
+    approval_subjects: tuple[tuple[UUID, UUID, str], ...] = ()
+    activity_subjects: tuple[tuple[UUID, int, str], ...] = ()
+    tool_intent_refreshes: tuple[ToolIntentRefreshRecord, ...] = ()
     pending_approval_id: UUID | None = None
     pending_approval_activity_id: UUID | None = None
     # (approval_id, decision, feedback). feedback carries the reviewer's note —
@@ -113,6 +132,8 @@ class RunState(BaseModel):
     team_id: str | None = None
     stream_version: int = 0
     terminal_event_id: UUID | None = None
+    definition_pin: DefinitionPin | None = None
+    definition_manifest: DefinitionManifest | None = None
 
     @field_validator("semantic_payload", mode="after")
     @classmethod
@@ -190,6 +211,24 @@ class RunCreatedInternalPayload(_Payload):
     policy_snapshot: dict[str, JsonValue]
 
 
+class CreateRunPayloadV2(CreateRunPayload):
+    # Legacy records stay readable. A missing pin is never upgraded to latest;
+    # production admission supplies an exact pin and routing rejects legacy work.
+    definition_pin: DefinitionPin | None = None
+
+
+class RunCreatedInternalPayloadV2(RunCreatedInternalPayload):
+    definition_pin: DefinitionPin | None = None
+
+
+class CreateRunPayloadV3(CreateRunPayloadV2):
+    definition_manifest: DefinitionManifest | None = None
+
+
+class RunCreatedInternalPayloadV3(RunCreatedInternalPayloadV2):
+    definition_manifest: DefinitionManifest | None = None
+
+
 class WaitRunPayload(_Payload):
     reason: Annotated[str, Field(min_length=1, max_length=128)]
 
@@ -224,6 +263,23 @@ class RequestActivityPayload(_Payload):
 class RequestActivityPayloadV2(RequestActivityPayload):
     parent_activity_id: UUID | None = None
     invocation_id: UUID | None = None
+
+
+class RequestActivityPayloadV3(RequestActivityPayloadV2):
+    subject_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class ActivityRequestedPayloadV3(RequestActivityPayloadV3):
+    generation: int | None = Field(default=None, ge=0)
+
+
+class RequestActivityPayloadV4(RequestActivityPayloadV3):
+    handler_version: ImplementationVersion | None = None
+    definition_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+
+
+class ActivityRequestedPayloadV4(RequestActivityPayloadV4):
+    generation: int | None = Field(default=None, ge=0)
 
 
 class ActivityRequestedPayloadV2(RequestActivityPayloadV2):
@@ -261,6 +317,10 @@ class ActivityFailurePayloadV2(ActivityFailurePayload):
     claim_generation: int | None = Field(default=None, ge=1)
 
 
+class ActivityFailurePayloadV3(ActivityFailurePayloadV2):
+    public_data: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 def _unknown_claim(payload):
     return {**payload, "claim_generation": None}
 
@@ -292,6 +352,33 @@ class DecideApprovalPayload(_Payload):
     feedback: Annotated[str, Field(max_length=2048)] = ""
 
 
+class RequestApprovalPayloadV2(RequestApprovalPayload):
+    public_preview: dict[str, JsonValue] = Field(default_factory=dict)
+    subject: ToolApprovalSubject | None = None
+    subject_digest: str | None = None
+
+    @model_validator(mode="after")
+    def _bound_subject(self):
+        if (self.subject is None) != (self.subject_digest is None):
+            raise ValueError("approval subject and digest must be paired")
+        if self.subject is not None and self.subject.digest != self.subject_digest:
+            raise ValueError("approval subject digest mismatch")
+        return self
+
+
+class ApprovalRequestedPayloadV2(RequestApprovalPayload):
+    subject_digest: str | None = None
+    public_preview: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class ApprovalRequestedInternalV2(_Payload):
+    subject: ToolApprovalSubject | None = None
+
+
+class DecideApprovalPayloadV2(DecideApprovalPayload):
+    expected_subject_digest: str | None = None
+
+
 class ExpireApprovalPayload(_Payload):
     approval_id: UUID
 
@@ -315,7 +402,10 @@ _COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "RequestApproval": RequestApprovalPayload,
     "DecideApproval": DecideApprovalPayload,
     "ExpireApproval": ExpireApprovalPayload,
+    "RefreshToolIntent": RefreshToolIntent,
 }
+
+_COMMAND_PAYLOADS.update(EFFECT_COMMAND_MODELS)
 
 # name -> (public payload model, internal payload model). The internal model is
 # mandatory: events with no internal data declare EmptyPayload, so accidental
@@ -341,7 +431,27 @@ _EVENT_SPECS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "ApprovalRequested": (RequestApprovalPayload, EmptyPayload),
     "ApprovalDecided": (DecideApprovalPayload, EmptyPayload),
     "ApprovalExpired": (ExpireApprovalPayload, EmptyPayload),
+    "ToolIntentRefreshRequested": (ToolIntentRefreshRecord, EmptyPayload),
 }
+
+for _effect_event in EFFECT_EVENT_TYPES:
+    _EVENT_SPECS[_effect_event] = (
+        EffectFact,
+        EffectPreparedInternal
+        if _effect_event == "EffectOperationPrepared"
+        else EffectDispatchInternal
+        if _effect_event == "EffectDispatchStarted"
+        else EffectReceiptInternal
+        if _effect_event
+        in {
+            "EffectReceiptRecorded",
+            "EffectOutcomeObserved",
+            "EffectManualResolutionAccepted",
+            "EffectResultAttached",
+            "EffectIntegrityConflict",
+        }
+        else EmptyPayload,
+    )
 
 # Every event type evolve() handles, maintained by hand next to the if-chain.
 # The registry self-check in __init__ cross-references this set against
@@ -369,15 +479,19 @@ _EVOLVED_EVENT_TYPES = frozenset(
         "ApprovalRequested",
         "ApprovalDecided",
         "ApprovalExpired",
+        "ToolIntentRefreshRequested",
     }
 )
+
+
+_EVOLVED_EVENT_TYPES = _EVOLVED_EVENT_TYPES | EFFECT_EVENT_TYPES
 
 
 class RunAggregate:
     """One deterministic state machine for all execution lifecycles."""
 
     state_type = RunState
-    snapshot_serializer_version = 6
+    snapshot_serializer_version = 10
 
     def __init__(self) -> None:
         self.command_registry = CommandRegistry()
@@ -391,6 +505,36 @@ class RunAggregate:
                 public_model,
                 internal_model=internal_model,
             )
+        self.command_registry.register(
+            "CreateRun",
+            2,
+            CreateRunPayloadV2,
+            upcast_from_previous=lambda p: {**p, "definition_pin": None},
+        )
+        self.event_registry.register(
+            "RunCreated",
+            2,
+            RunCreatedPayload,
+            internal_model=RunCreatedInternalPayloadV2,
+            upcast_from_previous=lambda p: EventPayloads(
+                public=p.public, internal={**p.internal, "definition_pin": None}
+            ),
+        )
+        self.command_registry.register(
+            "CreateRun",
+            3,
+            CreateRunPayloadV3,
+            upcast_from_previous=lambda p: {**p, "definition_manifest": None},
+        )
+        self.event_registry.register(
+            "RunCreated",
+            3,
+            RunCreatedPayload,
+            internal_model=RunCreatedInternalPayloadV3,
+            upcast_from_previous=lambda p: EventPayloads(
+                public=p.public, internal={**p.internal, "definition_manifest": None}
+            ),
+        )
         for name in (
             "MarkActivityCallStarted",
             "CompleteActivity",
@@ -421,6 +565,21 @@ class RunAggregate:
                 internal_model=_EVENT_SPECS[name][1],
                 upcast_from_previous=_unknown_event_claim,
             )
+        self.command_registry.register(
+            "FailActivity",
+            3,
+            ActivityFailurePayloadV3,
+            upcast_from_previous=lambda p: {**p, "public_data": {}},
+        )
+        self.event_registry.register(
+            "ActivityFailed",
+            3,
+            ActivityFailurePayloadV3,
+            internal_model=EmptyPayload,
+            upcast_from_previous=lambda p: EventPayloads(
+                public={**p.public, "public_data": {}}, internal=p.internal
+            ),
+        )
         self.command_registry.register(
             "RequestActivity",
             2,
@@ -457,6 +616,73 @@ class RunAggregate:
                 public=p.public, internal={**p.internal, "invocation_id": None}
             ),
         )
+        self.command_registry.register(
+            "RequestActivity",
+            3,
+            RequestActivityPayloadV3,
+            upcast_from_previous=lambda p: {**p, "subject_digest": None},
+        )
+        self.event_registry.register(
+            "ActivityRequested",
+            3,
+            ActivityRequestedPayloadV3,
+            internal_model=ActivityRequestedInternalPayload,
+            upcast_from_previous=lambda p: EventPayloads(
+                public={**p.public, "subject_digest": None}, internal=p.internal
+            ),
+        )
+        self.command_registry.register(
+            "RequestActivity",
+            4,
+            RequestActivityPayloadV4,
+            upcast_from_previous=lambda p: {
+                **p,
+                "handler_version": None,
+                "definition_digest": None,
+            },
+        )
+        self.event_registry.register(
+            "ActivityRequested",
+            4,
+            ActivityRequestedPayloadV4,
+            internal_model=ActivityRequestedInternalPayload,
+            upcast_from_previous=lambda p: EventPayloads(
+                public={**p.public, "handler_version": None, "definition_digest": None},
+                internal=p.internal,
+            ),
+        )
+        for command_name, event_name, model, fields in (
+            (
+                "RequestApproval",
+                "ApprovalRequested",
+                RequestApprovalPayloadV2,
+                {"subject": None, "subject_digest": None},
+            ),
+            (
+                "DecideApproval",
+                "ApprovalDecided",
+                DecideApprovalPayloadV2,
+                {"expected_subject_digest": None},
+            ),
+        ):
+            self.command_registry.register(
+                command_name, 2, model, upcast_from_previous=lambda p, f=fields: {**p, **f}
+            )
+            self.event_registry.register(
+                event_name,
+                2,
+                ApprovalRequestedPayloadV2 if event_name == "ApprovalRequested" else model,
+                internal_model=ApprovalRequestedInternalV2
+                if event_name == "ApprovalRequested"
+                else EmptyPayload,
+                upcast_from_previous=lambda p, f=fields: EventPayloads(
+                    public={
+                        **p.public,
+                        **{key: value for key, value in f.items() if key != "subject"},
+                    },
+                    internal={**p.internal, "subject": None} if "subject" in f else p.internal,
+                ),
+            )
         self._assert_registry_coverage()
 
     def _assert_registry_coverage(self) -> None:
@@ -468,7 +694,7 @@ class RunAggregate:
                 f"{sorted(registered_events ^ _EVOLVED_EVENT_TYPES)}"
             )
         for name in self.command_registry.registered_names():
-            if getattr(self, f"_decide_{name}", None) is None:
+            if name not in EFFECT_COMMAND_MODELS and getattr(self, f"_decide_{name}", None) is None:
                 raise RuntimeError(f"registered command {name} has no _decide_{name} handler")
 
     def initial_state(self, stream_id: str) -> RunState:
@@ -479,9 +705,30 @@ class RunAggregate:
         payload = event.public_payload
         common = {"stream_version": event.stream_version}
 
+        if event.event_type in EFFECT_EVENT_TYPES:
+            return state.model_copy(
+                update={
+                    **common,
+                    "effect_operations": evolve_effect(state.effect_operations, event),
+                }
+            )
         if event.event_type in {"ArtifactVersionProduced", "ModelUsageRecorded"}:
             return state.model_copy(update=common)
         if event.event_type == "RunCreated":
+            raw_pin = event.internal_payload.get("definition_pin")
+            pin = DefinitionPin.model_validate(raw_pin) if raw_pin is not None else None
+            raw_manifest = event.internal_payload.get("definition_manifest")
+            manifest = (
+                DefinitionManifest.model_validate(raw_manifest)
+                if raw_manifest is not None
+                else None
+            )
+            if manifest is not None:
+                if pin is None:
+                    raise ValueError("definition manifest has no formal pin")
+                manifest.require_pin(pin)
+            if pin is not None and pin.family.value != payload["family"]:
+                raise ValueError("Run definition family mismatch")
             raw_snapshot = event.internal_payload.get("policy_snapshot")
             try:
                 policy_snapshot = RunPolicySnapshot.model_validate(raw_snapshot)
@@ -498,6 +745,8 @@ class RunAggregate:
                 update={
                     **common,
                     "family": RunFamily(payload["family"]),
+                    "definition_pin": pin,
+                    "definition_manifest": manifest,
                     "source_entity_type": payload["source_entity_type"],
                     "source_entity_id": payload["source_entity_id"],
                     "semantic_payload": event.internal_payload.get("semantic_payload", {}),
@@ -550,6 +799,17 @@ class RunAggregate:
                     **common,
                     "status": RunStatus.WAITING,
                     "wait_reason": "approval",
+                    "pending_approval_subject_digest": payload.get("subject_digest"),
+                    "approval_subjects": (
+                        *state.approval_subjects,
+                        (
+                            UUID(str(payload["approval_id"])),
+                            UUID(str(payload["subject_activity_id"])),
+                            str(payload["subject_digest"]),
+                        ),
+                    )
+                    if payload.get("subject_digest")
+                    else state.approval_subjects,
                     "pending_approval_id": UUID(str(payload["approval_id"])),
                     "pending_approval_activity_id": UUID(str(payload["subject_activity_id"])),
                 }
@@ -567,6 +827,7 @@ class RunAggregate:
             return state.model_copy(
                 update={
                     **common,
+                    "pending_approval_subject_digest": None,
                     "pending_approval_id": None,
                     "pending_approval_activity_id": None,
                     "approval_decisions": tuple(
@@ -590,6 +851,7 @@ class RunAggregate:
             return state.model_copy(
                 update={
                     **common,
+                    "pending_approval_subject_digest": None,
                     "pending_approval_id": None,
                     "pending_approval_activity_id": None,
                     "approval_decisions": tuple(
@@ -620,6 +882,7 @@ class RunAggregate:
                     "result_ref": payload.get("result_ref"),
                     "failure_code": payload.get("failure_code"),
                     "wait_reason": None,
+                    "pending_approval_subject_digest": None,
                     "pending_approval_id": None,
                     "pending_approval_activity_id": None,
                 }
@@ -637,6 +900,12 @@ class RunAggregate:
                     "activity_generations": tuple(
                         sorted(generations.items(), key=lambda item: str(item[0]))
                     ),
+                    "activity_subjects": (
+                        *state.activity_subjects,
+                        (activity_id, state.retry_generation, payload["subject_digest"]),
+                    )
+                    if payload.get("subject_digest")
+                    else state.activity_subjects,
                     "requested_activities": tuple(
                         sorted(
                             (
@@ -649,6 +918,16 @@ class RunAggregate:
                             ),
                             key=lambda item: str(item[0]),
                         )
+                    ),
+                }
+            )
+        if event.event_type == "ToolIntentRefreshRequested":
+            return state.model_copy(
+                update={
+                    **common,
+                    "tool_intent_refreshes": (
+                        *state.tool_intent_refreshes,
+                        ToolIntentRefreshRecord.model_validate(payload),
                     ),
                 }
             )
@@ -708,7 +987,11 @@ class RunAggregate:
                         decision_digest,
                     ),
                 )
-            activity_failure_codes = state.activity_failure_codes
+            activity_failure_codes = tuple(
+                item
+                for item in state.activity_failure_codes
+                if not (item[0] == activity_id and item[1] == generation)
+            )
             if event.event_type in {
                 "ActivityFailed",
                 "ActivityOutcomeUnknown",
@@ -720,7 +1003,7 @@ class RunAggregate:
                 activity_failure_codes = tuple(
                     sorted(
                         (
-                            *state.activity_failure_codes,
+                            *activity_failure_codes,
                             (activity_id, generation, failure_code),
                         ),
                         key=lambda item: (str(item[0]), item[1]),
@@ -741,7 +1024,11 @@ class RunAggregate:
                     "settled_activities": tuple(
                         sorted(
                             (
-                                *state.settled_activities,
+                                *(
+                                    item
+                                    for item in state.settled_activities
+                                    if not (item[0] == activity_id and item[2] == generation)
+                                ),
                                 (activity_id, status, generation),
                             ),
                             key=lambda item: str(item[0]),
@@ -772,6 +1059,8 @@ class RunAggregate:
         payload = self.command_registry.latest(command.command_type).model.model_validate(
             normalized_payload
         )
+        if command.command_type in EFFECT_COMMAND_MODELS:
+            return decide_effect(self, state, command.command_type, payload)
         # Only receipt-verified metadata can be appended after termination.
         # The transactional adapter verifies the durable receipt before decide.
         if command.command_type == "RecordModelUsage":
@@ -799,6 +1088,22 @@ class RunAggregate:
                 f"cannot handle {command.command_type} from terminal {state.status}"
             )
 
+        if any(item.integrity_conflict for item in state.effect_operations) and (
+            command.command_type
+            in {
+                "StartRun",
+                "ResumeRun",
+                "RetryRun",
+                "CompleteRun",
+                "RequestActivity",
+                "RequestApproval",
+                "DecideApproval",
+                "RefreshToolIntent",
+            }
+            or (command.command_type == "FailRun" and payload.retryable)
+        ):
+            raise InvalidRunTransitionError("conflicting external evidence requires quarantine")
+
         # RequestApproval and FailRun schedule durable timers whose due times
         # are derived from the issuing command's clock; the handlers need the
         # envelope's issued_at, so they are dispatched explicitly rather than
@@ -812,6 +1117,111 @@ class RunAggregate:
         if handler is None:
             raise UnknownRunCommandError(command.command_type)
         return handler(state, payload)
+
+    def _decide_PrepareEffectOperation(self, state, payload):
+        return decide_effect(self, state, "PrepareEffectOperation", payload)
+
+    def _decide_StartEffectDispatch(self, state, payload):
+        return decide_effect(self, state, "StartEffectDispatch", payload)
+
+    def _decide_RecordEffectObservation(self, state, payload):
+        return decide_effect(self, state, "RecordEffectObservation", payload)
+
+    def _decide_ResolveActivityOutcome(self, state, payload):
+        return decide_effect(self, state, "ResolveActivityOutcome", payload)
+
+    def _decide_SupplyActivityResult(self, state, payload):
+        return decide_effect(self, state, "SupplyActivityResult", payload)
+
+    def _decide_AbandonEffectResolution(self, state, payload):
+        return decide_effect(self, state, "AbandonEffectResolution", payload)
+
+    def _decide_RefreshToolIntent(self, state, payload):
+        if any(item.refresh_id == payload.refresh_id for item in state.tool_intent_refreshes):
+            return Decision(events=())
+        if (
+            state.family != "agent"
+            or state.status != RunStatus.WAITING
+            or state.wait_reason
+            not in {
+                "contract_changed",
+                "authorization_changed",
+                "tool_intent_refresh_failed",
+            }
+            or state.active_activity_ids
+        ):
+            raise InvalidRunTransitionError("Run is not waiting for tool intent renewal")
+        if (payload.activity_id, "failed", state.retry_generation) not in state.settled_activities:
+            raise InvalidRunTransitionError("Only a definitely unsent failed intent can be renewed")
+        prior = next(
+            (
+                item
+                for item in reversed(state.tool_intent_refreshes)
+                if payload.activity_id in {item.prepare_activity_id, item.replacement_activity_id}
+                and item.generation == state.retry_generation
+            ),
+            None,
+        )
+        root_id = prior.root_activity_id if prior else payload.activity_id
+        latest = next(
+            (
+                item
+                for item in reversed(state.tool_intent_refreshes)
+                if item.root_activity_id == root_id and item.generation == state.retry_generation
+            ),
+            None,
+        )
+        if latest is not prior:
+            raise InvalidRunTransitionError("Tool intent was already superseded")
+        recorded = next(
+            (
+                value
+                for activity, generation, value in state.activity_subjects
+                if activity == payload.activity_id and generation == state.retry_generation
+            ),
+            None,
+        )
+        if recorded is None and prior and payload.activity_id == prior.prepare_activity_id:
+            recorded = prior.expected_subject_digest
+        if recorded != payload.expected_subject_digest:
+            raise InvalidRunTransitionError("Tool intent subject changed")
+        failure = next(
+            (
+                code
+                for activity, generation, code in state.activity_failure_codes
+                if activity == payload.activity_id and generation == state.retry_generation
+            ),
+            None,
+        )
+        if failure not in {
+            "TOOL_CONTRACT_CHANGED",
+            "TOOL_AUTHORIZATION_CHANGED",
+            "TOOL_INTENT_REFRESH_FAILED",
+        }:
+            raise InvalidRunTransitionError("Activity failure does not permit intent renewal")
+        if any(
+            item.spec.activity_id == payload.activity_id
+            and item.state not in {"prepared", "not_applied"}
+            for item in state.effect_operations
+        ):
+            raise InvalidRunTransitionError(
+                "An uncertain or applied effect must be reconciled first"
+            )
+        if sum(item.root_activity_id == root_id for item in state.tool_intent_refreshes) >= 20:
+            raise InvalidRunTransitionError("Tool intent renewal limit reached")
+        record = ToolIntentRefreshRecord(
+            **payload.model_dump(),
+            root_activity_id=root_id,
+            prepare_activity_id=uuid5(payload.refresh_id, "prepare"),
+            replacement_activity_id=uuid5(payload.refresh_id, "replacement"),
+            generation=state.retry_generation,
+        )
+        return Decision(
+            events=(
+                self._new_event("ToolIntentRefreshRequested", record.model_dump(mode="json")),
+                self._new_event("RunResumed", {}),
+            )
+        )
 
     def _decide_RecordModelUsage(self, state, payload):
         return Decision(
@@ -835,6 +1245,14 @@ class RunAggregate:
         if state.status != RunStatus.NEW:
             raise InvalidRunTransitionError("Run can only be created once")
         policy_snapshot = validate_run_policy_snapshot(payload.policy_snapshot)
+        pin = getattr(payload, "definition_pin", None)
+        manifest = getattr(payload, "definition_manifest", None)
+        if manifest is not None:
+            if pin is None:
+                raise InvalidRunTransitionError("definition manifest requires its exact pin")
+            manifest.require_pin(pin)
+        if pin is not None and pin.family != payload.family:
+            raise InvalidRunTransitionError("definition pin family mismatch")
         if policy_snapshot.family is not payload.family:
             raise RuntimePolicyIntegrityError(
                 "CreateRun policy snapshot family does not match Run family"
@@ -853,6 +1271,10 @@ class RunAggregate:
                     internal_payload={
                         "semantic_payload": payload.semantic_payload,
                         "policy_snapshot": policy_snapshot.model_dump(mode="json"),
+                        "definition_pin": pin.model_dump(mode="json") if pin is not None else None,
+                        "definition_manifest": manifest.model_dump(mode="json")
+                        if manifest is not None
+                        else None,
                     },
                 ),
             )
@@ -871,7 +1293,11 @@ class RunAggregate:
 
     def _decide_ResumeRun(self, state: RunState, payload: EmptyPayload) -> Decision:
         del payload
-        if state.status != RunStatus.WAITING or state.wait_reason == "retry":
+        if state.status != RunStatus.WAITING or state.wait_reason in {
+            "retry",
+            "external_outcome_unknown",
+            "result_material_missing",
+        }:
             raise InvalidRunTransitionError("Run is not resumable")
         return self._event("RunResumed", {})
 
@@ -942,7 +1368,12 @@ class RunAggregate:
             events=(
                 self._new_event(
                     "ApprovalRequested",
-                    payload.model_dump(mode="json"),
+                    payload.model_dump(mode="json", exclude={"subject"}),
+                    internal_payload={
+                        "subject": payload.subject.model_dump(mode="json")
+                        if payload.subject
+                        else None
+                    },
                 ),
             ),
             scheduled_commands=(timeout,),
@@ -980,6 +1411,8 @@ class RunAggregate:
             or state.pending_approval_id != payload.approval_id
         ):
             raise InvalidRunTransitionError("approval is not pending")
+        if payload.expected_subject_digest != state.pending_approval_subject_digest:
+            raise InvalidRunTransitionError("approval subject changed")
         decided = self._new_event("ApprovalDecided", payload.model_dump(mode="json"))
         if payload.decision == "approved":
             continuation = self._new_event("RunResumed", {})
@@ -1001,6 +1434,11 @@ class RunAggregate:
     ) -> Decision:
         if state.status not in {RunStatus.RUNNING, RunStatus.WAITING}:
             raise InvalidRunTransitionError("Run cannot fail from its current state")
+        if payload.retryable and state.wait_reason in {
+            "external_outcome_unknown",
+            "result_material_missing",
+        }:
+            raise InvalidRunTransitionError("unknown external effects cannot retry the Run")
         if payload.retryable:
             # D6: the retry is timer-driven instead of decision-loop-driven. A
             # durable, deterministic timer delivers RetryRun after exponential
@@ -1088,12 +1526,50 @@ class RunAggregate:
     ) -> Decision:
         if state.status != RunStatus.RUNNING:
             raise InvalidRunTransitionError("Activities require a running Run")
+        required_digest = getattr(payload, "definition_digest", None)
+        handler_version = getattr(payload, "handler_version", None)
+        if state.definition_pin is not None:
+            if state.definition_manifest is None:
+                raise InvalidRunTransitionError("pinned Run lacks its immutable handler closure")
+            state.definition_manifest.require_pin(state.definition_pin)
+            declared_version = state.definition_manifest.handler_version(payload.activity_type)
+            if (
+                required_digest is not None
+                and required_digest != state.definition_pin.manifest_digest
+            ):
+                raise InvalidRunTransitionError("Activity definition differs from its Run")
+            if handler_version is not None and handler_version != declared_version:
+                raise InvalidRunTransitionError(
+                    "Activity handler differs from its frozen definition"
+                )
+            required_digest, handler_version = (
+                state.definition_pin.manifest_digest,
+                declared_version,
+            )
+        elif required_digest is not None or handler_version is not None:
+            raise InvalidRunTransitionError("unpinned Run cannot invent a definition binding")
         if payload.activity_id in state.active_activity_ids:
             return Decision(events=())
         if any(
             activity_id == payload.activity_id for activity_id, _, _ in state.settled_activities
         ):
             raise InvalidRunTransitionError("Activity identity was already settled")
+        raw_subject = payload.input_payload.get("subject")
+        if raw_subject is not None:
+            subject = ToolApprovalSubject.model_validate(raw_subject)
+            if (
+                payload.subject_digest != subject.digest
+                or payload.invocation_id != subject.invocation_id
+            ):
+                raise InvalidRunTransitionError("Activity invocation binding mismatch")
+        approved = {item[0] for item in state.approval_decisions if item[1] == "approved"}
+        bound = [
+            digest
+            for approval_id, activity_id, digest in state.approval_subjects
+            if activity_id == payload.activity_id and approval_id in approved
+        ]
+        if bound and payload.subject_digest != bound[-1]:
+            raise InvalidRunTransitionError("Activity does not match approved subject")
         request = ActivityRequest(
             activity_id=payload.activity_id,
             activity_type=payload.activity_type,
@@ -1104,6 +1580,8 @@ class RunAggregate:
             input_ref=payload.input_ref,
             input_digest=payload.input_digest,
             input_payload=payload.input_payload,
+            definition_digest=required_digest,
+            handler_version=handler_version,
         )
         timer_id = uuid5(
             NAMESPACE_URL,
@@ -1153,6 +1631,8 @@ class RunAggregate:
                             exclude={"input_payload"},
                         ),
                         "generation": state.retry_generation,
+                        "definition_digest": required_digest,
+                        "handler_version": handler_version,
                     },
                     internal_payload={"input_payload": payload.input_payload},
                 ),
@@ -1182,6 +1662,21 @@ class RunAggregate:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="succeeded"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
+        operation = next(
+            (
+                item
+                for item in state.effect_operations
+                if item.spec.activity_id == payload.activity_id
+                and item.spec.generation == payload.generation
+            ),
+            None,
+        )
+        if operation is not None and (
+            operation.state != "applied"
+            or operation.awaiting_result
+            or operation.integrity_conflict
+        ):
+            raise InvalidRunTransitionError("external effect lacks confirmed complete result")
         # The decision payload itself stays off-stream (on the operational
         # activity task row, written in the same transaction); the event only
         # carries a digest that binds that row to the hash-chained history.
@@ -1208,6 +1703,17 @@ class RunAggregate:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="failed"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
+        operation = next(
+            (
+                item
+                for item in state.effect_operations
+                if item.spec.activity_id == payload.activity_id
+                and item.spec.generation == payload.generation
+            ),
+            None,
+        )
+        if operation is not None and operation.state not in {"prepared", "not_applied"}:
+            raise InvalidRunTransitionError("uncertain external effects cannot settle failed")
         return self._event("ActivityFailed", payload.model_dump(mode="json"))
 
     def _decide_MarkActivityOutcomeUnknown(
@@ -1218,7 +1724,12 @@ class RunAggregate:
         if RunAggregate._is_duplicate_settlement(state, payload, expected_status="unknown"):
             return Decision(events=())
         RunAggregate._validate_active_generation(state, payload)
-        return self._event("ActivityOutcomeUnknown", payload.model_dump(mode="json"))
+        return Decision(
+            events=(
+                self._new_event("ActivityOutcomeUnknown", payload.model_dump(mode="json")),
+                self._new_event("RunWaiting", {"reason": "external_outcome_unknown"}),
+            )
+        )
 
     @staticmethod
     def _validate_active_generation(
@@ -1296,10 +1807,13 @@ class RunAggregate:
             )
         if event.event_type != "RunCreated" and state.status == RunStatus.NEW:
             raise InvalidRunTransitionError("RunCreated must be the first event")
-        if state.status in TERMINAL_STATUSES and event.event_type not in {
-            "ArtifactVersionProduced",
-            "ModelUsageRecorded",
-        }:
+        if state.status in TERMINAL_STATUSES and event.event_type not in (
+            {
+                "ArtifactVersionProduced",
+                "ModelUsageRecorded",
+            }
+            | (EFFECT_EVENT_TYPES - {"EffectOperationPrepared", "EffectDispatchStarted"})
+        ):
             raise InvalidRunTransitionError("terminal Run cannot evolve")
 
     @staticmethod

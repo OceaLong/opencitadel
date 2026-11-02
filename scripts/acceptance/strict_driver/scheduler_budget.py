@@ -211,6 +211,7 @@ async def scheduler_budget_stop(context):
                             "claim_generation": claim.claim_generation,
                         },
                         version=2,
+                        lease_proof=claim.lease_proof,
                     )
                 )
             ).status
@@ -262,6 +263,7 @@ async def scheduler_budget_stop(context):
                             "result_summary": body["choices"][0]["message"]["content"],
                         },
                         version=2,
+                        lease_proof=claim.lease_proof,
                     )
                 )
             ).status

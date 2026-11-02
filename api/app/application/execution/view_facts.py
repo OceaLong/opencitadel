@@ -9,11 +9,13 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pydantic import TypeAdapter
 
 from app.application.dto.execution_view import (
+    ApprovalIntentPreview,
     ArtifactReference,
     CitationReference,
     Completeness,
     ConfigurationSummary,
     ContentReference,
+    ContextSummaryView,
     RunView,
     SourceReference,
 )
@@ -99,6 +101,8 @@ _FIELDS = {
         "status",
         "kind",
         "tool_name",
+        "contract_drift",
+        "context",
         "started_at",
         "ended_at",
         "duration_ms",
@@ -116,7 +120,15 @@ _FIELDS = {
         "input_ref",
         "output_ref",
     },
-    "approval": {"approval_id", "subject_activity_id", "approval_kind", "decision", "status"},
+    "approval": {
+        "approval_id",
+        "subject_activity_id",
+        "approval_kind",
+        "decision",
+        "status",
+        "subject_digest",
+        "public_preview",
+    },
     "message": {"role", "public_summary", "step_id", "progress", "phase", "progress_status"},
     "artifact": {"artifact_id", "version", "availability"},
 }
@@ -128,7 +140,25 @@ def sanitize_patch(kind: str, patch: dict) -> dict:
     _reject_public_secrets(patch)
     result = dict(patch)
     for key, value in patch.items():
-        if key == "source" and value is not None:
+        if key == "public_preview" and value is not None:
+            from app.application.execution.content_sanitization import sanitize_content
+
+            preview = ApprovalIntentPreview.model_validate(value)
+            clean = sanitize_content(preview.arguments_json)
+            result[key] = {
+                "arguments_json": clean,
+                "redacted": preview.redacted or clean != preview.arguments_json,
+            }
+        elif key == "contract_drift" and value is not None:
+            from app.application.dto.execution_view import ToolContractDriftView
+
+            drift = ToolContractDriftView.model_validate(value)
+            result[key] = drift.model_copy(
+                update={"tool_name": safe_text(drift.tool_name, 255)}
+            ).model_dump(mode="json")
+        elif key == "context" and value is not None:
+            result[key] = ContextSummaryView.model_validate(value).model_dump(mode="json")
+        elif key == "source" and value is not None:
             result[key] = {
                 k: safe_text(v) if isinstance(v, str) else v
                 for k, v in SourceReference.model_validate(value).model_dump(mode="json").items()
@@ -206,11 +236,22 @@ def to_view_fact(event: StoredEvent) -> ProjectionFact | None:
         name_value = safe_text(data.get("tool_name", data.get("name")), 255)
         if name_value:
             patch["tool_name"] = name_value
+        if data.get("contract_drift") is not None:
+            patch["contract_drift"] = data["contract_drift"]
+        if data.get("kind") == "context" and data.get("context") is not None:
+            patch["context"] = data["context"]
         if name == "ActivityRequested":
+            stage = {
+                activity_types.CONTEXT_PREPARE: "prepare",
+                activity_types.CONTEXT_COMPACT: "compact",
+            }.get(p.get("activity_type"))
+            if stage is not None:
+                patch["context"] = {"stage": stage}
             patch.update(
                 kind={
                     activity_types.MODEL_CALL: "model",
                     activity_types.TOOL_CALL: "tool",
+                    activity_types.TOOL_INTENT_REFRESH: "tool",
                     "model": "model",
                     "tool": "tool",
                 }.get(p.get("activity_type"), "activity"),
@@ -245,6 +286,9 @@ def to_view_fact(event: StoredEvent) -> ProjectionFact | None:
         for key in ("subject_activity_id", "approval_kind", "decision"):
             if key in p:
                 patch[key] = safe_text(p[key], 128)
+        if name == "ApprovalRequested":
+            patch["subject_digest"] = p.get("subject_digest")
+            patch["public_preview"] = p.get("public_preview") or None
     elif name.startswith("Run"):
         statuses = {
             "RunCreated": "queued",

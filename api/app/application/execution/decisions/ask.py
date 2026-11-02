@@ -15,6 +15,7 @@ from app.application.execution.decisions.base import (
     result_refs,
     settled_status,
 )
+from app.application.execution.decisions.context import context_gate
 from app.domain.execution.commands import JsonValue
 from app.domain.execution.context import RunExecutionContext
 from app.domain.execution.run import RunState
@@ -50,7 +51,7 @@ def next_ask_command(
         and type(semantic.get("judge_protocol")) is int
         and semantic["judge_protocol"] == 1
     ):
-        return _judge_command(state, outcomes=outcomes, now=now, timeout=timeout)
+        return _judge_command(state, context, outcomes=outcomes, now=now, timeout=timeout)
 
     retrieval_id = activity_identity(state, "retrieval:0")
     retrieval_status = settled_status(state, retrieval_id)
@@ -76,6 +77,11 @@ def next_ask_command(
     model_id = activity_identity(state, "model:0")
     model_status = settled_status(state, model_id)
     if model_status is None:
+        prepared = context_gate(
+            state, context, outcomes=outcomes, round_index=0, allow_tools=False, now=now
+        )
+        if prepared.pending:
+            return prepared.command
         return request_activity(
             state,
             activity_id=model_id,
@@ -86,7 +92,11 @@ def next_ask_command(
             input_digest=input_digest,
             input_payload={
                 "allow_tools": False,
-                "history_refs": result_refs(state),
+                **(
+                    {"context_ref": prepared.result_ref, "context_digest": prepared.digest}
+                    if prepared.result_ref
+                    else {"history_refs": result_refs(state)}
+                ),
                 "round": 0,
             },
         )
@@ -110,13 +120,18 @@ def next_ask_command(
 __all__ = ["next_ask_command"]
 
 
-def _judge_command(state, *, outcomes, now, timeout):
+def _judge_command(state, context, *, outcomes, now, timeout):
     # Versioned code-owned protocol, stamped only by restricted admission. The
     # handler/physical gate additionally requires its immutable database binding.
     for ordinal in range(3):
         identity = activity_identity(state, f"model:{ordinal}")
         status = settled_status(state, identity)
         if status is None:
+            prepared = context_gate(
+                state, context, outcomes=outcomes, round_index=ordinal, allow_tools=False, now=now
+            )
+            if prepared.pending:
+                return prepared.command
             return request_activity(
                 state,
                 activity_id=identity,
@@ -125,7 +140,15 @@ def _judge_command(state, *, outcomes, now, timeout):
                 timeout_seconds=timeout,
                 input_ref=state.semantic_payload["input_ref"],
                 input_digest=state.semantic_payload["input_digest"],
-                input_payload={"allow_tools": False, "history_refs": [], "round": ordinal},
+                input_payload={
+                    "allow_tools": False,
+                    "round": ordinal,
+                    **(
+                        {"context_ref": prepared.result_ref, "context_digest": prepared.digest}
+                        if prepared.result_ref
+                        else {"history_refs": []}
+                    ),
+                },
             )
         if status != "succeeded":
             return fail_for_activity(state, status, activity_id=identity, max_retries=0)

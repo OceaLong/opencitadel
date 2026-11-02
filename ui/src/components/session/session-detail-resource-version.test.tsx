@@ -162,16 +162,8 @@ vi.mock("@/components/session/file-preview-panel", () => ({
   FilePreviewPanel: () => null,
 }));
 
-vi.mock("@/components/session/tool-preview-panel", () => ({
-  ToolPreviewPanel: () => null,
-}));
-
 vi.mock("@/components/session/approval-actions-bar", () => ({
   ApprovalActionsBar: () => null,
-}));
-
-vi.mock("@/components/session/session-mode-toggle", () => ({
-  SessionModeToggle: () => null,
 }));
 
 vi.mock("@/components/session-model-picker", () => ({

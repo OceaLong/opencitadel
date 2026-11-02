@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domain.models.memory_entry import MemoryScope, MemorySource
+from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.infrastructure.repositories.db_memory_entry_repository import (
     DBMemoryEntryRepository,
 )
@@ -38,6 +38,9 @@ class _RecordingSession:
         self.params = params
         return SimpleNamespace(fetchall=lambda: self._rows)
 
+    async def flush(self):
+        return None
+
 
 def _row(**overrides):
     defaults = {
@@ -55,6 +58,7 @@ def _row(**overrides):
         "created_at": datetime(2026, 8, 14, tzinfo=UTC),
         "updated_at": datetime(2026, 8, 14, tzinfo=UTC),
         "distance": 0.25,
+        "embedding_space_digest": "a" * 64,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -65,12 +69,15 @@ async def test_vector_search_entries_builds_pgvector_statement_with_scope_isolat
     session = _RecordingSession()
     repo = DBMemoryEntryRepository(session)
 
-    await repo.vector_search_entries([0.1, 0.2, 0.3], session_id="s1", limit=5)
+    await repo.vector_search_entries(
+        [0.1] * 1536, session_id="s1", limit=5, embedding_space_digest="a" * 64
+    )
 
     assert session.stmt is not None
     compiled = str(session.stmt)  # asserts the statement compiles
     assert "embedding <=> CAST(:query_vec AS vector)" in compiled
     assert "memory_entries" in compiled
+    assert "embedding_space_digest = :embedding_space_digest" in compiled
     # EXISTS subquery enforces team/owner scope isolation via the session row
     assert "EXISTS" in compiled
     assert "sessions" in compiled
@@ -79,7 +86,8 @@ async def test_vector_search_entries_builds_pgvector_statement_with_scope_isolat
 
     assert session.params == {
         "session_id": "s1",
-        "query_vec": "[0.1,0.2,0.3]",
+        "query_vec": "[" + ",".join(["0.1"] * 1536) + "]",
+        "embedding_space_digest": "a" * 64,
         "limit": 5,
     }
 
@@ -89,7 +97,9 @@ async def test_vector_search_entries_maps_rows_to_memory_entries():
     session = _RecordingSession(rows=[_row(distance=0.2), _row(id="mem-2", distance=None)])
     repo = DBMemoryEntryRepository(session)
 
-    entries = await repo.vector_search_entries([0.1], limit=2)
+    entries = await repo.vector_search_entries(
+        [0.1] * 1536, limit=2, embedding_space_digest="a" * 64
+    )
 
     assert len(entries) == 2
     first = entries[0]
@@ -108,7 +118,7 @@ async def test_update_embedding_executes_update_statement_for_entry():
     session = _RecordingSession()
     repo = DBMemoryEntryRepository(session)
 
-    await repo.update_embedding("mem-1", [0.1, 0.2])
+    await repo.update_embedding("mem-1", [0.1] * 1536, embedding_space_digest="a" * 64)
 
     assert session.stmt is not None
     compiled = str(session.stmt)
@@ -138,10 +148,13 @@ async def test_postgres_vector_search_entries_ranks_by_similarity():
         engine,
         signing_secret=settings.session_secret,
     )
+    # Match the production UoW: save() adds the new row without flushing it.
+    session_factory.configure(autoflush=False)
     user_id = f"vec-user-{uuid.uuid4()}"
     session_id = f"vec-session-{uuid.uuid4()}"
     close_id = f"mem-close-{uuid.uuid4()}"
     far_id = f"mem-far-{uuid.uuid4()}"
+    foreign_id = f"mem-foreign-{uuid.uuid4()}"
 
     try:
         async with session_factory() as setup:
@@ -162,6 +175,7 @@ async def test_postgres_vector_search_entries_ranks_by_similarity():
                     content="close",
                     owner_user_id=user_id,
                     embedding=[1.0] + [0.0] * 1535,
+                    embedding_space_digest="a" * 64,
                 )
             )
             await setup.execute(
@@ -172,7 +186,23 @@ async def test_postgres_vector_search_entries_ranks_by_similarity():
                     content="far",
                     owner_user_id=user_id,
                     embedding=[0.0] * 1535 + [1.0],
+                    embedding_space_digest="a" * 64,
                 )
+            )
+            # An identical vector in another space must not participate in
+            # distance ranking, despite equal dimensions and equal text.
+            setup_repo = DBMemoryEntryRepository(setup)
+            await setup_repo.save(
+                MemoryEntry(
+                    id=foreign_id,
+                    scope="global",
+                    title="foreign space",
+                    content="close",
+                    owner_user_id=user_id,
+                )
+            )
+            await setup_repo.update_embedding(
+                foreign_id, [1.0] + [0.0] * 1535, embedding_space_digest="b" * 64
             )
             await setup.commit()
 
@@ -182,11 +212,21 @@ async def test_postgres_vector_search_entries_ranks_by_similarity():
             )
             repo = DBMemoryEntryRepository(query_session)
             results = await repo.vector_search_entries(
-                [1.0] + [0.0] * 1535, session_id=session_id, limit=2
+                [1.0] + [0.0] * 1535,
+                session_id=session_id,
+                limit=2,
+                embedding_space_digest="a" * 64,
+            )
+            foreign_results = await repo.vector_search_entries(
+                [1.0] + [0.0] * 1535,
+                session_id=session_id,
+                limit=5,
+                embedding_space_digest="b" * 64,
             )
 
         assert [r.id for r in results] == [close_id, far_id]
         assert results[0].vector_score > results[1].vector_score
+        assert [entry.id for entry in foreign_results] == [foreign_id]
     finally:
         async with session_factory() as cleanup:
             await configure_session_authorization(
@@ -195,7 +235,7 @@ async def test_postgres_vector_search_entries_ranks_by_similarity():
             from sqlalchemy import delete
 
             await cleanup.execute(
-                delete(MemoryEntryORM).where(MemoryEntryORM.id.in_([close_id, far_id]))
+                delete(MemoryEntryORM).where(MemoryEntryORM.id.in_([close_id, far_id, foreign_id]))
             )
             await cleanup.execute(delete(SessionModel).where(SessionModel.id == session_id))
             await cleanup.execute(delete(UserORM).where(UserORM.id == user_id))

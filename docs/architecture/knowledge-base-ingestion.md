@@ -10,6 +10,33 @@ Every retrieval, citation, source expansion, GraphRAG query, Ask Run, and Agent
 Run uses an explicit published `version_id`. There is no unversioned production
 read or write path.
 
+## Initial policy and optional capabilities
+
+The first migration into an empty database seeds a complete Execution Policy
+with text extraction and keyword search, `vector_enabled=false`,
+`rerank.enabled=false`, `graphrag.enabled=false`, and `ocr.mode=off`. Text
+ingestion and keyword retrieval do not resolve inference bindings. Ask/Agent
+answer generation still requires chat inference.
+
+An administrator can configure inference bindings and enable enhancements in
+**Settings → Runtime policy**. New builds capture the policy at admission;
+existing published versions need a rebuild to gain vector or graph data. New
+Ask/Agent Runs capture retrieval policy separately. Parsed document text is
+reused, so enabling OCR does not re-extract already indexed revisions.
+
+Upgrades validate and retain an existing policy head and its revisions. The
+initial seed is separate from schema-version-1 deserialization defaults so
+historical policies, Run snapshots, and their digests remain valid.
+
+A successful keyword-only build is `ready`. Disabled vector and graph stages
+produce false capabilities without degradation reasons; only failures of
+enabled stages or partial document failures produce `degraded` publication.
+See the [knowledge tutorial](../tutorials/02-internal-knowledge-base.md) for
+model requirements and activation steps.
+
+`rapidocr` remains a schema-compatible reserved value; local RapidOCR is not
+implemented. Use `off` or `vision_llm` for new configuration.
+
 ## Identity and storage model
 
 | Concept                | Identity and role                                                                                                                  |
@@ -112,6 +139,17 @@ The runner authorizes the persisted binding again and passes the same
 `version_id` to the retriever and knowledge tools. Missing, duplicated,
 foreign-resource, `building`, `failed`, or unpublished bindings fail closed.
 Publishing a newer version does not silently change an existing session.
+
+Keyword retrieval segments the question and removes common English and Chinese
+question stopwords and standalone punctuation. PostgreSQL parses the remaining
+terms as plain text: a chunk can match any keyword, and chunks matching more
+distinct keywords rank before those matching fewer. Text rank breaks ties;
+repeating one keyword does not outrank coverage of several different keywords.
+A question containing only stopwords or punctuation returns no keyword hits.
+This is lexical matching, without synonym or semantic expansion. The same
+version, indexed-document, and tenant authorization filters apply to every
+candidate. It needs no additional model or configuration, and existing keyword
+indexes need no rebuild.
 
 An explicit session upgrade creates a replacement current binding and keeps the
 superseded binding as history. This preserves auditability and makes old event

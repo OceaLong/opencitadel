@@ -29,6 +29,7 @@ const REMEDIATION_BADGE: Record<
 > = {
   proposed: { variant: "secondary" },
   executing: { variant: "outline", className: IN_PROGRESS_BADGE_CLASSNAME },
+  unknown: { variant: "outline", className: IN_PROGRESS_BADGE_CLASSNAME },
   executed: { variant: "outline", className: IN_PROGRESS_BADGE_CLASSNAME },
   verified: { variant: "success" },
   failed: { variant: "destructive" },
@@ -190,6 +191,19 @@ export function RemediationStatusList({ remediations }: { remediations: PatrolRe
               <p className="text-muted-foreground text-xs" translate="no">
                 {detail.target_kind}/{detail.target_workload || "—"} · {detail.target_namespace}
               </p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 text-xs">
+                <dt>{t("remediation.operationId")}</dt>
+                <dd className="break-all" translate="no">
+                  {detail.actuator_operation_id ?? "—"}
+                </dd>
+                <dt>{t("remediation.targetUid")}</dt>
+                <dd className="break-all" translate="no">
+                  {detail.actuator_target_uid ?? "—"}
+                </dd>
+              </dl>
+              {detail.status === "unknown" && (
+                <p role="status">{t("remediation.unknownExplanation")}</p>
+              )}
               {detail.error_message && (
                 <p className="text-destructive text-xs">{detail.error_message}</p>
               )}

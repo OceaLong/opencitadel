@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -30,7 +32,6 @@ from app.domain.execution.run import (
 )
 from app.domain.execution.store import (
     AppendContext,
-    CorruptEventStreamError,
     EventStore,
     OptimisticConcurrencyError,
     PayloadTooLargeError,
@@ -42,19 +43,40 @@ from app.infrastructure.execution.models import (
     ExecutionOutboxORM,
     ExecutionScheduledCommandORM,
 )
+from app.infrastructure.execution.postgres_activity_fence import (
+    WORKER_ACTIVITY_COMMANDS,
+    ActivityLeaseExpiredError,
+    authorize_activity_command,
+    ensure_activity_lease_current,
+)
+from app.infrastructure.execution.postgres_effect_store import (
+    EFFECT_COMMANDS,
+    authorize_effect_command,
+    ensure_effect_command_current,
+    project_effect_events,
+)
 from app.infrastructure.execution.postgres_event_store import PostgresEventStore
 from app.infrastructure.execution.postgres_inbox import PostgresInbox
 from app.infrastructure.execution.postgres_snapshot_store import PostgresSnapshotStore
 from app.infrastructure.execution.postgres_timer_store import PostgresTimerStore
+from app.infrastructure.execution.verified_run_loader import VerifiedAggregateLoader
 from app.infrastructure.observability.execution_metrics import (
     record_optimistic_conflict,
-    record_replay_failure,
 )
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
 type EventStoreFactory = Callable[[AsyncSession], EventStore]
 type InboxFactory = Callable[[AsyncSession], PostgresInbox]
 type SnapshotStoreFactory = Callable[[AsyncSession], PostgresSnapshotStore]
+
+
+@dataclass(frozen=True)
+class _CommandTransaction:
+    issuer: object
+    session: AsyncSession
+    transaction: object
+    identity: tuple
+    execution_lock: object
 
 
 class SqlAlchemyExecutionOrchestrator:
@@ -111,36 +133,12 @@ class SqlAlchemyExecutionOrchestrator:
     async def handle(self, command: CommandEnvelope) -> CommandResult:
         async with self._session_factory() as session:
             try:
-                await configure_session_authorization(session, self._authorization)
-                execution_lock = (
-                    await self._evaluation_execution.lock_command(session, command)
-                    if self._evaluation_execution is not None
-                    else None
-                )
-                inbox = self._inbox_factory(session)
-                claim = await inbox.claim(
-                    command,
-                    now=self._now(),
-                    claim_ttl=self._claim_ttl,
-                )
-                if claim.status == "completed":
-                    assert claim.result is not None
-                    await session.commit()
-                    return claim.result
-
-                if claim.payload_too_large:
-                    result = self._rejected(
-                        command,
-                        RejectionCode.PAYLOAD_TOO_LARGE,
-                    )
-                    await inbox.complete(result, now=self._now())
-                    await session.commit()
-                    return result
-
-                result = await self._process(session, command, execution_lock=execution_lock)
-                await inbox.complete(result, now=self._now())
+                result = await self.handle_in_session(command, session)
                 await session.commit()
                 return result
+            except ActivityLeaseExpiredError:
+                await session.rollback()
+                return self._rejected(command, RejectionCode.INVALID_TRANSITION)
             except ExecutionCapacityUnavailable:
                 await session.rollback()
                 return self._deferred(command)
@@ -155,6 +153,86 @@ class SqlAlchemyExecutionOrchestrator:
             except (OSError, RuntimeError, ValueError):
                 await session.rollback()
                 raise
+
+    @staticmethod
+    def _command_identity(command: CommandEnvelope) -> tuple:
+        return (
+            command.command_id,
+            command.command_type,
+            command.stream_type,
+            command.stream_id,
+            command.owner_user_id,
+            command.team_id,
+        )
+
+    async def prepare_command_transaction(
+        self, command: CommandEnvelope, session: AsyncSession
+    ) -> _CommandTransaction:
+        """Acquire budget locks before a caller takes scope/operation/authority locks."""
+        await configure_session_authorization(session, self._authorization)
+        execution_lock = (
+            await self._evaluation_execution.lock_command(session, command)
+            if self._evaluation_execution is not None
+            else None
+        )
+        # Caller-owned effect transactions take scope/authority locks before
+        # finalizing a receipt payload. Serialize the command identity first:
+        # an ordinary duplicate must never hold its inbox row while waiting
+        # for that caller's scope lock. API ingress/queue discovery only holds
+        # inbox rows briefly and never waits for the scope append lock.
+        command_lock = int.from_bytes(
+            hashlib.sha256(f"execution-command:{command.command_id}".encode()).digest()[:8],
+            "big",
+            signed=True,
+        )
+        await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": command_lock})
+        return _CommandTransaction(
+            self,
+            session,
+            session.sync_session.get_transaction(),
+            self._command_identity(command),
+            execution_lock,
+        )
+
+    async def handle_in_session(
+        self,
+        command: CommandEnvelope,
+        session: AsyncSession,
+        *,
+        prepared: _CommandTransaction | None = None,
+    ) -> CommandResult:
+        """Accept within the caller's transaction, preserving its authorization locks.
+
+        The caller owns commit/rollback, including exceptions and deferred capacity.
+        Effect preflight and reconciliation use this boundary so their permissions,
+        formal events, task settlement and recovery permit commit atomically.
+        """
+        if prepared is None:
+            prepared = await self.prepare_command_transaction(command, session)
+        elif (
+            prepared.issuer is not self
+            or prepared.session is not session
+            or prepared.transaction is not session.sync_session.get_transaction()
+            or prepared.identity != self._command_identity(command)
+        ):
+            raise ValueError("command preparation belongs to a different transaction or identity")
+        execution_lock = prepared.execution_lock
+        inbox = self._inbox_factory(session)
+        claim = await inbox.claim(command, now=self._now(), claim_ttl=self._claim_ttl)
+        if claim.status == "completed":
+            assert claim.result is not None
+            return claim.result
+        result = (
+            self._rejected(command, RejectionCode.PAYLOAD_TOO_LARGE)
+            if claim.payload_too_large
+            else await self._process(session, command, execution_lock=execution_lock)
+        )
+        await inbox.complete(result, now=self._now())
+        if result.status == "accepted":
+            await session.flush()
+            await ensure_activity_lease_current(session, command)
+            await ensure_effect_command_current(session, command)
+        return result
 
     async def _process(
         self,
@@ -218,8 +296,9 @@ class SqlAlchemyExecutionOrchestrator:
                     last_event_position=production_receipt["event_position"],
                     rejection_code=None,
                 )
-        if self._activity_timeout is not None and self._activity_timeout.applies(
-            normalized_command
+        if command.command_type in WORKER_ACTIVITY_COMMANDS | EFFECT_COMMANDS or (
+            self._activity_timeout is not None
+            and self._activity_timeout.applies(normalized_command)
         ):
             # Match append ordering after C2/inbox locks; call-start cannot race
             # the accepted-state safety decision and enqueue in this transaction.
@@ -231,6 +310,8 @@ class SqlAlchemyExecutionOrchestrator:
                     )
                 },
             )
+        if not await authorize_activity_command(session, command):
+            return self._rejected(command, RejectionCode.INVALID_TRANSITION)
         store = self._event_store_factory(session)
         snapshot_store = self._snapshot_store_factory(session)
         stream = StreamRef(
@@ -245,52 +326,15 @@ class SqlAlchemyExecutionOrchestrator:
                 # jitter) keeps behavior reproducible in tests; the increasing
                 # slope is what breaks the lockstep.
                 await asyncio.sleep(0.01 + (attempt - 1) * 0.02)
-            snapshot = await snapshot_store.load(
+            loaded = await VerifiedAggregateLoader(store, snapshot_store).load(
+                aggregate,
                 stream.stream_type,
                 stream.stream_id,
-                state_type=aggregate.state_type,
-                serializer_version=aggregate.snapshot_serializer_version,
+                owner_scope=(command.owner_user_id, command.team_id),
             )
-            if snapshot is None:
-                stored_events = await store.load_stream(
-                    stream.stream_type,
-                    stream.stream_id,
-                )
-                replayed = replay(
-                    aggregate,
-                    stored_events,
-                    stream_id=stream.stream_id,
-                )
-            else:
-                try:
-                    stored_events = await store.load_stream(
-                        stream.stream_type,
-                        stream.stream_id,
-                        after_version=snapshot.stream_version,
-                        expected_previous_hash=snapshot.last_event_hash,
-                    )
-                except CorruptEventStreamError:
-                    stored_events = await store.load_stream(
-                        stream.stream_type,
-                        stream.stream_id,
-                    )
-                    record_replay_failure("snapshot_hash_mismatch")
-                    await snapshot_store.delete(
-                        stream.stream_type,
-                        stream.stream_id,
-                    )
-                    replayed = replay(
-                        aggregate,
-                        stored_events,
-                        stream_id=stream.stream_id,
-                    )
-                else:
-                    replayed = replay(
-                        aggregate,
-                        stored_events,
-                        snapshot=snapshot,
-                        stream_id=stream.stream_id,
-                    )
+            replayed = loaded.replay
+            if not await authorize_effect_command(session, normalized_command, replayed.state):
+                return self._rejected(command, RejectionCode.INVALID_TRANSITION)
             if self._activity_timeout is not None and await self._activity_timeout.redirect(
                 session, normalized_command, replayed.state
             ):
@@ -331,6 +375,7 @@ class SqlAlchemyExecutionOrchestrator:
             )
 
             await bind_new_content_events(session, appended.events)
+            await project_effect_events(session, appended.events, command=normalized_command)
             if usage_receipt is not None:
                 from app.infrastructure.execution.postgres_execution_usage import (
                     mark_usage_publication,
@@ -470,18 +515,32 @@ class SqlAlchemyExecutionOrchestrator:
                 and command.command_type == "CompleteActivity"
             ):
                 settle_values["decision_payload"] = command.payload.get("decision_data") or {}
+            if event.event_type == "ActivityCompleted" and command.command_type in {
+                "ResolveActivityOutcome",
+                "SupplyActivityResult",
+            }:
+                settle_values["decision_payload"] = (
+                    command.payload.get("observation", {}).get("decision_data") or {}
+                )
             completed = await session.scalar(
                 update(ExecutionActivityTaskORM)
                 .where(
                     ExecutionActivityTaskORM.activity_id == activity_id,
                     ExecutionActivityTaskORM.request_generation
                     == int(event.public_payload["generation"]),
+                    ExecutionActivityTaskORM.aggregate_type == command.stream_type,
+                    ExecutionActivityTaskORM.aggregate_id == command.stream_id,
+                    ExecutionActivityTaskORM.owner_user_id == command.owner_user_id,
+                    ExecutionActivityTaskORM.team_id == command.team_id,
                     # "dead_lettered" is settleable: a task parked by the
                     # claim-attempt cap (K2-2) is later converged by the
                     # activity-timeout timer's FailActivity, whose settlement
                     # must find the row here instead of erroring.
                     ExecutionActivityTaskORM.status.in_(
-                        ("pending", "claimed", "call_started", "dead_lettered")
+                        ("pending", "claimed", "call_started", "dead_lettered", "unknown")
+                        if command.command_type
+                        in {"ResolveActivityOutcome", "SupplyActivityResult"}
+                        else ("pending", "claimed", "call_started", "dead_lettered")
                     ),
                 )
                 .values(**settle_values)
@@ -538,6 +597,8 @@ class SqlAlchemyExecutionOrchestrator:
                     aggregate_type=activity.aggregate_type,
                     aggregate_id=activity.aggregate_id,
                     activity_type=activity.activity_type,
+                    definition_digest=activity.definition_digest,
+                    handler_version=activity.handler_version,
                     request_event_position=request_position,
                     owner_user_id=command.owner_user_id,
                     team_id=command.team_id,

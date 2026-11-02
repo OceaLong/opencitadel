@@ -8,7 +8,7 @@
 
 ### 首次体验
 
-1. [10 分钟自托管](tutorials/01-self-host-10-minutes.zh-CN.md)
+1. [自托管教程](tutorials/01-self-host-10-minutes.zh-CN.md)
 2. [内部知识库教程](tutorials/02-internal-knowledge-base.zh-CN.md)
 3. [MCP 集成教程](tutorials/03-mcp-integrations.zh-CN.md)
 4. [受治理 Web Operator](tutorials/04-governed-web-operator.zh-CN.md)
@@ -56,19 +56,19 @@
 
 ### 模块说明
 
-| 文档                                                           | 范围                                          |
-| -------------------------------------------------------------- | --------------------------------------------- |
-| [API](../api/README.zh-CN.md)                                  | 后端路由、SSE、本地开发                       |
-| [UI](../ui/README.zh-CN.md)                                    | 前端技术栈与路由                              |
-| [Sandbox](../sandbox/README.zh-CN.md)                          | 隔离运行时                                    |
-| [Nginx 网关](../nginx/README.zh-CN.md)                         | 边缘代理、SSE/WS、上传限制                    |
-| [Ops Collector](../ops-collector/README.zh-CN.md)              | 固定只读 MCP 探针、配置与部署                 |
-| [Ops Actuator](../ops-actuator/README.zh-CN.md)                | 固定仅 patch 写 MCP 探针、配置与部署          |
-| [OpsConsole 演示](../demo/ops-console/README.zh-CN.md)         | Web Operator 工单后台演示                     |
-| [E2E 验收](../e2e/README.zh-CN.md)                             | 确定性隔离全栈门禁、证据与清理                |
-| [仓库脚本](../scripts/README.zh-CN.md)                         | `quickstart.sh`、`check-docs.sh`、验收 Runner |
-| [部署脚本](../deploy/scripts/README.zh-CN.md)                  | 生产主机调优工具                              |
-| [Ops Patrol 故障实验室](../deploy/patrol-demo/README.zh-CN.md) | 一次性 kind 集群与可复现 Patrol Fixture       |
+| 文档                                                    | 范围                                          |
+| ------------------------------------------------------- | --------------------------------------------- |
+| [API](../api/README.zh-CN.md)                           | 后端路由、SSE、本地开发                       |
+| [UI](../ui/README.zh-CN.md)                             | 前端技术栈与路由                              |
+| [Sandbox](../sandbox/README.zh-CN.md)                   | 隔离运行时                                    |
+| [Nginx 网关](../deploy/nginx/README.zh-CN.md)           | 边缘代理、SSE/WS、上传限制                    |
+| [Ops Collector](../ops-collector/README.zh-CN.md)       | 固定只读 MCP 探针、配置与部署                 |
+| [Ops Actuator](../ops-actuator/README.zh-CN.md)         | 固定仅 patch 写 MCP 探针、配置与部署          |
+| [OpsConsole 演示](../demo/ops-console/README.zh-CN.md)  | Web Operator 工单后台演示                     |
+| [E2E 验收](../e2e/README.zh-CN.md)                      | 确定性隔离全栈门禁、证据与清理                |
+| [仓库脚本](../scripts/README.zh-CN.md)                  | `quickstart.sh`、`check-docs.sh`、验收 Runner |
+| [部署脚本](../deploy/scripts/README.zh-CN.md)           | 生产主机调优工具                              |
+| [Ops Patrol 故障实验室](../demo/patrol/README.zh-CN.md) | 一次性 kind 集群与可复现 Patrol Fixture       |
 
 ### 开源治理
 
@@ -82,7 +82,7 @@
 ## 维护规则
 
 - **一主题一权威文档**：避免在 README 与专题文档中重复维护同一策略。
-- **配置事实来源**：部署输入以 `.env.example` 为准；实时行为以 PostgreSQL Runtime Policy Revision 为准。
+- **配置入口**：`.env.example` 只列基础启动项，[`deploy/config/.env.reference`](../deploy/config/.env.reference) 分类列出可选覆盖。自动生成的凭据保存在 `.env`；实时行为以 PostgreSQL Runtime Policy Revision 为准。
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。

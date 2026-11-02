@@ -10,6 +10,7 @@
 | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | [`backup.sh`](backup.sh) / [`backup_tool.py`](backup_tool.py)                                                                | 停写后的 Compose 数据库与对象备份，含完整性 Manifest                                                           |
 | [`verify-backup.sh`](verify-backup.sh) / [`restore.sh`](restore.sh)                                                          | 离线校验与全新卷恢复演练；参见[操作手册](../docs/operations/deployment.zh-CN.md#本地-compose-备份与隔离恢复)   |
+| [`configure-local.sh`](configure-local.sh) | 生成并保存首次安装凭据，不启动容器（`make configure`） |
 | [`quickstart.sh`](quickstart.sh)                                                                                             | 首次体验：创建 `.env`、构建 `opencitadel-sandbox`、启动 Compose 栈                                             |
 | [`check-docs.sh`](check-docs.sh)                                                                                             | CI 文档检查：双语配对、索引覆盖、过期内容防护                                                                  |
 | [`run-acceptance-e2e.sh`](run-acceptance-e2e.sh)                                                                             | 管理隔离的全栈验收、证据 Manifest 与精确 Label 清理                                                            |
@@ -22,12 +23,20 @@
 
 ## 用法
 
+`acceptance/` 存放 E2E Runner 的 Python 编排，`execution_capacity/` 存放容量
+来源构建与证据工具。容量测试统一放在 `execution_capacity/tests/`，在仓库根目录
+运行 `make test-capacity`，复用 API 的依赖环境。其中包含较大的本地证据 Fixture，
+与 API 默认测试收集分开运行；工具测试通过不代表完整 AC21 验收通过。
+
+Quickstart 要求 Docker 服务已运行（`docker info` 必须成功），会在生成配置和构建镜像前
+检查。`make configure` 仍可在没有 Docker 时单独准备配置。
+
 ```bash
 # 推荐首次运行（亦可 make quickstart）
 bash scripts/quickstart.sh
 
-# 非交互模式（CI / 无 TTY）
-QUICKSTART_NONINTERACTIVE=1 bash scripts/quickstart.sh
+# 仅准备配置；不启动 Docker，无需交互输入
+make configure
 
 # 文档一致性检查（提交文档 PR 前）
 ./scripts/check-docs.sh
@@ -57,4 +66,4 @@ QUICKSTART_NONINTERACTIVE=1 bash scripts/quickstart.sh
 - [文档维护清单](../docs/MAINTENANCE_CHECKLIST.zh-CN.md)
 - [确定性全栈验收](../e2e/README.zh-CN.md)
 - [部署脚本](../deploy/scripts/README.zh-CN.md) — 生产主机调优
-- [Ops Patrol 故障实验室](../deploy/patrol-demo/README.zh-CN.md)
+- [Ops Patrol 故障实验室](../demo/patrol/README.zh-CN.md)

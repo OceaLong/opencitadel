@@ -22,6 +22,42 @@ class PublicViewModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DefinitionAvailabilityView(PublicViewModel):
+    """Current routing observation, deliberately separate from historical Run state."""
+
+    run_id: UUID
+    state: Literal["available", "version_unavailable", "unversioned", "terminal"]
+    reason: Literal["VERSION_UNAVAILABLE"] | None = None
+    definition_version: Annotated[int, Field(ge=1)] | None = None
+    definition_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+    checked_at: UTCDateTime
+
+
+class ToolContractDriftView(PublicViewModel):
+    reason: Literal["contract_changed", "authorization_changed"]
+    subject_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    tool_name: Annotated[str, Field(min_length=1, max_length=255)]
+
+
+class ContextSummaryView(PublicViewModel):
+    stage: Literal["prepare", "compact"]
+    state: Literal["ready", "needs_compaction", "compacted"] | None = None
+    definition_version: Annotated[int, Field(ge=1)] | None = None
+    definition_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+    context_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+    selected_sources: Annotated[int, Field(ge=0, le=4096)] | None = None
+    original_sources: Annotated[int, Field(ge=0, le=4096)] | None = None
+    estimated_input_units: NonNegative | None = None
+    input_budget: NonNegative | None = None
+    output_budget: NonNegative | None = None
+    summary_chunks: Annotated[int, Field(ge=0, le=128)] | None = None
+
+
+class ApprovalIntentPreview(PublicViewModel):
+    arguments_json: str
+    redacted: bool
+
+
 class ViewScope(PublicViewModel):
     owner_user_id: Identifier | None = None
     team_id: Identifier | None = None
@@ -101,13 +137,17 @@ class ConfigurationSummary(PublicViewModel):
     top_p: float | None = None
 
 
-class UsagePurposeSummary(PublicViewModel):
+class UsageCostGroup(PublicViewModel):
     calls: NonNegative
     unknown_usage_calls: NonNegative
     unknown_cost_calls: NonNegative
     known_input_count: NonNegative
     known_output_count: NonNegative
     known_cost_usd: str
+
+
+class UsagePurposeSummary(UsageCostGroup):
+    groups: dict[Literal["main_answer", "context_summary", "other"], UsageCostGroup] | None = None
 
 
 class RunView(PublicViewModel):
@@ -172,6 +212,8 @@ class StepView(PublicViewModel):
     wait_reason: str | None = None
     end_reason: str | None = None
     business_outcome: Literal["success", "failure", "unknown"] | None = None
+    contract_drift: ToolContractDriftView | None = None
+    context: ContextSummaryView | None = None
     tool_name: str | None = None
     tool_contract_revision: str | None = None
     public_summary: str | None = None
@@ -191,6 +233,8 @@ class ApprovalView(PublicViewModel):
     approval_kind: str | None = None
     decision: str | None = None
     status: str | None = None
+    subject_digest: str | None = None
+    public_preview: ApprovalIntentPreview | None = None
 
 
 class MessageView(PublicViewModel):

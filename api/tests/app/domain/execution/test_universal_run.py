@@ -122,7 +122,7 @@ def test_snapshotless_run_created_event_is_rejected() -> None:
         stream_id=str(RUN_ID),
         stream_version=1,
         event_type="RunCreated",
-        event_schema_version=1,
+        event_schema_version=3,
         public_payload={
             "family": "agent",
             "source_entity_type": "session",

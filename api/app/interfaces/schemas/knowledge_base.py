@@ -135,6 +135,8 @@ class KnowledgeVersionResponse(BaseModel):
     parent_version_id: str | None = None
     build_id: str
     state: KnowledgeVersionState
+    embedding_space_digest: str | None = None
+    revision_assurance: str | None = None
     capabilities: dict[str, Any] = Field(default_factory=dict)
     degraded_reasons: list[str] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)

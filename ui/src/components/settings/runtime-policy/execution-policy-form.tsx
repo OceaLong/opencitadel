@@ -17,7 +17,7 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
   {
     key: "agent",
     fields: [
-      { path: "agent.max_iterations", type: "number", min: 1, max: 100 },
+      { path: "agent.max_iterations", type: "number", min: 1, max: 1000 },
       { path: "agent.max_retries", type: "number", min: 0, max: 10 },
     ],
   },
@@ -108,7 +108,7 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
       {
         path: "knowledge_base.ocr.mode",
         type: "enum",
-        options: ["vision_llm", "rapidocr", "off"],
+        options: ["off", "rapidocr", "vision_llm"],
       },
       { path: "knowledge_base.ocr.max_pages", type: "number", min: 0, max: 1000 },
       { path: "knowledge_base.document.max_bytes", type: "number", min: 1, max: 524288000 },
@@ -116,6 +116,19 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
     ],
   },
 ];
+
+function fieldIsVisible(policy: ExecutionPolicy, path: string): boolean {
+  const knowledge = policy.knowledge_base;
+  if (path === "knowledge_base.retrieval.vector_top_k") return knowledge?.vector_enabled === true;
+  if (path === "knowledge_base.rerank.timeout_seconds") return knowledge?.rerank?.enabled === true;
+  if (path.startsWith("knowledge_base.graphrag.") && path !== "knowledge_base.graphrag.enabled") {
+    return knowledge?.graphrag?.enabled === true;
+  }
+  if (path === "knowledge_base.ocr.max_pages") {
+    return knowledge?.ocr?.mode === "vision_llm" || knowledge?.ocr?.mode === "rapidocr";
+  }
+  return true;
+}
 
 export function ExecutionPolicyForm({
   policy,
@@ -127,6 +140,29 @@ export function ExecutionPolicyForm({
   onChange: (policy: ExecutionPolicy) => void;
 }) {
   const t = useTranslations("runtimePolicy");
+  const knowledge = policy.knowledge_base;
+  const basicKnowledge =
+    knowledge?.vector_enabled === false &&
+    knowledge?.rerank?.enabled === false &&
+    knowledge?.graphrag?.enabled === false &&
+    knowledge?.ocr?.mode === "off";
+  const enhancedKnowledge =
+    knowledge?.vector_enabled === true ||
+    knowledge?.rerank?.enabled === true ||
+    knowledge?.graphrag?.enabled === true ||
+    knowledge?.ocr?.mode === "vision_llm" ||
+    knowledge?.ocr?.mode === "rapidocr";
+  const descriptions: Record<string, string> = {
+    "knowledge_base.vector_enabled": t("knowledgeSetup.vector"),
+    "knowledge_base.rerank.enabled": t("knowledgeSetup.rerank"),
+    "knowledge_base.graphrag.enabled": t("knowledgeSetup.graph"),
+    "knowledge_base.ocr.mode": t("knowledgeSetup.ocr"),
+  };
+  const ocrOptions = {
+    off: t("knowledgeSetup.ocrOff"),
+    rapidocr: t("knowledgeSetup.ocrReserved"),
+    vision_llm: t("knowledgeSetup.ocrVision"),
+  };
 
   return (
     <FieldGroup className="gap-6">
@@ -136,16 +172,37 @@ export function ExecutionPolicyForm({
           <FieldDescription>
             {t(`groupDescriptions.execution.${group.key}` as Parameters<typeof t>[0])}
           </FieldDescription>
-          {group.fields.map((definition) => (
-            <PolicyField
-              key={definition.path}
-              definition={definition}
-              label={t(`fields.${definition.path}` as Parameters<typeof t>[0])}
-              value={readPolicyPath(policy, definition.path)}
-              disabled={disabled}
-              onChange={(value) => onChange(writePolicyPath(policy, definition.path, value))}
-            />
-          ))}
+          {group.key === "knowledge_base" ? (
+            <div className="bg-muted/40 space-y-2 rounded-md p-3 text-sm">
+              <p className="font-medium">
+                {basicKnowledge
+                  ? t("knowledgeSetup.basic")
+                  : enhancedKnowledge
+                    ? t("knowledgeSetup.enhanced")
+                    : t("knowledgeSetup.configured")}
+              </p>
+              <FieldDescription>{t("knowledgeSetup.enableSteps")}</FieldDescription>
+            </div>
+          ) : null}
+          {group.fields
+            .filter((definition) => fieldIsVisible(policy, definition.path))
+            .map((definition) => (
+              <PolicyField
+                key={definition.path}
+                definition={definition}
+                label={t(`fields.${definition.path}` as Parameters<typeof t>[0])}
+                description={descriptions[definition.path]}
+                optionLabels={
+                  definition.path === "knowledge_base.ocr.mode" ? ocrOptions : undefined
+                }
+                disabledOptions={
+                  definition.path === "knowledge_base.ocr.mode" ? ["rapidocr"] : undefined
+                }
+                value={readPolicyPath(policy, definition.path)}
+                disabled={disabled}
+                onChange={(value) => onChange(writePolicyPath(policy, definition.path, value))}
+              />
+            ))}
         </FieldSet>
       ))}
     </FieldGroup>

@@ -36,12 +36,15 @@ class ResourceBuildIntent(BaseModel):
     parent_version_id: str | None = None
     embedding_model_id: str | None = None
     embedding_dimensions: int | None = Field(default=None, ge=1)
+    embedding_space_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_embedding_snapshot(self) -> "ResourceBuildIntent":
         values = (self.embedding_model_id, self.embedding_dimensions)
         if (values[0] is None) != (values[1] is None):
             raise ValueError("embedding model and dimensions must be frozen together")
+        if (self.embedding_model_id is None) != (self.embedding_space_digest is None):
+            raise ValueError("embedding model and space digest must be frozen together")
         if self.embedding_dimensions not in {None, PLATFORM_EMBEDDING_DIMENSIONS}:
             raise ValueError(f"embedding dimensions must be {PLATFORM_EMBEDDING_DIMENSIONS}")
         return self

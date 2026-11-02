@@ -221,10 +221,18 @@ async def test_bound_file_copy_pin_becomes_unavailable_after_actual_force_delete
 
     session_id, producer, _, handler = await production_run()
     scope = producer.scope
+    from app.domain.models.scope import Principal
+    from app.infrastructure.security.db_authorization import configure_session_authorization
+
+    async def authorize(db):
+        await configure_session_authorization(
+            db, AuthorizationContext.for_principal(Principal(user_id=scope.user_id), scope=scope)
+        )
 
     @asynccontextmanager
     async def file_uow():
         async with execution_admin_session() as db:
+            await authorize(db)
             yield SimpleNamespace(
                 file=DBFileRepository(db),
                 execution_content=DBExecutionContentRepository(db),
@@ -281,6 +289,9 @@ async def test_bound_file_copy_pin_becomes_unavailable_after_actual_force_delete
             "result_summary": "copied",
         },
     )
+    from tests.app.execution_test_support import with_current_test_claim
+
+    envelope = await with_current_test_claim(handler, envelope)
     assert (await handler.handle(envelope)).status == "accepted"
     await PostgresFormalProjector(
         session_factory=execution_admin_session, authorization=auth
@@ -305,12 +316,14 @@ async def test_bound_file_copy_pin_becomes_unavailable_after_actual_force_delete
             resource_id=reference.content_id,
             resource_version=digest,
         )
+        await authorize(db)
         await DBResourcePinRepository(db).acquire(scope, "session", session_id, [pin])
         await db.commit()
     await FileService(file_uow, storage).delete_file(file.id, scope, force=True)
     with pytest.raises(ViewNotFound):
         await reader.read_step_content(scope, producer.run_id, step.step_id, view.at)
     async with execution_admin_session() as db:
+        await authorize(db)
         repo = DBResourcePinRepository(db)
         assert not (await repo.validate(scope, "session", session_id, [pin]))[0].available
         with pytest.raises(ResourceUnavailable):

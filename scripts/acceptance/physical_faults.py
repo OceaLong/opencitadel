@@ -26,6 +26,7 @@ SOURCE_FILES = (
     "physical_fault_command.py",
     "physical_fault_host.py",
     "fault_lifecycle.py",
+    "phase1_browser_runtime.py",
 )
 
 

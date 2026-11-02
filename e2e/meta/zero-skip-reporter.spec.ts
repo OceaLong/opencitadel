@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -11,9 +17,12 @@ import {
 
 const REQUIRED = ["ID-LOGIN", "INF-ENDPOINT"] as const;
 
-test("global timeout retains an unstarted cleanup in totals and errors", () => {
+test("global timeout retains an unstarted cleanup and preserves its parent test output", ({}, testInfo) => {
   const directory = mkdtempSync(resolve(tmpdir(), "opencitadel-reporter-"));
   try {
+    mkdirSync(testInfo.outputDir, { recursive: true });
+    const sentinel = testInfo.outputPath("parent-output.txt");
+    writeFileSync(sentinel, "parent output must survive child setup");
     const playwright = require.resolve("@playwright/test");
     const reporter = resolve(__dirname, "../reporters/zero-skip-reporter.ts");
     for (const [name, body] of Object.entries({
@@ -33,6 +42,7 @@ test("global timeout retains an unstarted cleanup in totals and errors", () => {
       config,
       `module.exports = {
         testDir: ${JSON.stringify(directory)}, workers: 1,
+        outputDir: ${JSON.stringify(resolve(directory, "test-results"))},
         timeout: 60000, globalTimeout: 3000,
         reporter: [[${JSON.stringify(reporter)}]],
         projects: [
@@ -59,6 +69,9 @@ test("global timeout retains an unstarted cleanup in totals and errors", () => {
     );
     expect(child.error).toBeUndefined();
     expect(child.status).toBe(1);
+    expect(readFileSync(sentinel, "utf8")).toBe(
+      "parent output must survive child setup",
+    );
     const evidence = JSON.parse(
       readFileSync(resolve(directory, "playwright/results.json"), "utf8"),
     );

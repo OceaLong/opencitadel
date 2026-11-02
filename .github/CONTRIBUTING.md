@@ -51,10 +51,14 @@ The API job and both Make targets exclude only the six current-invocation consum
 ### Full stack (local)
 
 ```bash
-cp .env.example .env
-# Edit .env: set the admin password; add inference credentials after login
-docker compose --profile local up --build
+make quickstart
+# Generated credentials persist in .env; configure inference after login
 ```
+
+Configuration starts with six optional choices in `.env.example`; credentials
+are generated once and saved in private `.env`. `make configure` prepares it
+without starting containers. Advanced overrides are grouped in
+[`deploy/config/.env.reference`](../deploy/config/.env.reference).
 
 ## Pull Request Process
 

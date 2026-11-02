@@ -9,7 +9,7 @@ pod or a ``kubectl``/Collector read of the live object.
 
 Invoked by scripts/run-patrol-fixtures.sh only when
 PATROL_RUN_REMEDIATION_FIXTURE=true, immediately after apply-fixture.sh has
-applied deploy/patrol-demo/fixtures/21-remediation-crashloop/setup.yaml and
+applied demo/patrol/fixtures/21-remediation-crashloop/setup.yaml and
 confirmed (via its own restartCount>=11 poll) that the fixture is actually
 crash-looping. The actuator itself is expected to already be deployed (into
 the `opencitadel` namespace, kept separate from `opencitadel-patrol-demo` so
@@ -28,20 +28,12 @@ Steps (all deterministic, no waiting on non-deterministic LLM output):
      production-shaped ingress NetworkPolicy is left untouched).
   3. get_capabilities: assert overall_capability_hash is present and all
      three write actions are registered.
-  4. restart_workload with a fresh idempotency key: assert action_outcome
-     "applied" and that the Deployment's own metadata annotation
-     opencitadel.io/remediation-key now equals that key (read back via
-     kubectl, not trusted from the envelope alone). ops-actuator's
-     k8s_writer.py:restart() patches this annotation onto the Deployment
-     object's *own* metadata, not the Pod template's -- a distinct map from
-     the opencitadel.io/restarted-at annotation in step 5, which the same
-     call patches onto spec.template.metadata instead. See
-     object_annotations()/pod_template_annotations() below.
-  5. Replay restart_workload with the *same* key: assert action_outcome
-     "skipped_idempotent", the remediation-key annotation (Deployment's own
-     metadata) is unchanged, the opencitadel.io/restarted-at annotation
-     (Pod template metadata -- a different map, see step 4) is unchanged
-     (no second rollout), and metadata.generation is unchanged.
+  4. get_target freezes the live Deployment UID. restart_workload receives a
+     platform UUID, rem:{id} key and canonical payload digest. Check the durable
+     receipt and operation/digest annotations against the real Deployment.
+  5. Explicitly replay the same approved identity: the retained receipt must be
+     returned without a second rollout. Query get_operation and check the same
+     receipt; target annotations are only supporting evidence.
   6. Apply healthy.yaml (models "redeploy a fixed image" -- restart_workload
      alone cannot repair this fixture's literal crash loop, see setup.yaml's
      comment) and wait for the rollout to finish.
@@ -56,6 +48,7 @@ non-zero.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import select
@@ -74,12 +67,14 @@ ACTUATOR_NAMESPACE = os.environ.get("OPS_ACTUATOR_NAMESPACE", "opencitadel")
 ACTUATOR_SERVICE = os.environ.get("OPS_ACTUATOR_SERVICE", "opencitadel-ops-actuator")
 ACTUATOR_PORT = int(os.environ.get("OPS_ACTUATOR_PORT", "8091"))
 LOCAL_PORT = int(os.environ.get("OPS_ACTUATOR_LOCAL_PORT", "18091"))
-IDEMPOTENCY_ANNOTATION = "opencitadel.io/remediation-key"
+OPERATION_ANNOTATION = "opencitadel.io/operation-id"
+PAYLOAD_ANNOTATION = "opencitadel.io/payload-digest"
 RESTARTED_AT_ANNOTATION = "opencitadel.io/restarted-at"
 HEALTHY_MANIFEST = (
-    ROOT / "deploy" / "patrol-demo" / "fixtures" / "21-remediation-crashloop" / "healthy.yaml"
+    ROOT / "demo" / "patrol" / "fixtures" / "21-remediation-crashloop" / "healthy.yaml"
 )
-REQUIRED_TOOLS = {"restart_workload", "scale_workload", "rollback_workload"}
+WRITE_TOOLS = {"restart_workload", "scale_workload", "rollback_workload"}
+REQUIRED_TOOLS = WRITE_TOOLS | {"get_target", "get_operation"}
 
 
 class HarnessError(RuntimeError):
@@ -108,15 +103,7 @@ def get_deployment(namespace: str, name: str) -> dict:
 
 
 def object_annotations(deployment: dict) -> dict:
-    """The Deployment's own metadata.annotations.
-
-    This is where ops-actuator's k8s_writer.py:restart() patches
-    IDEMPOTENCY_ANNOTATION (opencitadel.io/remediation-key) -- see its
-    ``body = {"metadata": {"annotations": {...}}, "spec": {...}}`` merge
-    patch: the "metadata" key there is the Deployment object's own
-    metadata, a different map from the pod template's, see
-    pod_template_annotations() below.
-    """
+    """Read operation/digest markers on the Deployment, separate from pod metadata."""
     return deployment["metadata"].get("annotations") or {}
 
 
@@ -221,6 +208,9 @@ async def _call_tool_async(url: str, tool_name: str, arguments: dict, attempts: 
     token = os.environ.get("PATROL_ACTUATOR_TOKEN", "")
     if len(token) < 32:
         raise HarnessError("PATROL_ACTUATOR_TOKEN must contain at least 32 characters")
+    # A timeout may have applied. Only the explicit replay step may reuse a key.
+    if tool_name in WRITE_TOOLS:
+        attempts = min(attempts, 1)
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -243,7 +233,8 @@ async def _call_tool_async(url: str, tool_name: str, arguments: dict, attempts: 
                 f"[mcp] attempt {attempt}/{attempts} for {tool_name} failed: {exc!r}",
                 file=sys.stderr,
             )
-            await asyncio.sleep(1.5 * attempt)
+            if attempt < attempts:
+                await asyncio.sleep(1.5 * attempt)
     raise HarnessError(f"MCP call {tool_name} failed after {attempts} attempts: {last_exc!r}")
 
 
@@ -323,46 +314,65 @@ def main() -> int:
                     f"get_capabilities missing required tools {missing_tools}: {manifest}"
                 )
 
-            idempotency_key = f"phaseB-task3-{uuid.uuid4().hex[:16]}"
-            print(f"[3/7] restart_workload (idempotency_key={idempotency_key})", file=sys.stderr)
-            envelope_1 = call_tool(
+            target = call_tool(
                 actuator_url,
-                "restart_workload",
+                "get_target",
                 {
                     "namespace": NAMESPACE,
                     "workload": DEPLOYMENT,
                     "kind": "deployment",
-                    "idempotency_key": idempotency_key,
                 },
             )
+            deployment_before = get_deployment(NAMESPACE, DEPLOYMENT)
+            if (
+                target.get("uid") != deployment_before["metadata"]["uid"]
+                or target.get("target_ref") != manifest["target_ref"]
+            ):
+                raise HarnessError("get_target identity does not match the live fixture")
+            operation_id = str(uuid.uuid4())
+            idempotency_key = f"rem:{operation_id}"
+            payload = {
+                "action": "restart_workload",
+                "target_ref": manifest["target_ref"],
+                "namespace": NAMESPACE,
+                "workload": DEPLOYMENT,
+                "kind": "deployment",
+                "target_uid": target["uid"],
+                "parameters": {},
+            }
+            payload_digest = hashlib.sha256(
+                json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            arguments = {
+                "namespace": NAMESPACE,
+                "workload": DEPLOYMENT,
+                "kind": "deployment",
+                "idempotency_key": idempotency_key,
+                "operation_id": operation_id,
+                "payload_digest": payload_digest,
+                "target_uid": target["uid"],
+            }
+            print(f"[3/7] restart_workload (operation_id={operation_id})", file=sys.stderr)
+            envelope_1 = call_tool(actuator_url, "restart_workload", arguments)
             if envelope_1.get("action_outcome") != "applied":
                 raise HarnessError(f"first restart_workload call did not apply: {envelope_1}")
 
-            # Two different annotation maps, read off one fetched object:
-            # the idempotency key lands on the Deployment's own metadata,
-            # the restart timestamp lands on the Pod template's metadata --
-            # see object_annotations()/pod_template_annotations() docstrings.
+            if envelope_1.get("state") != "applied" or not envelope_1.get("receipt"):
+                raise HarnessError("Actuator did not retain an applied receipt")
             deployment_1 = get_deployment(NAMESPACE, DEPLOYMENT)
             object_annotations_1 = object_annotations(deployment_1)
-            if object_annotations_1.get(IDEMPOTENCY_ANNOTATION) != idempotency_key:
-                raise HarnessError(
-                    "remediation-key annotation was not persisted on the Deployment's own metadata: "
-                    f"expected {idempotency_key!r}, got {object_annotations_1.get(IDEMPOTENCY_ANNOTATION)!r}; envelope={envelope_1}"
-                )
+            if (
+                object_annotations_1.get(OPERATION_ANNOTATION) != operation_id
+                or object_annotations_1.get(PAYLOAD_ANNOTATION) != payload_digest
+            ):
+                raise HarnessError("operation/digest annotations do not bind the applied operation")
             generation_1 = deployment_generation(deployment_1)
             restarted_at_1 = pod_template_annotations(deployment_1).get(RESTARTED_AT_ANNOTATION)
 
             print("[4/7] replay restart_workload with the same idempotency_key", file=sys.stderr)
-            envelope_2 = call_tool(
-                actuator_url,
-                "restart_workload",
-                {
-                    "namespace": NAMESPACE,
-                    "workload": DEPLOYMENT,
-                    "kind": "deployment",
-                    "idempotency_key": idempotency_key,
-                },
-            )
+            envelope_2 = call_tool(actuator_url, "restart_workload", arguments)
             if envelope_2.get("action_outcome") != "skipped_idempotent":
                 raise HarnessError(f"replayed restart_workload was not a no-op: {envelope_2}")
 
@@ -370,9 +380,19 @@ def main() -> int:
             object_annotations_2 = object_annotations(deployment_2)
             generation_2 = deployment_generation(deployment_2)
             restarted_at_2 = pod_template_annotations(deployment_2).get(RESTARTED_AT_ANNOTATION)
-            if object_annotations_2.get(IDEMPOTENCY_ANNOTATION) != idempotency_key:
+            if (
+                object_annotations_2.get(OPERATION_ANNOTATION) != operation_id
+                or object_annotations_2.get(PAYLOAD_ANNOTATION) != payload_digest
+            ):
+                raise HarnessError("operation identity changed on explicit idempotent replay")
+            queried = call_tool(actuator_url, "get_operation", {"operation_id": operation_id})
+            if (
+                queried.get("state") != "applied"
+                or queried.get("receipt") != envelope_1["receipt"]
+                or envelope_2.get("receipt") != envelope_1["receipt"]
+            ):
                 raise HarnessError(
-                    f"remediation-key annotation changed on idempotent replay: {object_annotations_2.get(IDEMPOTENCY_ANNOTATION)!r}"
+                    "get_operation/replay did not recover the original durable receipt"
                 )
             if restarted_at_2 != restarted_at_1:
                 raise HarnessError(

@@ -2,7 +2,7 @@
 {{- /*
 默认安全响应头 annotations（HSTS / nosniff / Referrer-Policy / CSP），面向
 ingress-nginx 的 configuration-snippet。CSP 单一来源为
-.Values.securityHeaders.contentSecurityPolicy，与 nginx/templates/
+.Values.securityHeaders.contentSecurityPolicy，与 deploy/nginx/templates/
 default.http(s).conf.template 保持一致，避免双份漂移。
 用户 .Values.ingress.annotations 同 key 时覆盖默认值。
 */}}
@@ -30,7 +30,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    - host: {{ include "opencitadel.ingressHost" . | quote }}
       http:
         paths:
           - path: /api

@@ -21,6 +21,7 @@ from app.domain.runtime_policy.execution import (
     KnowledgeRetrievalPolicy,
     MemoryExecutionPolicy,
     ModelResiliencePolicy,
+    initial_execution_policy,
 )
 from app.domain.runtime_policy.operations import (
     OperationsPolicy,
@@ -107,6 +108,7 @@ __all__ = [
     "TrafficPolicy",
     "canonical_policy_bytes",
     "derive_run_policy_snapshot",
+    "initial_execution_policy",
     "policy_digest",
     "validate_run_policy_snapshot",
 ]

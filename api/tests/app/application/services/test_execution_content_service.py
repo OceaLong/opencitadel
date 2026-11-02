@@ -232,6 +232,9 @@ async def test_snapshot_binds_only_matching_new_command_and_never_late_to_old_cu
             "result_summary": "summary",
         },
     )
+    from tests.app.execution_test_support import with_current_test_claim
+
+    envelope = await with_current_test_claim(handler, envelope)
     assert (await handler.handle(envelope)).status == "accepted"
     projector = PostgresFormalProjector(session_factory=execution_admin_session, authorization=auth)
     await projector.run_once(producer.scope, limit=1000)
@@ -291,6 +294,12 @@ async def test_snapshot_binds_only_matching_new_command_and_never_late_to_old_cu
             resource_id=str(reference.content_id),
             resource_version=digest,
         )
+        await configure_session_authorization(
+            db,
+            AuthorizationContext.for_principal(
+                Principal(user_id=producer.scope.user_id), scope=producer.scope
+            ),
+        )
         repo = DBResourcePinRepository(db)
         await repo.acquire(producer.scope, "session", session_id, [pin])
         assert (await repo.validate(producer.scope, "session", session_id, [pin]))[0].available
@@ -306,6 +315,12 @@ async def test_snapshot_binds_only_matching_new_command_and_never_late_to_old_cu
     @asynccontextmanager
     async def content_uow():
         async with execution_admin_session() as db:
+            await configure_session_authorization(
+                db,
+                AuthorizationContext.for_principal(
+                    Principal(user_id=producer.scope.user_id), scope=producer.scope
+                ),
+            )
             yield SimpleNamespace(execution_content=DBExecutionContentRepository(db))
 
     reader = ExecutionContentService(
@@ -350,8 +365,9 @@ async def test_snapshot_binds_only_matching_new_command_and_never_late_to_old_cu
         await writer.record(
             producer, command_id=command_id, phase="output", value={"answer": "replacement"}
         )
-    # An input capture after the completion command cannot acquire its event.
-    await writer.record(producer, command_id=command_id, phase="input", value={"late": "input"})
+    # Settlement revokes capture authority; a late input cannot acquire its event.
+    with pytest.raises(ResourceUnavailable):
+        await writer.record(producer, command_id=command_id, phase="input", value={"late": "input"})
     await handler.handle(envelope)
     await projector.run_once(producer.scope, limit=1000)
     again = await views.get_view(producer.scope, producer.run_id, at=view.at)

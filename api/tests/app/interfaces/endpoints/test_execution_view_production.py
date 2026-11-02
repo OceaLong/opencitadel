@@ -294,6 +294,17 @@ async def test_fixed_binary_source_and_step_content_recheck_revoked_file():
     @asynccontextmanager
     async def uow():
         async with execution_admin_session() as db:
+            from app.infrastructure.security.db_authorization import (
+                configure_session_authorization,
+            )
+
+            await configure_session_authorization(
+                db,
+                AuthorizationContext.for_principal(
+                    Principal(user_id=producer.scope.user_id), scope=producer.scope
+                ),
+                signing_secret=load_deployment_settings().database_authorization_signing_secret,
+            )
             yield SimpleNamespace(
                 file=DBFileRepository(db),
                 resource_pins=DBResourcePinRepository(db),
@@ -353,6 +364,9 @@ async def test_fixed_binary_source_and_step_content_recheck_revoked_file():
             "result_summary": "summary",
         },
     )
+    from tests.app.execution_test_support import with_current_test_claim
+
+    envelope = await with_current_test_claim(handler, envelope)
     assert (await handler.handle(envelope)).status == "accepted"
     # Materialized view with an empty public feed is a valid recovery start.
     from tests.app.infrastructure.execution.test_postgres_execution_view import write

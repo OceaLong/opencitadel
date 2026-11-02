@@ -191,6 +191,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/execution-definition-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result */
+        get: operations["result_api_admin_execution_definition_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/execution-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Definitions */
+        get: operations["definitions_api_admin_execution_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/execution-definitions/{family}/head": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Head */
+        post: operations["head_api_admin_execution_definitions__family__head_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/execution-definitions/{family}/{version}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retire */
+        post: operations["retire_api_admin_execution_definitions__family___version__retire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/execution-workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workers */
+        get: operations["workers_api_admin_execution_workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/execution/projection-status": {
         parameters: {
             query?: never;
@@ -1791,6 +1876,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/execution-runs/{run_id}/contexts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Contexts
+         * @description Scan a bounded Activity page; continue its cursor even when no context matches.
+         */
+        get: operations["list_contexts_api_execution_runs__run_id__contexts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/contexts/{step_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Context */
+        get: operations["get_context_api_execution_runs__run_id__contexts__step_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/definition-availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Definition Availability */
+        get: operations["definition_availability_api_execution_runs__run_id__definition_availability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Effects */
+        get: operations["list_effects_api_execution_runs__run_id__effects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Effect */
+        get: operations["get_effect_api_execution_runs__run_id__effects__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects/{operation_id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon Effect */
+        post: operations["abandon_effect_api_execution_runs__run_id__effects__operation_id__abandon_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects/{operation_id}/queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Query Effect */
+        post: operations["query_effect_api_execution_runs__run_id__effects__operation_id__queries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects/{operation_id}/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Effect Request */
+        get: operations["get_effect_request_api_execution_runs__run_id__effects__operation_id__requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/effects/{operation_id}/resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Effect */
+        post: operations["resolve_effect_api_execution_runs__run_id__effects__operation_id__resolutions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/execution-runs/{run_id}/events": {
         parameters: {
             query?: never;
@@ -1885,6 +2126,40 @@ export interface paths {
         };
         /** Get Timeline */
         get: operations["get_timeline_api_execution_runs__run_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/tool-intents/{activity_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Tool Intent */
+        post: operations["refresh_tool_intent_api_execution_runs__run_id__tool_intents__activity_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution-runs/{run_id}/tool-intents/{activity_id}/refresh/{command_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tool Intent Refresh Status */
+        get: operations["tool_intent_refresh_status_api_execution_runs__run_id__tool_intents__activity_id__refresh__command_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4498,6 +4773,13 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** ApprovalIntentPreview */
+        ApprovalIntentPreview: {
+            /** Arguments Json */
+            arguments_json: string;
+            /** Redacted */
+            redacted: boolean;
+        };
         /**
          * ApprovalMode
          * @enum {string}
@@ -4548,10 +4830,13 @@ export interface components {
             approval_kind?: string | null;
             /** Decision */
             decision?: string | null;
+            public_preview?: components["schemas"]["ApprovalIntentPreview"] | null;
             /** Status */
             status?: string | null;
             /** Subject Activity Id */
             subject_activity_id?: string | null;
+            /** Subject Digest */
+            subject_digest?: string | null;
         };
         /** ArchiveReceipt */
         ArchiveReceipt: {
@@ -5748,6 +6033,34 @@ export interface components {
             /** Truncated */
             truncated: boolean;
         };
+        /** ContextSummaryView */
+        ContextSummaryView: {
+            /** Context Digest */
+            context_digest?: string | null;
+            /** Definition Digest */
+            definition_digest?: string | null;
+            /** Definition Version */
+            definition_version?: number | null;
+            /** Estimated Input Units */
+            estimated_input_units?: number | null;
+            /** Input Budget */
+            input_budget?: number | null;
+            /** Original Sources */
+            original_sources?: number | null;
+            /** Output Budget */
+            output_budget?: number | null;
+            /** Selected Sources */
+            selected_sources?: number | null;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "prepare" | "compact";
+            /** State */
+            state?: ("ready" | "needs_compaction" | "compacted") | null;
+            /** Summary Chunks */
+            summary_chunks?: number | null;
+        };
         /** ConversationMessage */
         ConversationMessage: {
             /** Content */
@@ -6237,10 +6550,294 @@ export interface components {
             run_id: string;
         };
         /**
+         * DefinitionAvailabilityView
+         * @description Current routing observation, deliberately separate from historical Run state.
+         */
+        DefinitionAvailabilityView: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Definition Digest */
+            definition_digest?: string | null;
+            /** Definition Version */
+            definition_version?: number | null;
+            /** Reason */
+            reason?: "VERSION_UNAVAILABLE" | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "version_unavailable" | "unversioned" | "terminal";
+        };
+        /** DefinitionInfo */
+        DefinitionInfo: {
+            /** Compiler Version */
+            compiler_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Definition Version */
+            definition_version: number;
+            family: components["schemas"]["RunFamily"];
+            /** Head Digest */
+            head_digest: string | null;
+            /** Head Revision */
+            head_revision: number | null;
+            /** Is Head */
+            is_head: boolean;
+            /** Manifest Digest */
+            manifest_digest: string;
+            /** Planner Version */
+            planner_version: string;
+            /** Retired At */
+            retired_at: string | null;
+        };
+        /** DefinitionPage */
+        DefinitionPage: {
+            /** Items */
+            items: components["schemas"]["DefinitionInfo"][];
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** DefinitionPin */
+        DefinitionPin: {
+            /** Compiler Version */
+            compiler_version: string;
+            /** Definition Version */
+            definition_version: number;
+            family: components["schemas"]["RunFamily"];
+            /** Manifest Digest */
+            manifest_digest: string;
+            /** Planner Version */
+            planner_version: string;
+        };
+        /** DefinitionRequestResult */
+        DefinitionRequestResult: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "completed";
+        };
+        /**
          * DocStatus
          * @enum {string}
          */
         DocStatus: "pending" | "parsing" | "ready" | "failed";
+        /** EffectAbandonRequest */
+        EffectAbandonRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Reason */
+            reason: string;
+        };
+        /** EffectAttestation */
+        EffectAttestation: {
+            /** Action */
+            action: string;
+            /** Method */
+            method: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Responsible Actor */
+            responsible_actor: string;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+        };
+        /**
+         * EffectCapability
+         * @enum {string}
+         */
+        EffectCapability: "native_safe" | "dedupe_resolve" | "dedupe_only" | "resolve_only" | "manual_only";
+        /** EffectContract */
+        EffectContract: {
+            /**
+             * Cancel
+             * @default false
+             */
+            cancel: boolean;
+            /** @default manual_only */
+            capability: components["schemas"]["EffectCapability"];
+            /**
+             * Conflict Rule
+             * @default reject_changed_intent
+             * @constant
+             */
+            conflict_rule: "reject_changed_intent";
+            /**
+             * Execute
+             * @default true
+             */
+            execute: boolean;
+            /** Key Scope */
+            key_scope?: string | null;
+            /**
+             * Not Found Means Not Applied
+             * @default false
+             */
+            not_found_means_not_applied: boolean;
+            /**
+             * Resolve
+             * @default false
+             */
+            resolve: boolean;
+            /** Retention Seconds */
+            retention_seconds?: number | null;
+            /**
+             * Target Rule
+             * @default all_arguments_v1
+             * @constant
+             */
+            target_rule: "all_arguments_v1";
+        };
+        /** EffectOperationResponse */
+        EffectOperationResponse: {
+            /**
+             * Accounting State
+             * @default independent
+             */
+            accounting_state: string;
+            /**
+             * Activity Id
+             * Format: uuid
+             */
+            activity_id: string;
+            /** Allowed Actions */
+            allowed_actions?: string[];
+            /** Arguments Digest */
+            arguments_digest: string;
+            /** Capability */
+            capability: string | {
+                [key: string]: unknown;
+            };
+            /** Contract Digest */
+            contract_digest: string;
+            /** Contract Drift */
+            contract_drift?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Last Confirmed Fact */
+            last_confirmed_fact?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Provider Identity */
+            provider_identity: string | {
+                [key: string]: unknown;
+            };
+            /** Query History */
+            query_history?: {
+                [key: string]: unknown;
+            }[];
+            /** Receipts */
+            receipts?: {
+                [key: string]: unknown;
+            }[];
+            /** Revision */
+            revision: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** State */
+            state: string;
+            /** Target Digest */
+            target_digest: string;
+            /** Verification Binding */
+            verification_binding?: {
+                [key: string]: unknown;
+            };
+            /** Wait Reason */
+            wait_reason?: string | null;
+        };
+        /** EffectQueryRequest */
+        EffectQueryRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /** EffectRequestResponse */
+        EffectRequestResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** EffectResolutionRequest */
+        EffectResolutionRequest: {
+            attestation: components["schemas"]["EffectAttestation"];
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "applied" | "not_applied";
+            /** Evidence Refs */
+            evidence_refs: components["schemas"]["EvidenceReference"][];
+            /** Expected Revision */
+            expected_revision: number;
+            /** Reason */
+            reason: string;
+            result_evidence_ref?: components["schemas"]["EvidenceReference"] | null;
+        };
         /** EmbeddingModelSettings */
         EmbeddingModelSettings: {
             /**
@@ -6381,6 +6978,13 @@ export interface components {
             owner_kind: "dataset_version" | "config_version" | "recording_version";
             /** Resource Version */
             resource_version: string;
+        };
+        /** EvidenceReference */
+        EvidenceReference: {
+            /** Ref */
+            ref: string;
+            /** Sha256 */
+            sha256: string;
         };
         /** EvidenceSessionItem */
         EvidenceSessionItem: {
@@ -6802,6 +7406,20 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HeadChange */
+        HeadChange: {
+            /** Expected Digest */
+            expected_digest: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Target Version */
+            target_version: number;
         };
         /**
          * HealthCheckStatus
@@ -7622,6 +8240,8 @@ export interface components {
             created_at: string;
             /** Degraded Reasons */
             degraded_reasons?: string[];
+            /** Embedding Space Digest */
+            embedding_space_digest?: string | null;
             /** Id */
             id: string;
             /**
@@ -7649,6 +8269,8 @@ export interface components {
             parent_version_id?: string | null;
             /** Published At */
             published_at?: string | null;
+            /** Revision Assurance */
+            revision_assurance?: string | null;
             state: components["schemas"]["KnowledgeVersionState"];
         };
         /**
@@ -7936,6 +8558,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Embedding Space Digest */
+            embedding_space_digest?: string | null;
             /** Id */
             id: string;
             /** Last Used At */
@@ -8614,6 +9238,14 @@ export interface components {
             action: components["schemas"]["PatrolRemediationAction"];
             /** Actuator Capability Hash */
             actuator_capability_hash: string | null;
+            /** Actuator Operation Id */
+            actuator_operation_id?: string | null;
+            /** Actuator Payload Digest */
+            actuator_payload_digest?: string | null;
+            /** Actuator Target Ref */
+            actuator_target_ref?: string | null;
+            /** Actuator Target Uid */
+            actuator_target_uid?: string | null;
             /** After Observation */
             after_observation: {
                 [key: string]: unknown;
@@ -8685,7 +9317,7 @@ export interface components {
          * PatrolRemediationStatus
          * @enum {string}
          */
-        PatrolRemediationStatus: "proposed" | "executing" | "executed" | "verified" | "failed" | "cancelled";
+        PatrolRemediationStatus: "proposed" | "executing" | "unknown" | "executed" | "verified" | "failed" | "cancelled";
         /** PatrolRetentionPolicy */
         PatrolRetentionPolicy: {
             /**
@@ -9102,8 +9734,21 @@ export interface components {
             };
             /** Connector Id */
             connector_id?: string | null;
+            /**
+             * Contract Schema Version
+             * @default 1
+             * @enum {integer}
+             */
+            contract_schema_version: 1 | 2;
+            effect_contract?: components["schemas"]["EffectContract"] | null;
+            /** Implementation Revision */
+            implementation_revision?: string | null;
             /** Name */
             name: string;
+            /** Output Schema */
+            output_schema?: {
+                [key: string]: unknown;
+            } | null;
             /** Pack */
             pack: string;
             policy: components["schemas"]["ToolExecutionPolicy"];
@@ -9258,6 +9903,26 @@ export interface components {
             rule?: components["schemas"]["MatchRule"];
             /** Tool */
             tool: string;
+        };
+        /** RefreshToolIntentRequest */
+        RefreshToolIntentRequest: {
+            /** Expected Subject Digest */
+            expected_subject_digest: string;
+            /** Reason */
+            reason: string;
+        };
+        /** RefreshToolIntentResponse */
+        RefreshToolIntentResponse: {
+            /**
+             * Command Id
+             * Format: uuid
+             */
+            command_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "applied" | "rejected";
         };
         /** RegisterEnvironmentRequest */
         RegisterEnvironmentRequest: {
@@ -10448,6 +11113,136 @@ export interface components {
              */
             code: number;
             data?: components["schemas"]["DecideApprovalResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[DefinitionAvailabilityView] */
+        Response_DefinitionAvailabilityView_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["DefinitionAvailabilityView"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[DefinitionPage] */
+        Response_DefinitionPage_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["DefinitionPage"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[DefinitionRequestResult] */
+        Response_DefinitionRequestResult_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["DefinitionRequestResult"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[EffectOperationResponse] */
+        Response_EffectOperationResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["EffectOperationResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[EffectRequestResponse] */
+        Response_EffectRequestResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["EffectRequestResponse"] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -12209,6 +13004,32 @@ export interface components {
              */
             msg: string;
         };
+        /** Response[RefreshToolIntentResponse] */
+        Response_RefreshToolIntentResponse_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["RefreshToolIntentResponse"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
         /** Response[RegistryReference] */
         Response_RegistryReference_: {
             /**
@@ -12967,6 +13788,32 @@ export interface components {
              */
             msg: string;
         };
+        /** Response[WorkerPage] */
+        Response_WorkerPage_: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            data?: components["schemas"]["WorkerPage"] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
         /** Response[dict] */
         Response_dict_: {
             /**
@@ -13059,6 +13906,33 @@ export interface components {
             code: number;
             /** Data */
             data?: components["schemas"]["DatasetSummary"][] | null;
+            /** Error Key */
+            error_key?: string | null;
+            /** Error Params */
+            error_params?: {
+                [key: string]: string;
+            } | null;
+            /** I18N Key */
+            i18n_key?: string | null;
+            /** I18N Params */
+            i18n_params?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** Response[list[EffectOperationResponse]] */
+        Response_list_EffectOperationResponse__: {
+            /**
+             * Code
+             * @default 200
+             */
+            code: number;
+            /** Data */
+            data?: components["schemas"]["EffectOperationResponse"][] | null;
             /** Error Key */
             error_key?: string | null;
             /** Error Params */
@@ -13208,6 +14082,18 @@ export interface components {
         RetainedSteps: {
             /** Steps */
             steps: components["schemas"]["StepView"][];
+        };
+        /** Retirement */
+        Retirement: {
+            /** Expected Manifest Digest */
+            expected_manifest_digest: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
         };
         /** ReviewItem */
         ReviewItem: {
@@ -14197,6 +15083,8 @@ export interface components {
             citation_refs?: components["schemas"]["CitationReference"][] | null;
             completeness: components["schemas"]["Completeness"];
             configuration?: components["schemas"]["app__application__dto__execution_view__ConfigurationSummary"] | null;
+            context?: components["schemas"]["ContextSummaryView"] | null;
+            contract_drift?: components["schemas"]["ToolContractDriftView"] | null;
             /** Duration Ms */
             duration_ms?: number | null;
             /** End Reason */
@@ -14276,6 +15164,8 @@ export interface components {
             citation_refs?: components["schemas"]["CitationReference"][] | null;
             completeness: components["schemas"]["Completeness"];
             configuration?: components["schemas"]["app__application__dto__execution_view__ConfigurationSummary"] | null;
+            context?: components["schemas"]["ContextSummaryView"] | null;
+            contract_drift?: components["schemas"]["ToolContractDriftView"] | null;
             /** Duration Ms */
             duration_ms?: number | null;
             /** End Reason */
@@ -14923,6 +15813,18 @@ export interface components {
             /** Unknown */
             unknown: number;
         };
+        /** ToolContractDriftView */
+        ToolContractDriftView: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "contract_changed" | "authorization_changed";
+            /** Subject Digest */
+            subject_digest: string;
+            /** Tool Name */
+            tool_name: string;
+        };
         /**
          * ToolEffect
          * @enum {string}
@@ -15140,10 +16042,29 @@ export interface components {
             /** Items */
             items: components["schemas"]["UsageBreakdownItem"][];
         };
+        /** UsageCostGroup */
+        UsageCostGroup: {
+            /** Calls */
+            calls: number;
+            /** Known Cost Usd */
+            known_cost_usd: string;
+            /** Known Input Count */
+            known_input_count: number;
+            /** Known Output Count */
+            known_output_count: number;
+            /** Unknown Cost Calls */
+            unknown_cost_calls: number;
+            /** Unknown Usage Calls */
+            unknown_usage_calls: number;
+        };
         /** UsagePurposeSummary */
         UsagePurposeSummary: {
             /** Calls */
             calls: number;
+            /** Groups */
+            groups?: {
+                [key: string]: components["schemas"]["UsageCostGroup"];
+            } | null;
             /** Known Cost Usd */
             known_cost_usd: string;
             /** Known Input Count */
@@ -15289,6 +16210,36 @@ export interface components {
             webhook_secret: string;
             /** Webhook Token */
             webhook_token: string;
+        };
+        /** WorkerInfo */
+        WorkerInfo: {
+            /** Available */
+            available: boolean;
+            /** Boot Id */
+            boot_id: string;
+            /** Build Artifact Digest */
+            build_artifact_digest: string;
+            /** Definitions */
+            definitions: components["schemas"]["DefinitionPin"][];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
+            /** Worker Id */
+            worker_id: string;
+        };
+        /** WorkerPage */
+        WorkerPage: {
+            /** Items */
+            items: components["schemas"]["WorkerInfo"][];
+            /** Next Offset */
+            next_offset: number | null;
         };
         /** ConfigurationSummary */
         app__application__dto__execution_view__ConfigurationSummary: {
@@ -15661,6 +16612,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_api_admin_execution_definition_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_DefinitionRequestResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    definitions_api_admin_execution_definitions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_DefinitionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    head_api_admin_execution_definitions__family__head_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                family: components["schemas"]["RunFamily"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HeadChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_DefinitionRequestResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_api_admin_execution_definitions__family___version__retire_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                family: components["schemas"]["RunFamily"];
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Retirement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_DefinitionRequestResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workers_api_admin_execution_workers_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_WorkerPage_"];
                 };
             };
             /** @description Validation Error */
@@ -21726,6 +22847,485 @@ export interface operations {
             };
         };
     };
+    list_contexts_api_execution_runs__run_id__contexts_get: {
+        parameters: {
+            query?: {
+                at?: string | null;
+                revision?: number | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_StepViewPage_"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description permission_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description revision_conflict or resource_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description projection_rebuilding */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description Execution read client error (validation uses 400) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+        };
+    };
+    get_context_api_execution_runs__run_id__contexts__step_id__get: {
+        parameters: {
+            query?: {
+                at?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                step_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_StepDetailResponse_"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description permission_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description revision_conflict or resource_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description projection_rebuilding */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description Execution read client error (validation uses 400) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+        };
+    };
+    definition_availability_api_execution_runs__run_id__definition_availability_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_DefinitionAvailabilityView_"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description permission_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description revision_conflict or resource_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description projection_rebuilding */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description Execution read client error (validation uses 400) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+        };
+    };
+    list_effects_api_execution_runs__run_id__effects_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_list_EffectOperationResponse__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_effect_api_execution_runs__run_id__effects__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_EffectOperationResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abandon_effect_api_execution_runs__run_id__effects__operation_id__abandon_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EffectAbandonRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_EffectRequestResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_effect_api_execution_runs__run_id__effects__operation_id__queries_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EffectQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_EffectRequestResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_effect_request_api_execution_runs__run_id__effects__operation_id__requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                operation_id: string;
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_EffectRequestResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_effect_api_execution_runs__run_id__effects__operation_id__resolutions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Effect-Scope-User-Id"?: string | null;
+                "X-Effect-Scope-Team-Id"?: string | null;
+                "X-Effect-Scope-Reason"?: string | null;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EffectResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_EffectRequestResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_events_api_execution_runs__run_id__events_get: {
         parameters: {
             query?: {
@@ -22172,6 +23772,170 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_TimelineView_"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description permission_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description revision_conflict or resource_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description projection_rebuilding */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description Execution read client error (validation uses 400) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+        };
+    };
+    refresh_tool_intent_api_execution_runs__run_id__tool_intents__activity_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                activity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshToolIntentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_RefreshToolIntentResponse_"];
+                };
+            };
+            /** @description invalid_argument */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description permission_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description revision_conflict or resource_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description projection_rebuilding */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+            /** @description Execution read client error (validation uses 400) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_ExecutionReadError_"];
+                };
+            };
+        };
+    };
+    tool_intent_refresh_status_api_execution_runs__run_id__tool_intents__activity_id__refresh__command_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                activity_id: string;
+                command_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_RefreshToolIntentResponse_"];
                 };
             };
             /** @description invalid_argument */

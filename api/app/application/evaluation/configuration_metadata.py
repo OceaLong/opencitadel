@@ -10,6 +10,7 @@ from pydantic import Field
 
 from app.domain.evaluation.configuration import ExternalContractReference, digest
 from app.domain.evaluation.dataset import ImmutableModel
+from app.domain.execution.tool_contract import RecordedContract, execution_contract
 from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.session_mode import SessionMode
 from app.domain.models.tool_policy import ToolExecutionPolicy
@@ -116,4 +117,34 @@ def contract_fingerprints(contracts, *, mode, skill):
             {"mode": mode, "skill": skill, "tools": entries}, sort_keys=True, ensure_ascii=False
         ).encode()
     ).hexdigest()
-    return legacy, digest({"schema_version": 1, "contracts": list(contracts)})
+    full = []
+    for item in contracts:
+        revision = item.get("binding_revision") or digest(
+            {"schema": item["schema"], "policy": item["policy"]}
+        )
+        contract = execution_contract(
+            RecordedContract(
+                name=item["name"],
+                pack=item["pack"],
+                schema_body=item["schema"],
+                policy=item["policy"],
+                connector_id=item.get("connector_id"),
+                binding_revision=revision,
+                authority_revision=item.get("authority_revision") or revision,
+            )
+        )
+        full.append(
+            {
+                **item,
+                **{
+                    key: contract.model_dump(mode="json")[key]
+                    for key in (
+                        "contract_schema_version",
+                        "implementation_revision",
+                        "output_schema",
+                        "effect_contract",
+                    )
+                },
+            }
+        )
+    return legacy, digest({"schema_version": 2, "contracts": full})

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from app.application.evaluation.suite_service import SuiteService
     from app.application.execution.admission import RunAdmissionService
     from app.application.execution.command_ingress import CommandIngress
+    from app.application.execution.effect_service import EffectService
     from app.application.execution.run_control import RunControlService
     from app.application.ports.coordination import LeaseManagerPort, RateLimitStorePort
     from app.application.ports.crypto import (
@@ -135,6 +136,8 @@ class ResourceBundle:
 class ApiRuntime:
     """Complete HTTP-process graph; no execution-kernel workers are present."""
 
+    effect_service: EffectService
+
     settings: DeploymentSettings
     resources: ResourceBundle
     readiness: RuntimeReadiness
@@ -207,6 +210,7 @@ class ApiRuntime:
     execution_content_factory: Callable[[AuthorizationContext], ExecutionContentService]
     execution_view_factory: Callable[[AuthorizationContext], ExecutionViewService]
     execution_event_factory: Callable[[AuthorizationContext], ExecutionEventService]
+    definition_management_factory: Callable
 
 
 @dataclass(frozen=True)

@@ -98,6 +98,11 @@ class PostgresInbox:
                 issued_at=command.issued_at,
                 payload={} if payload_too_large else command.payload,
                 payload_digest=payload_digest,
+                activity_lease_proof=(
+                    command.activity_lease_proof.model_dump(mode="json")
+                    if command.activity_lease_proof is not None
+                    else None
+                ),
                 status="received",
                 last_error_code=("PAYLOAD_TOO_LARGE" if payload_too_large else None),
             )
@@ -300,6 +305,13 @@ class PostgresInbox:
         )
         if persisted != received:
             raise ValueError("command_id was reused with a different envelope")
+        proof = (
+            command.activity_lease_proof.model_dump(mode="json")
+            if command.activity_lease_proof is not None
+            else None
+        )
+        if record.activity_lease_proof != proof:
+            raise ValueError("command_id was reused with a different Activity lease")
         if record.payload_digest is None:
             if record.payload != command.payload:
                 raise ValueError("command_id was reused with a different envelope")

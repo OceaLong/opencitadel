@@ -59,6 +59,7 @@ async function executeCleanupAction(
   await cleanupProductResource(page, value.resource, value.resource_id, {
     workspaceId: value.workspace_id,
     expectedRetention: value.expected_retention,
+    expectedTeamRetention: value.expected_team_retention,
     retainedRevision: value.retained_revision,
     retainedAccounting: value.retained_accounting,
     expectedUnknownRetention: value.expected_unknown_retention,

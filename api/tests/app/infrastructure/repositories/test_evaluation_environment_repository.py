@@ -643,12 +643,16 @@ async def test_actual_pre_admission_binding_current_approval_and_revocation(
 
     from app.application.evaluation.environment_admission import prepare_environment_binding
     from app.application.evaluation.environment_runtime import EnvironmentRuntime
+    from app.application.execution.activity_inputs import ActivityObjectStore
+    from app.application.execution.invocation_contracts import freeze_calls
     from app.application.ports.evaluation_environment import AdapterRegistry
     from app.domain.evaluation.configuration import ConfigSelection
     from app.domain.evaluation.environment import CaseSlot, EnvironmentLease, transition
     from app.domain.execution.family import RunFamily
+    from app.domain.execution.tool_contract import ToolApprovalSubject, ToolContractChanged
     from app.domain.models.authorization import AuthorizationContext
     from app.domain.runtime_policy.snapshot import derive_run_policy_snapshot
+    from tests.app.application.services.test_artifact_provenance_postgres import Objects
     from tests.app.execution_test_support import execution_admin_session
 
     suites, _ds, scope, principal = configurations
@@ -760,12 +764,28 @@ async def test_actual_pre_admission_binding_current_approval_and_revocation(
     definitions = await runtime.definitions(context)
     assert [d.name for d in definitions.definitions] == ["write_file"]
     assert definitions.definitions[0].requires_approval
-    with pytest.raises(PermissionError, match="current_approval_required"):
+    call = {
+        "call_id": "isolated-write",
+        "name": "write_file",
+        "arguments": {"filepath": "/home/ubuntu/test", "content": "test"},
+    }
+    await freeze_calls(
+        ActivityObjectStore(Objects()),
+        SimpleNamespace(aggregate_id=str(run_id), activity_id=uuid4()),
+        definitions,
+        [call],
+    )
+    invocation = ToolApprovalSubject.model_validate(call["subject"])
+    contract = definitions.definitions[0].contract
+    with pytest.raises(ToolContractChanged, match="authorization_changed") as denied:
         await runtime.invoke(
             context,
             name="write_file",
-            arguments={"filepath": "/home/ubuntu/test", "content": "test"},
+            arguments=call["arguments"],
+            invocation=invocation,
+            contract=contract,
         )
+    assert str(denied.value.__cause__) == "current_approval_required"
     async with execution_admin_session() as db:
         await db.execute(
             text("UPDATE skills SET allowed_tools='[]'::jsonb WHERE id=:id"), {"id": skill_id}
@@ -773,8 +793,15 @@ async def test_actual_pre_admission_binding_current_approval_and_revocation(
         await db.commit()
     with pytest.raises(PermissionError, match="environment_current_tool_policy_denied"):
         await runtime.definitions(context)
-    with pytest.raises(PermissionError, match="environment_current_tool_policy_denied"):
-        await runtime.invoke(context, name="write_file", arguments={})
+    with pytest.raises(ToolContractChanged, match="authorization_changed") as denied:
+        await runtime.invoke(
+            context,
+            name="write_file",
+            arguments=call["arguments"],
+            invocation=invocation,
+            contract=contract,
+        )
+    assert str(denied.value.__cause__) == "environment_current_tool_policy_denied"
     async with execution_admin_session() as db:
         await db.execute(
             text("UPDATE users SET token_version=token_version+1 WHERE id=:id"),

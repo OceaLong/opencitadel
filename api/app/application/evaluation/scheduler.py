@@ -317,9 +317,7 @@ class Scheduler:
             await work.commit()
         scheduler = self
 
-        async def configuration_resolver(owner, run_id, actual_policy):
-            if actual_policy != pair.execution.revision.policy:
-                raise ValueError("admission_policy_changed")
+        async def capture_configuration(run_id):
             evidence = f07_configuration_evidence(
                 scope, config, pair.execution, purpose="evaluation_subject"
             )
@@ -336,16 +334,37 @@ class Scheduler:
                 await work.commit()
                 return identity
 
+        async def configuration_resolver(owner, run_id, actual_policy, *, inference_read_context):
+            if actual_policy != pair.execution.revision.policy:
+                raise ValueError("admission_policy_changed")
+            return configuration_id
+
         class Sink:
+            def __init__(self, work=None):
+                self.work = work
+                self._session = work.db_session if work is not None else None
+                self.envelope = None
+                self.max_active_runs = 0
+
+            @asynccontextmanager
+            async def admission_transaction(self):
+                async with scheduler.uow_factory(KERNEL) as work:
+                    bound = Sink(work)
+                    yield bound, work
+                    await work.commit()
+                # The durable prepared request and its exact definition pin
+                # survive C1 capacity failures. They grant no execution permit.
+                if bound.envelope is not None:
+                    await Sink().receive(bound.envelope, max_active_runs=bound.max_active_runs)
+
             async def receive(self, envelope, *, max_active_runs=0):
                 if envelope.payload["policy_snapshot"] != intent["policy"]:
                     raise ValueError("admission_policy_changed")
-                # Known input/configuration references survive a later C1 rollback.
-                # This checkpoint grants no execution permit or accepted receipt.
-                async with scheduler.uow_factory(KERNEL) as work:
-                    await work.evaluation_batch.fence(claim)
-                    await work.evaluation_batch.prepared(scope, row, envelope)
-                    await work.commit()
+                if self.work is not None:
+                    await self.work.evaluation_batch.fence(claim)
+                    await self.work.evaluation_batch.prepared(scope, row, envelope)
+                    self.envelope, self.max_active_runs = envelope, max_active_runs
+                    return True
                 async with scheduler.uow_factory(KERNEL) as work:
                     repo = work.evaluation_batch
                     await repo.fence(claim, dispatch=True, result_id=row["id"])
@@ -430,6 +449,7 @@ class Scheduler:
         if row["prepared_envelope"] is not None:
             await Sink().receive(CommandEnvelope.model_validate(row["prepared_envelope"]))
             return True
+        configuration_id = await capture_configuration(row["run_id"])
         await self.admission.admit(
             family=RunFamily(config.selection.mode),
             source_entity_type="evaluation_recorded_case"
@@ -713,8 +733,12 @@ def private_case_input(case, config, attachments):
         if case.input[-1].role != "user":
             raise ValueError("case_final_user_message_required")
         message = case.input[-1].content
-    if len(conversation) > 100:
+    if len(conversation) > 4096:
         raise ValueError("case_conversation_limit")
+    from app.domain.execution.serialization import canonical_json_bytes
+
+    if len(canonical_json_bytes([item.model_dump(mode="json") for item in conversation])) > 8388608:
+        raise ValueError("case_conversation_bytes_limit")
     if config.selection.prompt:
         message = config.selection.prompt + "\n\n" + message
     resources = {
@@ -725,6 +749,11 @@ def private_case_input(case, config, attachments):
     if len(resources) > 8:
         raise ValueError("case_resource_limit")
     return {
+        "_context_dataset": {
+            "case_revision_id": str(case.id),
+            "case_revision": case.revision,
+            "config_version_id": str(config.id),
+        },
         "message": message,
         "conversation": [item.model_dump(mode="json") for item in conversation],
         "mode": config.selection.mode,

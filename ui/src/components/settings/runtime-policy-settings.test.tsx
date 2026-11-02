@@ -10,6 +10,7 @@ import type { ExecutionPolicy, ExecutionPolicyRevision } from "@/lib/api/runtime
 import { renderComponent } from "@/test-utils/render";
 
 import en from "../../../messages/en.json";
+import zh from "../../../messages/zh.json";
 
 const mocks = vi.hoisted(() => ({
   getExecution: vi.fn(),
@@ -162,6 +163,129 @@ afterEach(() => {
 });
 
 describe("Runtime Policy settings", () => {
+  it.each([
+    ["en", en],
+    ["zh", zh],
+  ] as const)("renders server-provided basic knowledge policy in %s", async (locale, messages) => {
+    const policy = {
+      ...structuredClone(EXECUTION_POLICY),
+      knowledge_base: {
+        ...structuredClone(EXECUTION_POLICY.knowledge_base),
+        vector_enabled: false,
+        rerank: { ...EXECUTION_POLICY.knowledge_base.rerank, enabled: false },
+        graphrag: { ...EXECUTION_POLICY.knowledge_base.graphrag, enabled: false },
+        ocr: { ...EXECUTION_POLICY.knowledge_base.ocr, mode: "off" },
+      },
+    } satisfies ExecutionPolicy;
+    mocks.getExecution.mockResolvedValue({
+      head: HEAD,
+      revision: { ...EXECUTION_REVISION, policy },
+    });
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <RuntimePolicySettings />
+      </NextIntlClientProvider>,
+    );
+    const fields = messages.runtimePolicy.fields.knowledge_base;
+    for (const label of [fields.vector_enabled, fields.rerank.enabled, fields.graphrag.enabled]) {
+      expect(container.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-checked")).toBe(
+        "false",
+      );
+    }
+    expect(container.querySelector(`[aria-label="${fields.ocr.mode}"]`)?.textContent).toContain(
+      messages.runtimePolicy.knowledgeSetup.ocrOff,
+    );
+    for (const label of [
+      fields.retrieval.vector_top_k,
+      fields.rerank.timeout_seconds,
+      fields.graphrag.max_llm_calls,
+      fields.ocr.max_pages,
+    ]) {
+      expect(container.querySelector(`[aria-label="${label}"]`)).toBeNull();
+    }
+    expect(container.textContent).toContain(messages.runtimePolicy.knowledgeSetup.basic);
+    expect(container.textContent).toContain(messages.runtimePolicy.knowledgeSetup.enableSteps);
+    expect(container.querySelector(`[aria-label="${fields.retrieval.bm25_top_k}"]`)).toBeTruthy();
+    expect(mocks.createExecution).not.toHaveBeenCalled();
+    await unmount();
+  });
+
+  it.each([
+    ["en", en],
+    ["zh", zh],
+  ] as const)("keeps existing enhanced policy visible in %s", async (locale, messages) => {
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <RuntimePolicySettings />
+      </NextIntlClientProvider>,
+    );
+    const fields = messages.runtimePolicy.fields.knowledge_base;
+    for (const label of [fields.vector_enabled, fields.rerank.enabled, fields.graphrag.enabled]) {
+      expect(container.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-checked")).toBe(
+        "true",
+      );
+    }
+    expect(container.querySelector(`[aria-label="${fields.ocr.mode}"]`)?.textContent).toContain(
+      messages.runtimePolicy.knowledgeSetup.ocrVision,
+    );
+    for (const label of [
+      fields.retrieval.vector_top_k,
+      fields.rerank.timeout_seconds,
+      fields.graphrag.max_llm_calls,
+      fields.ocr.max_pages,
+    ]) {
+      expect(container.querySelector(`[aria-label="${label}"]`)).toBeTruthy();
+    }
+    expect(container.textContent).toContain(messages.runtimePolicy.knowledgeSetup.enhanced);
+    expect(mocks.createExecution).not.toHaveBeenCalled();
+    await unmount();
+  });
+
+  it("hides disabled tuning without changing the stored tuning values", async () => {
+    const policy = {
+      ...structuredClone(EXECUTION_POLICY),
+      knowledge_base: {
+        ...structuredClone(EXECUTION_POLICY.knowledge_base),
+        ocr: { ...EXECUTION_POLICY.knowledge_base.ocr, mode: "rapidocr" },
+      },
+    } satisfies ExecutionPolicy;
+    mocks.getExecution.mockResolvedValue({
+      head: HEAD,
+      revision: { ...EXECUTION_REVISION, policy },
+    });
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <RuntimePolicySettings />
+      </NextIntlClientProvider>,
+    );
+    expect(container.querySelector('[aria-label="OCR mode"]')?.textContent).toContain(
+      en.runtimePolicy.knowledgeSetup.ocrReserved,
+    );
+    const vector = container.querySelector('[aria-label="Vector indexing enabled"]');
+    await act(async () => (vector as HTMLButtonElement).click());
+    expect(container.querySelector('[aria-label="Vector top-K"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Maximum graph LLM calls"]')).toBeTruthy();
+    const note = container.querySelector('input[aria-label="Change note"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(note, "Disable vector indexing");
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const save = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Save execution policy",
+    );
+    await act(async () => save?.click());
+    expect(mocks.createExecution).toHaveBeenCalledOnce();
+    expect(mocks.createExecution.mock.calls[0][0].policy.knowledge_base).toEqual({
+      ...policy.knowledge_base,
+      vector_enabled: false,
+    });
+    await unmount();
+  });
+
   it("preserves edits and offers reload on a head conflict", async () => {
     mocks.createExecution.mockRejectedValue(
       new ApiError(409, "conflict", { version: 9 }, "runtimePolicy.headConflict"),

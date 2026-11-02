@@ -8,13 +8,13 @@ from typing import Literal
 from uuid import UUID
 
 from jsonschema import Draft202012Validator
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from app.domain.evaluation.dataset import ImmutableModel
-from app.domain.json_values import deep_freeze_json
+from app.domain.execution.context_resources import ContextResourceEvidence
+from app.domain.execution.tool_contract import RecordedContract
 from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.models.resource_pin import ResourceIdentity
-from app.domain.models.tool_policy import ToolExecutionPolicy
 
 MAX_RECORDING_BYTES = 20 * 1024 * 1024
 MAX_RECORDING_SLOTS = 10_000
@@ -103,31 +103,6 @@ def sanitize_result(
     return value
 
 
-class RecordedContract(ImmutableModel):
-    name: str = Field(min_length=1)
-    pack: str = Field(min_length=1)
-    schema_body: dict
-    policy: ToolExecutionPolicy
-    connector_id: str | None = None
-    source_name: str | None = None
-    connector_bindings: dict[str, str] = Field(default_factory=dict)
-    binding_revision: str = Field(min_length=1)
-    authority_revision: str = Field(min_length=1)
-
-    @field_validator("schema_body", "connector_bindings", mode="after")
-    @classmethod
-    def immutable_metadata(cls, value):
-        return deep_freeze_json(value)
-
-    @property
-    def digest(self):
-        return hashlib.sha256(canonical(self.model_dump(mode="json"))).hexdigest()
-
-    @property
-    def arguments_schema(self):
-        return self.schema_body["function"]["parameters"]
-
-
 class RecordingSelection(ImmutableModel):
     tool: str = Field(min_length=1)
     allowed_fields: tuple[str, ...]
@@ -169,6 +144,7 @@ class RecordingSlot(ImmutableModel):
     result_bytes: int = Field(gt=0, le=MAX_RECORDING_BYTES)
     simulated_effect: bool
     citation_evidence: RecordingCitationEvidence | None = None
+    resource_evidence: ContextResourceEvidence | None = None
 
 
 class RecordingManifest(ImmutableModel):

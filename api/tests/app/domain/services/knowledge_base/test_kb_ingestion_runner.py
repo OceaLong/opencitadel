@@ -18,7 +18,11 @@ from app.domain.models.knowledge_version import (
     DocumentRevisionState,
     KnowledgeDocumentRevision,
 )
-from app.domain.runtime_policy import KnowledgeBaseExecutionPolicy
+from app.domain.runtime_policy import (
+    KnowledgeBaseExecutionPolicy,
+    KnowledgeOcrMode,
+    KnowledgeOcrPolicy,
+)
 from app.domain.services.knowledge_base.ingestion_runner import (
     KBIngestionRunner,
     _published_document_status,
@@ -128,7 +132,9 @@ async def test_empty_pdf_parser_keeps_ocr_warning(monkeypatch):
     with pytest.raises(ValueError, match="OCR 未执行"):
         await runner._parse_document(
             document,
-            policy=KnowledgeBaseExecutionPolicy(),
+            policy=KnowledgeBaseExecutionPolicy(
+                ocr=KnowledgeOcrPolicy(mode=KnowledgeOcrMode.VISION_LLM)
+            ),
         )
 
 

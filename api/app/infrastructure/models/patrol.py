@@ -472,6 +472,11 @@ class PatrolRemediationModel(Base):
     rollback_hint: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     actuator_capability_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    actuator_operation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    actuator_payload_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actuator_target_uid: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    actuator_target_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actuator_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="proposed")
     before_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     after_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -525,6 +530,11 @@ class PatrolRemediationModel(Base):
             rollback_hint=self.rollback_hint,
             idempotency_key=self.idempotency_key,
             actuator_capability_hash=self.actuator_capability_hash,
+            actuator_operation_id=self.actuator_operation_id,
+            actuator_payload_digest=self.actuator_payload_digest,
+            actuator_target_uid=self.actuator_target_uid,
+            actuator_target_ref=self.actuator_target_ref,
+            actuator_receipt=dict(self.actuator_receipt) if self.actuator_receipt else None,
             status=PatrolRemediationStatus(self.status),
             before_observation=dict(self.before_observation)
             if self.before_observation is not None

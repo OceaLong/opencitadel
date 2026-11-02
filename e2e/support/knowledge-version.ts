@@ -8,6 +8,7 @@ import { createOwnedActor } from "./owned-actor";
 import { readChatStream, waitForTerminalProfile } from "./execution";
 import { pollProjection } from "./poll";
 import { acceptanceId } from "./ids";
+import { registerOwnedSession } from "./session-retirement";
 
 /** Genuine KB versions and citation reads. Parent soft-delete is accessibility loss, not version purge. */
 export async function verifyFixedKnowledgeVersion(
@@ -40,10 +41,7 @@ export async function verifyFixedKnowledgeVersion(
     },
     { workspaceId: team.id, userId: operatorId },
   );
-  const journal = (
-    resource: "file" | "knowledge-base" | "session",
-    id: string,
-  ) =>
+  const journal = (resource: "file" | "knowledge-base", id: string) =>
     registerCleanupAction({
       action: "delete-resource",
       resource,
@@ -129,7 +127,7 @@ export async function verifyFixedKnowledgeVersion(
         body: { mode: "ask", model_id: modelId, knowledge_base_version_id: v1 },
       })
     ).data.session_id;
-    journal("session", session);
+    await registerOwnedSession(page, session, team.id);
     await readChatStream(page, session, {
       message:
         "[acceptance:evaluation:citation] What is the Citadel verification beacon and its rotation interval?",

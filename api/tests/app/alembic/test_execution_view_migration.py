@@ -28,7 +28,7 @@ def test_execution_view_is_additive_revision():
         scripts.get_revision("0005evaluation_datasets").down_revision
         == "0004execution_configuration"
     )
-    assert scripts.get_heads() == ["0030evaluation_judge_history"]
+    assert scripts.get_heads() == ["0045execution_object_retention"]
 
 
 def test_view_schema_has_scoped_unique_identities_and_no_sequence_order():

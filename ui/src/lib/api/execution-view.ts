@@ -12,6 +12,9 @@ import type {
   ArtifactProvenance,
   ContentPage,
   ContentQuery,
+  ContextQuery,
+  ContextsQuery,
+  DefinitionAvailability,
   EventsQuery,
   ExecutionReadErrorCode,
   ListRunsQuery,
@@ -65,6 +68,10 @@ async function collectContent(
 }
 
 export const executionViewApi = {
+  getDefinitionAvailability: (
+    run: string,
+    options?: RequestOptions,
+  ): Promise<DefinitionAvailability> => get(`${runPath(run)}/definition-availability`, {}, options),
   listRuns: (query: ListRunsQuery = {}, options?: RequestOptions): Promise<RunViewPage> =>
     get("/execution-runs", params(query), options),
   getView: (run: string, query: ViewQuery = {}, options?: RequestOptions): Promise<ViewPage> =>
@@ -80,6 +87,17 @@ export const executionViewApi = {
     query: StepQuery = {},
     options?: RequestOptions,
   ): Promise<StepDetail> => get(`${runPath(run)}/steps/${id(step)}`, params(query), options),
+  listContexts: (
+    run: string,
+    query: ContextsQuery = {},
+    options?: RequestOptions,
+  ): Promise<StepViewPage> => get(`${runPath(run)}/contexts`, params(query), options),
+  getContext: (
+    run: string,
+    step: string,
+    query: ContextQuery = {},
+    options?: RequestOptions,
+  ): Promise<StepDetail> => get(`${runPath(run)}/contexts/${id(step)}`, params(query), options),
   getTimeline: (
     run: string,
     query: TimelineQuery,

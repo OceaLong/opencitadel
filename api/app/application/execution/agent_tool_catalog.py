@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 
 from pydantic_core import to_jsonable_python
 
+from app.application.evaluation.contract_capture import ContractCapture
+from app.application.execution import activity_types
+from app.application.execution.context_read_tool import ContextReadTool
+from app.application.execution.invocation_contracts import verify_authority
 from app.application.execution.tool_catalog import CatalogSnapshot, ToolDefinition
 from app.application.ports.inference_dispatch import close_inference_adapters
 from app.application.services.artifact_service import ArtifactService
@@ -25,8 +29,12 @@ from app.application.services.integration_server_service import (
     MCPServerService,
 )
 from app.application.services.memory_service import MemoryService
+from app.domain.evaluation.errors import ReplayMismatch
+from app.domain.evaluation.recording import validate_typed
 from app.domain.execution.activity import ActivityContext
 from app.domain.execution.commands import JsonValue
+from app.domain.execution.context_resources import ContextKnowledgeVersion, ContextResourceEvidence
+from app.domain.execution.tool_contract import ToolContractChanged, ToolPreparationFailed
 from app.domain.external.connection_pool import (
     A2AConnectionPoolPort,
     MCPConnectionPoolPort,
@@ -217,7 +225,20 @@ async def _assemble_knowledge_base(
     return packs
 
 
+async def _assemble_context(catalog, site):
+    definition = site.context.run.definition_manifest
+    if definition is None or not any(
+        item.activity_type == activity_types.CONTEXT_PREPARE for item in definition.handlers
+    ):
+        return []
+    reader = getattr(catalog, "_context_sources", None)
+    if reader is None:
+        raise ValueError("CONTEXT_SOURCE_READER_UNAVAILABLE")
+    return [ContextReadTool(lambda **args: reader.read_for_activity(site.context, **args))]
+
+
 _TOOL_ASSEMBLY: tuple[_ToolAssembly, ...] = (
+    _ToolAssembly(ToolSpec("context", modes=AGENT_ONLY), _assemble_context),
     _ToolAssembly(ToolSpec("mcp", modes=ALL_MODES), _assemble_mcp),
     _ToolAssembly(ToolSpec("a2a", modes=ALL_MODES), _assemble_a2a),
     _ToolAssembly(ToolSpec("search", modes=AGENT_ONLY), _assemble_search),
@@ -262,12 +283,14 @@ class AgentToolCatalog:
         replay=None,
         isolated=None,
         contract_capture=None,
+        context_sources=None,
         embeddings: EmbeddingPort | None = None,
         llm_factory: Callable[..., LLM] | None = None,
     ) -> None:
         self._replay = replay
         self._isolated = isolated
         self._contract_capture = contract_capture
+        self._context_sources = context_sources
         self._uow_factory = uow_factory
         self._sandbox_factory = sandbox_factory
         self._search_engine = search_engine
@@ -297,8 +320,15 @@ class AgentToolCatalog:
             raise ValueError("environment_binding_missing")
         built = await self._build(payload, context)
         try:
+            capture = getattr(self, "_contract_capture", None) or ContractCapture(self._uow_factory)
+            contracts = await capture.describe(context, built)
+            async with self._uow_factory() as uow:
+                authority = await uow.execution_usage.invocation_authority(
+                    context.run.owner_scope, context.run.run_id
+                )
+            by_name = {contract.name: contract for contract in contracts}
             if getattr(self, "_contract_capture", None) is not None:
-                await self._contract_capture.capture(context, built)
+                await self._contract_capture.capture(context, built, contracts=contracts)
             return CatalogSnapshot(
                 definitions=tuple(
                     ToolDefinition(
@@ -309,11 +339,14 @@ class AgentToolCatalog:
                         approval_kind=descriptor.policy.approval_kind,
                         approval_prompt_param=descriptor.policy.approval_prompt_param,
                         approval_choices_param=descriptor.policy.approval_choices_param,
+                        approval_feedback_param=descriptor.policy.approval_feedback_param,
+                        contract=by_name[descriptor.name],
                     )
                     for pack in built.packs
                     for descriptor in pack.get_tool_descriptors()
                 ),
                 fingerprint=built.fingerprint,
+                authority=authority,
             )
         finally:
             await _cleanup(built)
@@ -331,10 +364,11 @@ class AgentToolCatalog:
         arguments: dict[str, JsonValue],
         expected_fingerprint: str | None = None,
         approval_feedback: str | None = None,
+        invocation=None,
+        contract=None,
+        execute=None,
     ) -> dict[str, JsonValue]:
         if getattr(self, "_replay", None) is not None and await self._replay.active(context):
-            from app.domain.evaluation.errors import ReplayMismatch
-
             raise ReplayMismatch("direct_real_tool_forbidden")
         isolated = getattr(self, "_isolated", None)
         if isolated is not None and await isolated.active(context):
@@ -344,14 +378,28 @@ class AgentToolCatalog:
                 arguments=arguments,
                 expected_fingerprint=expected_fingerprint,
                 approval_feedback=approval_feedback,
+                **(
+                    {"invocation": invocation, "contract": contract, "execute": execute}
+                    if invocation is not None
+                    else {}
+                ),
             )
         if getattr(context.run, "source_entity_type", None) == "evaluation_isolated_case":
             raise ValueError("environment_binding_missing")
-        built = await self._build(payload, context)
+        try:
+            built = await self._build(payload, context)
+        except ToolContractChanged:
+            raise
+        except PermissionError as error:
+            raise ToolContractChanged("authorization_changed") from error
+        except ValueError as error:
+            raise ToolContractChanged() from error
+        except (OSError, RuntimeError) as error:
+            raise ToolPreparationFailed("tool_catalog_preparation_failed") from error
         try:
             if expected_fingerprint and expected_fingerprint != built.fingerprint:
-                # 目录漂移本身不失败（D9）：仅当请求的工具已消失/被禁时
-                # 才返回 not_found tool error 喂回模型。
+                # The legacy whole-catalog fingerprint is diagnostic only;
+                # the selected immutable contract below decides authorization.
                 logger.warning(
                     "tool catalog drifted since the model decision (expected %s, got %s)",
                     expected_fingerprint[:12],
@@ -363,33 +411,92 @@ class AgentToolCatalog:
                 if any(descriptor.name == name for descriptor in pack.get_tool_descriptors())
             ]
             if len(matches) != 1:
+                if invocation is not None:
+                    raise ToolContractChanged()
                 raise ToolInvocationError(
                     f"工具[{name}]已不可用（不存在、被禁用或注册歧义）",
                     kind="not_found",
                 )
-            # Reviewer feedback flows only into tools that declare a receiving
-            # parameter (approval_feedback_param) — data-driven, never keyed on
-            # tool names. For ask_user this is the user's chosen option.
-            descriptor = next(
-                item for item in matches[0].get_tool_descriptors() if item.name == name
-            )
-            feedback_param = descriptor.policy.approval_feedback_param
-            if approval_feedback and feedback_param:
-                arguments = {**arguments, feedback_param: approval_feedback}
-            try:
+            if invocation is not None:
+                try:
+                    capture = getattr(self, "_contract_capture", None) or ContractCapture(
+                        self._uow_factory
+                    )
+                    current = await capture.describe(context, built, names=(name,))
+                except ReplayMismatch as error:
+                    raise ToolContractChanged() from error
+                except PermissionError as error:
+                    raise ToolContractChanged("authorization_changed") from error
+                except ValueError as error:
+                    raise ToolContractChanged() from error
+                except (OSError, RuntimeError) as error:
+                    raise ToolPreparationFailed("tool_contract_preparation_failed") from error
+                if len(current) != 1 or contract is None or current[0].digest != contract.digest:
+                    raise ToolContractChanged()
+                if contract.requires_operation and execute is None:
+                    raise ToolContractChanged("effect_service_required")
+                if approval_feedback:
+                    raise ToolContractChanged("approval_arguments_not_final")
+                try:
+                    validate_typed(arguments, contract.arguments_schema)
+                except ValueError as error:
+                    raise ToolInvocationError(str(error), kind="invalid_arguments") from error
+            else:
+                raise ToolContractChanged("invocation_binding_required")
+
+            async def preflight(uow):
+                if invocation is not None:
+                    await verify_authority(uow, context, invocation, contract)
+                    try:
+                        await uow.execution_usage.authorize_tool(
+                            context.run.owner_scope,
+                            skill_id=payload.get("skill_id"),
+                            name=name,
+                            pack=contract.pack,
+                            connector_ids=tuple(contract.connector_bindings),
+                            lock=True,
+                        )
+                    except PermissionError as error:
+                        raise ToolContractChanged("authorization_changed") from error
+                if context.require_active_lease is not None:
+                    context.require_active_lease()
+
+            async def send():
+                if context.require_active_lease is not None:
+                    context.require_active_lease()
                 result = await matches[0].invoke(name, **arguments)
+                if _is_knowledge_base_tool(matches[0]) and context.record_citations:
+                    await context.record_citations(result.citations)
+                encoded = to_jsonable_python(result)
+                if not isinstance(encoded, dict):
+                    raise TypeError("tool result must serialize to an object")
+                # Only the trusted adapter may set this reserved producer field.
+                # Connector output cannot promote its claimed citations to authority.
+                encoded.pop("_context_resource_evidence", None)
+                if (
+                    context.run.definition_manifest
+                    and context.run.definition_manifest.context_policy
+                ):
+                    evidence = await self._context_knowledge(matches[0], result.citations, context)
+                    encoded["_context_resource_evidence"] = ContextResourceEvidence(
+                        knowledge=(evidence,) if evidence else (),
+                    ).model_dump(mode="json")
+                return encoded
+
+            try:
+                if execute is not None:
+                    return await execute(send, preflight)
+                if invocation is not None:
+                    async with self._uow_factory() as uow:
+                        await preflight(uow)
+                        await uow.commit()
+                return await send()
             except asyncio.CancelledError:
                 try:
                     await matches[0].on_cancel()
                 except (AttributeError, OSError, RuntimeError, ValueError):
                     logger.warning("tool on_cancel hook failed for %s", name)
                 raise
-            if _is_knowledge_base_tool(matches[0]) and context.record_citations:
-                await context.record_citations(result.citations)
-            encoded = to_jsonable_python(result)
-            if not isinstance(encoded, dict):
-                raise TypeError("tool result must serialize to an object")
-            return encoded
         finally:
             await _cleanup(built)
 
@@ -401,8 +508,6 @@ class AgentToolCatalog:
         query: str,
     ) -> dict[str, JsonValue]:
         if getattr(self, "_replay", None) is not None and await self._replay.active(context):
-            from app.domain.evaluation.errors import ReplayMismatch
-
             raise ReplayMismatch("direct_real_tool_forbidden")
         isolated = getattr(self, "_isolated", None)
         if isolated is not None and await isolated.active(context):
@@ -412,19 +517,68 @@ class AgentToolCatalog:
         built = await self._build(payload, context)
         try:
             sources: list[JsonValue] = []
+            knowledge = []
+            unresolved = False
             for kind, pack, retrieval_tool in built.retrieval:
                 result = await pack.invoke(retrieval_tool, query=query)
                 if _is_knowledge_base_tool(pack) and context.record_citations:
                     await context.record_citations(result.citations)
+                if (
+                    context.run.definition_manifest
+                    and context.run.definition_manifest.context_policy
+                ):
+                    evidence = await self._context_knowledge(pack, result.citations, context)
+                    if evidence:
+                        knowledge.append(evidence)
+                    else:
+                        unresolved = True
                 sources.append(
                     {
                         "kind": kind,
                         "result": to_jsonable_python(result),
                     }
                 )
-            return {"query": query, "sources": sources}
+            value = {"query": query, "sources": sources}
+            if context.run.definition_manifest and context.run.definition_manifest.context_policy:
+                value["_context_resource_evidence"] = ContextResourceEvidence(
+                    knowledge=tuple(knowledge),
+                    unresolved_sources=unresolved,
+                ).model_dump(mode="json")
+            return value
         finally:
             await _cleanup(built)
+
+    async def _context_knowledge(self, pack, citations, context):
+        if not _is_knowledge_base_tool(pack):
+            return None
+        trusted = pack._wrapped if isinstance(pack, PolicyBoundTool) else pack
+        async with self._uow_factory() as work:
+            if (
+                await work.knowledge_base.get_kb(trusted._kb_id, scope=context.run.owner_scope)
+                is None
+            ):
+                raise ToolContractChanged("authorization_changed")
+            version = await work.knowledge_version.get_version(
+                trusted._version_id, knowledge_base_id=trusted._kb_id
+            )
+        if (
+            version is None
+            or version.published_at is None
+            or version.state not in {"ready", "degraded"}
+        ):
+            raise ToolContractChanged("authorization_changed")
+        if any(
+            citation.knowledge_base_id != trusted._kb_id
+            or citation.version_id != trusted._version_id
+            for citation in citations
+        ):
+            raise ValueError("CONTEXT_RESOURCE_IDENTITY_CONFLICT")
+        return ContextKnowledgeVersion(
+            knowledge_base_id=trusted._kb_id,
+            version_id=trusted._version_id,
+            embedding_space_digest=version.embedding_space_digest,
+            citations=tuple(citations),
+        )
 
     async def _build(self, payload, context):
         clients = []
@@ -610,7 +764,7 @@ class AgentToolCatalog:
         async with self._uow_factory() as uow:
             skill = await uow.skill.get_by_id(skill_id, scope=scope)
         if skill is None:
-            raise ValueError("skill does not exist in the Run owner scope")
+            raise ToolContractChanged("authorization_changed")
         if not skill.enabled:
             # 运行中 Run 引用的 skill 被禁用：与 model.call 一致地降级为
             # "无 skill 继续"（P2-10），不再击穿 Run。通知链复杂，选择

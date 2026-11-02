@@ -10,6 +10,15 @@ from opencitadel_ops_actuator.contracts import ActuatorEnvelope, ActuatorErrorCo
 
 def test_error_enum_is_complete():
     assert {item.value for item in ActuatorErrorCode} == {
+        "OPERATION_CONFLICT",
+        "OPERATION_NOT_FOUND",
+        "OPERATION_UNKNOWN",
+        "OPERATION_PENDING",
+        "OPERATION_JOURNAL_UNAVAILABLE",
+        "OPERATION_JOURNAL_TOO_LARGE",
+        "OPERATION_JOURNAL_SENSITIVE",
+        "PAYLOAD_DIGEST_MISMATCH",
+        "TARGET_UID_MISMATCH",
         "NAMESPACE_DENIED",
         "TARGET_DENIED",
         "TARGET_NOT_FOUND",

@@ -524,6 +524,9 @@ class PostgresFormalProjector:
         values = {
             "run_id": state.run_id,
             "family": state.family.value,
+            "definition_digest": state.definition_pin.manifest_digest
+            if state.definition_pin
+            else None,
             "source_entity_type": state.source_entity_type,
             "source_entity_id": state.source_entity_id,
             "execution_policy_revision_id": policy_snapshot.execution_revision_id,

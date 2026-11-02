@@ -227,12 +227,39 @@ async def inspect_result(shared, arm, *, cleanup=False):
         else:
             if (
                 task.status != "unknown"
-                or task.failure_code != "NON_IDEMPOTENT_OUTCOME_UNKNOWN"
+                or task.failure_code != "EXTERNAL_OUTCOME_UNKNOWN"
                 or (UUID(arm["activity_id"]), "unknown", arm["generation"])
                 not in state.settled_activities
-                or row.status != "failed"
+                or row.status != "waiting"
+                or state.wait_reason != "external_outcome_unknown"
             ):
                 raise FaultError("actual unknown settlement/convergence absent")
+            effects = [
+                effect
+                for effect in state.effect_operations
+                if str(effect.spec.activity_id) == arm["activity_id"]
+                and effect.spec.generation == arm["generation"]
+            ]
+            if len(effects) != 1 or effects[0].state != "unknown":
+                raise FaultError("physical write is not bound to one unknown effect operation")
+            effect = effects[0]
+            proof["effect"] = {
+                "operation_id": str(effect.spec.operation_id),
+                "invocation_id": str(effect.spec.invocation_id),
+                "state": effect.state,
+                "revision": effect.revision,
+                "contract_digest": effect.spec.contract_digest,
+                "idempotency_key": effect.spec.idempotency_key,
+                "capability": effect.spec.capability,
+            }
+            proof["queries"] = control_queries = (
+                FaultControl().read("queries-" + arm["fault_id"] + ".json") or []
+            )
+            if any(
+                query.get("operation_id") != str(effect.spec.operation_id)
+                for query in control_queries
+            ):
+                raise FaultError("foreign query evidence")
             session = await work.session.get_by_id(arm["source_entity_id"], scope=scope)
             if session is None or session.sandbox_id != arm["sandbox_id"]:
                 raise FaultError("owned sandbox identity changed")

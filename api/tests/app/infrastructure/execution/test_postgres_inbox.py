@@ -8,7 +8,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.application.execution.orchestrator import CommandResult
-from app.domain.execution.commands import CommandEnvelope
+from app.domain.execution.commands import ActivityLeaseProof, CommandEnvelope
+from app.domain.execution.definition import SchemaCompatibility
 from app.domain.execution.errors import CommandInProgressError
 from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.execution.models import ExecutionCommandInboxORM
@@ -60,6 +61,7 @@ def test_persisted_omitted_payload_digest_survives_worker_reload() -> None:
         payload={},
         payload_digest=digest,
         payload_ref=None,
+        activity_lease_proof=None,
     )
 
     reloaded = PostgresInboxSource._to_command(record)
@@ -85,6 +87,7 @@ def test_idempotent_command_retry_may_have_a_new_transport_timestamp() -> None:
         payload=candidate.payload,
         payload_digest=None,
         payload_ref=None,
+        activity_lease_proof=None,
     )
     retried = candidate.model_copy(update={"issued_at": candidate.issued_at + timedelta(seconds=1)})
 
@@ -114,6 +117,29 @@ async def inbox_database(_db_schema):
             )
             await session.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_durable_submission_preserves_lease_and_rejects_different_owner(inbox_database):
+    session_factory, command_ids = inbox_database
+    proof = ActivityLeaseProof(
+        activity_id=uuid4(), request_generation=0, claim_generation=1, worker_id="worker-a"
+    )
+    candidate = command().model_copy(update={"activity_lease_proof": proof})
+    command_ids.append(candidate.command_id)
+    async with session_factory() as session:
+        await configure_session_authorization(session, AuthorizationContext.system("inbox-proof"))
+        await PostgresInbox(session).receive(candidate)
+        await session.commit()
+    async with session_factory() as session:
+        await configure_session_authorization(session, AuthorizationContext.system("inbox-proof"))
+        record = await session.get(ExecutionCommandInboxORM, candidate.command_id)
+        assert PostgresInboxSource._to_command(record).activity_lease_proof == proof
+        conflicting = candidate.model_copy(
+            update={"activity_lease_proof": proof.model_copy(update={"worker_id": "worker-b"})}
+        )
+        with pytest.raises(ValueError, match="lease"):
+            await PostgresInbox(session).receive(conflicting)
 
 
 @pytest.mark.asyncio
@@ -228,6 +254,49 @@ async def test_load_pending_claims_disjoint_batches_across_workers(inbox_databas
         first_command.command_id,
         second_command.command_id,
     }
+
+
+@pytest.mark.asyncio
+async def test_incompatible_command_is_not_claimed_or_poisoned_before_matching_worker_returns(
+    inbox_database,
+):
+    sessions, command_ids = inbox_database
+    old, new = command(), command().model_copy(update={"command_schema_version": 2})
+    command_ids.extend((old.command_id, new.command_id))
+    auth = AuthorizationContext.system("inbox-compatible-worker")
+    async with sessions() as session:
+        await configure_session_authorization(session, auth)
+        for item in (old, new):
+            await PostgresInbox(session).receive(item)
+        await session.commit()
+
+    def worker(version):
+        return PostgresInboxSource(
+            session_factory=sessions,
+            authorization=auth,
+            supported_schemas=(
+                SchemaCompatibility(
+                    name=old.command_type, minimum=version, maximum=version, write_version=version
+                ),
+            ),
+        )
+
+    assert [item.command_id for item in await worker(1).load_pending(now=NOW, limit=10)] == [
+        old.command_id
+    ]
+    for _ in range(3):
+        assert await worker(1).load_pending(now=NOW, limit=10) == ()
+    async with sessions() as session:
+        await configure_session_authorization(session, auth)
+        row = await session.get(ExecutionCommandInboxORM, new.command_id)
+        assert row.status == "received"
+        assert row.claim_generation == 0
+        assert row.delivery_attempts == 0
+        assert row.claim_deadline is None
+        assert row.last_error_code is None
+    assert [item.command_id for item in await worker(2).load_pending(now=NOW, limit=10)] == [
+        new.command_id
+    ]
 
 
 @pytest.mark.asyncio

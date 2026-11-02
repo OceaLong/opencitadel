@@ -3,8 +3,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.domain.errors import ConflictError
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
 from app.domain.models.scope import OwnerScope
 from app.domain.services.knowledge_base.vector_service import KBVectorService
+from tests.app.embedding_test_support import embedding_space, resolved_embedding
 
 
 @pytest.mark.asyncio
@@ -29,6 +31,7 @@ async def test_enabled_vector_consumer_propagates_missing_binding() -> None:
         embeddings,
         scope=OwnerScope.personal("user-1"),
         enabled=True,
+        expected_space=embedding_space(),
     )
 
     with pytest.raises(ConflictError, match="binding missing"):
@@ -44,8 +47,12 @@ async def test_build_vector_consumer_uses_frozen_model_id() -> None:
         scope=OwnerScope.personal("user-1"),
         enabled=True,
         model_id="embedding-1",
+        expected_space=EmbeddingSpaceDescriptor.from_resolved(
+            resolved_embedding(model_id="embedding-1")
+        ),
     )
 
     await service.embed_batch(["content"])
 
     assert embeddings.embed.await_args.kwargs["model_id"] == "embedding-1"
+    assert embeddings.embed.await_args.kwargs["expected_space"].model_id == "embedding-1"

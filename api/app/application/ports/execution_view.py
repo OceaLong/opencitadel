@@ -57,6 +57,9 @@ class ExecutionViewPort(Protocol):
     """Opaque session handle; concrete public result records cross this seam."""
 
     def transaction(self, *, writable: bool = False) -> AbstractAsyncContextManager[Any]: ...
+    async def definition_availability(
+        self, session: Any, scope: OwnerScope, run_id: UUID
+    ) -> dict: ...
     async def capture_run(
         self, session: Any, scope: OwnerScope, run_id: UUID
     ) -> PlaybackBoundary: ...

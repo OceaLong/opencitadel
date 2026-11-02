@@ -47,3 +47,36 @@ async def test_fixture_authenticates_the_mcp_transport(monkeypatch):
     result = await _call_tool_async("http://127.0.0.1:18091/mcp", "get_capabilities", {})
     assert result == {"name": "get_capabilities"}
     assert captured["headers"] == {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.asyncio
+async def test_fixture_never_retries_an_ambiguous_write(monkeypatch):
+    monkeypatch.setenv("PATROL_ACTUATOR_TOKEN", "fixture-generated-token-for-auth-proof-123456")
+    calls = []
+
+    @asynccontextmanager
+    async def transport(**kwargs):
+        yield object(), object(), object()
+
+    class Session:
+        def __init__(self, *_args):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def initialize(self):
+            pass
+
+        async def call_tool(self, name, arguments):
+            calls.append(name)
+            raise TimeoutError("response lost")
+
+    monkeypatch.setattr("mcp.client.streamable_http.streamablehttp_client", transport)
+    monkeypatch.setattr("mcp.ClientSession", Session)
+    with pytest.raises(HarnessError):
+        await _call_tool_async("http://127.0.0.1:18091/mcp", "restart_workload", {}, attempts=3)
+    assert calls == ["restart_workload"]

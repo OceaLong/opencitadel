@@ -10,8 +10,6 @@ from app.application.execution.run_context import (
     run_execution_context,
 )
 from app.domain.execution.context import RunExecutionContext
-from app.domain.execution.run import RunState
-from app.domain.execution.serialization import canonical_state_hash
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from app.infrastructure.execution.models import (
@@ -19,6 +17,7 @@ from app.infrastructure.execution.models import (
     ExecutionPoisonedScopeORM,
     ExecutionRunProjectionORM,
 )
+from app.infrastructure.execution.run_projection_validation import decode_run_projection
 from app.infrastructure.security.db_authorization import configure_session_authorization
 
 
@@ -62,9 +61,9 @@ class PostgresRunContextSource:
             if blocked_scope is not None or blocked_run is not None:
                 raise RunContextUnavailableError(f"Run {run_id} is awaiting verified recovery")
         try:
-            state = RunState.model_validate(record.state)
-            if state.run_id != run_id or canonical_state_hash(state) != record.state_hash:
-                raise ValueError("Run projection state mismatch")
+            state = decode_run_projection(record)
+            if state.run_id != run_id:
+                raise ValueError("Run projection identity mismatch")
             context = run_execution_context(state)
             snapshot = context.policy_snapshot
             if (

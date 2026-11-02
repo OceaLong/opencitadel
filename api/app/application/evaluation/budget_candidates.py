@@ -8,6 +8,7 @@ from app.domain.models.inference import ChatModelSettings
 
 class FrozenBudgetCandidates:
     def __init__(self, inventory, proof):
+        self.inventory = inventory
         if proof.get("inventory") != inventory.fingerprint or not proof.get("candidates"):
             raise ValueError("budget_configuration_proof_unavailable")
         authority = BudgetAuthority(inventory)
@@ -16,6 +17,47 @@ class FrozenBudgetCandidates:
             if any(candidate.get(key) != value for key, value in expected.items()):
                 raise ValueError("budget_configuration_proof_unavailable")
         self.proof = deep_freeze_json(proof)
+
+    def for_context_summary(self, *, output_tokens):
+        """Derive a bounded output setting; retain every fixed fallback candidate.
+
+        This does not reserve capacity or authorize a send. The context Activity
+        must bind the derived proof to its independent dispatch and namespace.
+        """
+        return self._for_context(output_tokens=output_tokens, purpose="summary", maximum=4096)
+
+    def for_context_model(self, *, output_tokens):
+        """Bind the definition's explicit output setting to the original candidate proof.
+
+        This is the same policy override used by ordinary context admission.
+        Evaluation keeps its original configuration evidence and records this
+        derived physical setting, without changing model/fallback identities.
+        """
+        if type(output_tokens) is not int or not 256 <= output_tokens <= 32768:
+            raise ValueError("CONTEXT_MODEL_OUTPUT_INVALID")
+        if all(item["output"] == output_tokens for item in self.proof["candidates"]):
+            return self
+        return self._for_context(output_tokens=output_tokens, purpose="model", maximum=32768)
+
+    def _for_context(self, *, output_tokens, purpose, maximum):
+        from copy import deepcopy
+
+        from app.domain.evaluation.budget_capabilities import PROFILES, BudgetProfile
+
+        if type(output_tokens) is not int or not 256 <= output_tokens <= maximum:
+            raise ValueError(f"CONTEXT_{purpose.upper()}_OUTPUT_INVALID")
+        proof = deepcopy(self.proof)
+        parent = digest(self.proof)
+        authority = BudgetAuthority(self.inventory)
+        for candidate in proof["candidates"]:
+            profile = BudgetProfile.model_validate(candidate["profile"])
+            if output_tokens > PROFILES[profile.profile][4]:
+                raise ValueError("CONTEXT_OUTPUT_PROFILE_UNSUPPORTED")
+            candidate["settings"]["max_output_tokens"] = output_tokens
+            candidate.update(authority.configuration(candidate))
+        proof["context_subpurpose"] = purpose
+        proof["parent_candidate_proof_digest"] = parent
+        return FrozenBudgetCandidates(self.inventory, proof)
 
     def validate(self, model, candidate, *, effective=False):
         identity = {

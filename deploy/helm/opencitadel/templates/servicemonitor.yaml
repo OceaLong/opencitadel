@@ -1,8 +1,8 @@
 {{- if .Values.monitoring.serviceMonitor.enabled }}
 {{- /*
 Prometheus Operator 抓取配置：抓 api Service 的 /api/metrics。
-该端点 fail-closed：METRICS_TOKEN（secrets.metricsToken）为空时返回 404，
-启用本模板前必须设置 metricsToken，否则抓取只会一直失败。
+启用本模板时，主 Secret 自动生成并持久保存 METRICS_TOKEN；显式
+secrets.metricsToken 优先。引用外部主 Secret 时需预先提供这个键。
 */}}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -27,6 +27,6 @@ spec:
       authorization:
         type: Bearer
         credentials:
-          name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+          name: {{ include "opencitadel.secretName" (dict "root" . "group" "application") }}
           key: METRICS_TOKEN
 {{- end }}

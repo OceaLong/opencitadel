@@ -1201,6 +1201,7 @@ async def test_legacy_unavailable_requirements_do_not_block_judge_cleanup(
                         update={
                             "command_id": uuid4(),
                             "command_type": "StartRun",
+                            "command_schema_version": 1,
                             "expected_stream_version": None,
                             "payload": {},
                         }

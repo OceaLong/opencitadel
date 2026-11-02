@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.application.execution.admission import RunAdmissionService
@@ -24,6 +27,7 @@ from app.domain.models.patrol import (
     PatrolRemediation,
     PatrolRemediationAction,
     PatrolRemediationStatus,
+    patrol_actuator_payload_digest,
     patrol_remediation_params_hash,
 )
 from app.domain.models.scope import OwnerScope
@@ -37,17 +41,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-# ActuatorEnvelope.action == this domain enum value 1:1 (see
-# ops-actuator/src/opencitadel_ops_actuator/server.py) — no mapping table
-# needed. K8s `kind` casing differs though: the domain model stores the
-# capitalized Kubernetes Kind ("Deployment"/"StatefulSet", matching probe
-# args), while the Actuator's RestartRequest/ScaleRequest/RollbackRequest
-# schemas declare kind as the lowercase Literal["deployment", "statefulset"].
-_ACTUATOR_KIND_ALIASES: dict[str, str] = {
-    "Deployment": "deployment",
-    "StatefulSet": "statefulset",
-}
 
 
 # Closed-world catalog: only k8s_* probes have an actuator counterpart today.
@@ -123,6 +116,102 @@ def _rollback_hint(action: PatrolRemediationAction) -> str:
     if action == PatrolRemediationAction.SCALE_WORKLOAD:
         return "Scale the workload back to its prior replica count if this causes regressions."
     return "Roll forward to the previous revision recorded before this action."
+
+
+def _require_effect_capabilities(manifest: dict, action: str, target_ref: str | None) -> None:
+    effect = manifest.get("effect_contract") or {}
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("target_ref") != target_ref
+        or effect.get("version") != 2
+        or effect.get("execute") is not True
+        or effect.get("resolve") != "get_operation"
+        or effect.get("target_identity") != "get_target"
+        or not {action, "get_operation", "get_target"} <= set(manifest.get("enabled_tools", []))
+    ):
+        raise ConflictError("Actuator lacks the approved durable operation contract")
+
+
+def _valid_operation_identity(remediation: PatrolRemediation) -> bool:
+    return bool(
+        remediation.actuator_operation_id == remediation.id
+        and remediation.actuator_target_uid
+        and remediation.actuator_target_ref
+        and remediation.idempotency_key == f"rem:{remediation.id}"
+        and remediation.actuator_payload_digest == patrol_actuator_payload_digest(remediation)
+    )
+
+
+def _verified_operation_receipt(
+    remediation: PatrolRemediation, envelope: dict
+) -> tuple[str, dict | None]:
+    """Only a bound, retained receipt proves applied or not_applied, never an outcome label."""
+    if not isinstance(envelope, dict):
+        raise TypeError("provider envelope must be an object")
+    state = envelope.get("state")
+    if state not in {"applied", "not_applied"}:
+        return "unknown", None
+    receipt = envelope.get("receipt")
+    if not isinstance(receipt, dict):
+        raise TypeError("durable receipt required")
+    key_digest = hashlib.sha256(remediation.idempotency_key.encode()).hexdigest()
+    target = {
+        "cluster": remediation.actuator_target_ref,
+        "namespace": remediation.target_namespace,
+        "workload": remediation.target_workload,
+        "kind": remediation.target_kind.lower(),
+        "uid": remediation.actuator_target_uid,
+    }
+    expected = {
+        "operation_id": remediation.actuator_operation_id,
+        "payload_digest": remediation.actuator_payload_digest,
+        "key_digest": key_digest,
+        "target": target,
+        "action": remediation.action.value,
+        "state": state,
+    }
+    if (
+        envelope.get("schema_version") != 2
+        or envelope.get("target_ref") != remediation.actuator_target_ref
+    ):
+        raise ValueError("wrong provider envelope")
+    if any(
+        envelope.get(key) != value or receipt.get(key) != value for key, value in expected.items()
+    ):
+        raise ValueError("receipt binding mismatch")
+    revision = receipt.get("revision")
+    if (
+        receipt.get("schema_version") != 1
+        or type(revision) is not int
+        or revision < 1
+        or envelope.get("receipt_revision") != revision
+        or not receipt.get("caller_authority")
+        or not receipt.get("provider_namespace")
+    ):
+        raise ValueError("receipt identity missing")
+    canonical = json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    expected_hash = hashlib.sha256(canonical.encode()).hexdigest()
+    evidence_ref = f"actuator://operations/{remediation.actuator_operation_id}/receipts/{revision}"
+    evidence = next(
+        (
+            item
+            for item in envelope.get("evidence", [])
+            if isinstance(item, dict) and item.get("ref") == evidence_ref
+        ),
+        None,
+    )
+    if (
+        not evidence
+        or evidence.get("sha256") != expected_hash
+        or evidence.get("target_ref") != remediation.actuator_target_ref
+    ):
+        raise ValueError("receipt evidence unavailable")
+    expires = datetime.fromisoformat(evidence["expires_at"])
+    if expires.tzinfo is None or expires <= utc_now():
+        raise ValueError("receipt evidence expired")
+    return state, receipt
 
 
 class PatrolRemediationService:
@@ -262,6 +351,11 @@ class PatrolRemediationService:
                 else str(check.probe.args.get("workload") or "")
             )
             kind = str(check.probe.args.get("kind") or "Deployment")
+            if not resolved_workload:
+                raise BadRequestError(
+                    "修复提案需要具体 workload，不能审批未解析的目标",
+                    error_key="apiErrors.patrolRemediation.workloadMissing",
+                )
 
             params_hash = patrol_remediation_params_hash(
                 action.value, namespace, resolved_workload, kind, params
@@ -288,6 +382,26 @@ class PatrolRemediationService:
                     "无法获取 Ops Actuator capability 基线，拒绝创建修复提案",
                     error_key="apiErrors.patrolRemediation.capabilityBaselineUnavailable",
                 )
+            _require_effect_capabilities(baseline, action.value, config.target_ref)
+            target = await self._actuator_client.get_target(
+                actuator_server,
+                namespace=namespace,
+                workload=resolved_workload,
+                kind=kind.lower(),
+                policy=ActivityExecutionPolicy(),
+            )
+            if (
+                target.get("schema_version") != 2
+                or target.get("target_ref") != config.target_ref
+                or target.get("namespace") != namespace
+                or target.get("workload") != resolved_workload
+                or target.get("kind") != kind.lower()
+                or not isinstance(target.get("uid"), str)
+                or not re.fullmatch(r"[A-Za-z0-9:_-]{1,200}", target["uid"])
+            ):
+                raise ConflictError(
+                    "Actuator target identity unavailable or does not match proposal"
+                )
 
             remediation = PatrolRemediation(
                 pack_id=run.pack_id,
@@ -306,8 +420,12 @@ class PatrolRemediationService:
                 idempotency_key="pending",
                 created_by=actor_user_id,
                 actuator_capability_hash=baseline_hash,
+                actuator_target_uid=target["uid"],
+                actuator_target_ref=target["target_ref"],
             )
             remediation.idempotency_key = f"rem:{remediation.id}"
+            remediation.actuator_operation_id = remediation.id
+            remediation.actuator_payload_digest = patrol_actuator_payload_digest(remediation)
 
             # The session is the user-facing owner of the formal remediation
             # Run and its persisted approval request.
@@ -350,6 +468,10 @@ class PatrolRemediationService:
                     "remediation_id": remediation.id,
                     "action": action.value,
                     "params": params,
+                    "operation_id": remediation.actuator_operation_id,
+                    "payload_digest": remediation.actuator_payload_digest,
+                    "target_uid": remediation.actuator_target_uid,
+                    "target_ref": remediation.actuator_target_ref,
                 },
                 public_input={
                     "session_id": session.id,
@@ -359,6 +481,7 @@ class PatrolRemediationService:
                 parent_run_id=parent_run_id,
                 correlation_id=parent_run_id,
                 command_sink=uow.execution_commands,
+                inference_read_context=uow,
             )
             await uow.commit()
 
@@ -383,253 +506,297 @@ class PatrolRemediationService:
         scope: OwnerScope,
         *,
         policy: ActivityExecutionPolicy,
+        persist_outcome: bool = True,
     ) -> dict:
-        """Execute an approved remediation through the registered Actuator.
-
-        The Activity idempotency key authenticates the durable delivery but
-        is never forwarded. The Actuator always receives the remediation key
-        frozen when the proposal was admitted.
-        """
-        del idempotency_key
-
+        """Send a newly approved operation once; an interrupted call is query-only."""
+        del idempotency_key  # Delivery identity never replaces the approved rem:{id} key.
+        remediation = await self.get(remediation_id, scope)
+        if remediation.session_id != session_id:
+            raise ConflictError(
+                "修复提案与当前会话不匹配", error_key="apiErrors.patrolRemediation.bindingMismatch"
+            )
+        if remediation.status in {
+            PatrolRemediationStatus.EXECUTING,
+            PatrolRemediationStatus.UNKNOWN,
+        }:
+            return await self.resolve_operation(
+                remediation_id, scope, policy=policy, persist_outcome=persist_outcome
+            )
+        if remediation.status == PatrolRemediationStatus.EXECUTED:
+            return (await self._ensure_recheck(remediation, scope)).model_dump(mode="json")
+        if remediation.status != PatrolRemediationStatus.PROPOSED:
+            raise ConflictError(
+                "修复提案已处理", error_key="apiErrors.patrolRemediation.bindingMismatch"
+            )
         if await self._remediation_mode() is not PatrolRemediationMode.ENABLED:
             raise BadRequestError(
                 "Ops Patrol Remediation execution is disabled",
                 error_key="apiErrors.patrolRemediation.executionDisabled",
             )
 
+        recomputed = patrol_remediation_params_hash(
+            remediation.action.value,
+            remediation.target_namespace,
+            remediation.target_workload,
+            remediation.target_kind,
+            remediation.params,
+        )
+        if recomputed != remediation.params_hash:
+            await self._reject_unsent(remediation, scope, "PARAMS_TAMPERED")
+            raise ConflictError(
+                "修复提案参数已变更，拒绝执行",
+                error_key="apiErrors.patrolRemediation.paramsTampered",
+            )
+        if not remediation.actuator_capability_hash:
+            await self._reject_unsent(remediation, scope, "CAPABILITY_BASELINE_MISSING")
+            raise ConflictError(
+                "缺少执行前 capability 基线",
+                error_key="apiErrors.patrolRemediation.capabilityBaselineMissing",
+            )
+        if not _valid_operation_identity(remediation):
+            await self._reject_unsent(remediation, scope, "OPERATION_IDENTITY_MISSING")
+            raise ConflictError("修复提案缺少已批准的 operation 身份")
         async with self._uow_factory() as uow:
-            # 1. Binding check: the tool call must belong to the exact session.
-            # EXECUTING is deliberately resumable: the Actuator receives the
-            # remediation's persisted idempotency key, so a worker crash after
-            # this transition can safely repeat the same external operation.
-            remediation = await uow.patrol.get_remediation(remediation_id, scope, for_update=True)
-            if remediation is None:
-                raise NotFoundError(
-                    "Patrol Remediation 不存在", error_key="apiErrors.patrolRemediation.notFound"
-                )
-            if remediation.session_id != session_id:
-                raise ConflictError(
-                    "修复提案与当前会话不匹配或已被处理",
-                    error_key="apiErrors.patrolRemediation.bindingMismatch",
-                )
-            already_executed = remediation.status == PatrolRemediationStatus.EXECUTED
-            if not already_executed and remediation.status not in {
-                PatrolRemediationStatus.PROPOSED,
-                PatrolRemediationStatus.EXECUTING,
-            }:
-                raise ConflictError(
-                    "修复提案与当前会话不匹配或已被处理",
-                    error_key="apiErrors.patrolRemediation.bindingMismatch",
-                )
-            starting = remediation.status == PatrolRemediationStatus.PROPOSED
-
-            # 2. params_hash re-verification: guards against the proposal row
-            # being edited directly in the database after approval but before
-            # execution (the approval was granted for a specific params_hash;
-            # if the persisted params no longer hash to it, the approval no
-            # longer covers what is about to run).
-            recomputed_hash = patrol_remediation_params_hash(
-                remediation.action.value,
-                remediation.target_namespace,
-                remediation.target_workload,
-                remediation.target_kind,
-                remediation.params,
+            server = await uow.mcp_server.get_by_name(ACTUATOR_MCP_SERVER_NAME)
+        if server is None or not server.enabled:
+            raise NotFoundError(
+                "Ops Actuator 未注册或已禁用",
+                error_key="apiErrors.patrolRemediation.actuatorServerMissing",
             )
-            if not already_executed and recomputed_hash != remediation.params_hash:
-                remediation.status = PatrolRemediationStatus.FAILED
-                remediation.error_code = "PARAMS_TAMPERED"
-                remediation.error_message = (
-                    "Persisted remediation no longer matches the approved proposal hash"
-                )
-                await uow.patrol.save_remediation(remediation)
-                await uow.commit()
-                self._governance_metrics.record_remediation_transition(remediation.status.value)
-                await self._audit(
-                    "patrol_remediation_params_tampered", remediation, scope.user_id, {}
-                )
-                raise ConflictError(
-                    "修复提案参数已变更，拒绝执行",
-                    error_key="apiErrors.patrolRemediation.paramsTampered",
-                )
+        live = await self._actuator_client.get_capabilities(server, policy=policy)
+        if live.get("overall_capability_hash") != remediation.actuator_capability_hash:
+            await self._reject_unsent(remediation, scope, "CAPABILITY_DRIFT")
+            raise ConflictError(
+                "Actuator capability 已漂移，拒绝执行",
+                error_key="apiErrors.patrolRemediation.capabilityDrift",
+            )
+        _require_effect_capabilities(
+            live, remediation.action.value, remediation.actuator_target_ref
+        )
+        if await self._remediation_mode() is not PatrolRemediationMode.ENABLED:
+            await self._reject_unsent(remediation, scope, "POLICY_DENIED")
+            raise BadRequestError(
+                "Ops Patrol Remediation execution is disabled",
+                error_key="apiErrors.patrolRemediation.executionDisabled",
+            )
 
-            if not already_executed and not remediation.target_workload.strip():
-                raise BadRequestError(
-                    "修复目标 workload 缺失，无法执行（propose 时未能从 Check 探测参数解析，也未提供覆盖值）",
-                    error_key="apiErrors.patrolRemediation.workloadMissing",
-                )
-
-            # 3a. Capability baseline must already be persisted before the
-            # remediation Activity is admitted and approved.
-            # execute() only ever *reads* it here; a missing baseline means
-            # the session was somehow never through that preflight (or ran
-            # against a version of the code that predates it) and must fail
-            # closed rather than silently trusting whatever the Actuator
-            # reports right now.
-            baseline_hash = remediation.actuator_capability_hash
-            if not already_executed and not baseline_hash:
-                remediation.status = PatrolRemediationStatus.FAILED
-                remediation.error_code = "CAPABILITY_BASELINE_MISSING"
-                remediation.error_message = (
-                    "No capability baseline was persisted before this session was approved"
-                )
-                await uow.patrol.save_remediation(remediation)
-                await uow.commit()
-                self._governance_metrics.record_remediation_transition(remediation.status.value)
-                await self._audit(
-                    "patrol_remediation_capability_baseline_missing",
-                    remediation,
-                    scope.user_id,
-                    {},
-                )
-                raise ConflictError(
-                    "缺少执行前 capability 基线，拒绝执行",
-                    error_key="apiErrors.patrolRemediation.capabilityBaselineMissing",
-                )
-
-            if not already_executed:
-                server = await uow.mcp_server.get_by_name(ACTUATOR_MCP_SERVER_NAME)
-                if server is None or not server.enabled:
-                    raise NotFoundError(
-                        "Ops Actuator 未注册或已禁用",
-                        error_key="apiErrors.patrolRemediation.actuatorServerMissing",
-                    )
-
+        # Claim the only send after preflight. Concurrent callers and crash recovery
+        # query this operation; they cannot acquire a second send authorization.
+        async with self._uow_factory() as uow:
+            current = await uow.patrol.get_remediation(remediation_id, scope, for_update=True)
+            if current is None or current.session_id != session_id:
+                raise NotFoundError("Remediation not found")
+            starting = current.status == PatrolRemediationStatus.PROPOSED
             if starting:
-                remediation.status = PatrolRemediationStatus.EXECUTING
-                await uow.patrol.save_remediation(remediation)
+                if (
+                    current.params_hash,
+                    current.actuator_payload_digest,
+                    current.actuator_capability_hash,
+                ) != (
+                    remediation.params_hash,
+                    remediation.actuator_payload_digest,
+                    remediation.actuator_capability_hash,
+                ) or not _valid_operation_identity(current):
+                    raise ConflictError("Remediation changed during preflight")
+                current.status = PatrolRemediationStatus.EXECUTING
+                await uow.patrol.save_remediation(current)
                 await uow.commit()
-        if already_executed:
-            remediation = await self._ensure_recheck(remediation, scope)
-            return remediation.model_dump(mode="json")
-        if starting:
-            self._governance_metrics.record_remediation_transition(remediation.status.value)
-            await self._audit(
-                "patrol_remediation_executing",
-                remediation,
-                scope.user_id,
-                {},
+            remediation = current
+        if not starting:
+            return await self.resolve_operation(
+                remediation_id, scope, policy=policy, persist_outcome=persist_outcome
             )
-
-        kind = _ACTUATOR_KIND_ALIASES.get(remediation.target_kind, remediation.target_kind.lower())
-        action_args: dict = {
+        self._governance_metrics.record_remediation_transition("executing")
+        await self._audit("patrol_remediation_executing", remediation, scope.user_id)
+        arguments = {
             "namespace": remediation.target_namespace,
             "workload": remediation.target_workload,
-            "kind": kind,
-            # Never the LLM/batch-executor value — always the record's own key.
+            "kind": remediation.target_kind.lower(),
             "idempotency_key": remediation.idempotency_key,
+            "operation_id": remediation.actuator_operation_id,
+            "payload_digest": remediation.actuator_payload_digest,
+            "target_uid": remediation.actuator_target_uid,
+            **remediation.params,
         }
-        if remediation.action == PatrolRemediationAction.SCALE_WORKLOAD:
-            action_args["replicas"] = remediation.params.get("replicas")
-
         try:
-            # 3b. Live drift check: compare the Actuator's *current* capability
-            # hash against the baseline persisted before approval (3a). This is
-            # the check that actually spans the approval time window — the
-            # baseline was captured at session-construction time (pre-approval),
-            # this read happens post-approval, immediately before the write —
-            # so a schema change made *during* human review is caught here.
-            live = await self._actuator_client.get_capabilities(
-                server,
-                policy=policy,
-            )
-            live_hash = str(live.get("overall_capability_hash") or "")
-            if not live_hash or live_hash != baseline_hash:
-                async with self._uow_factory() as uow:
-                    remediation.status = PatrolRemediationStatus.FAILED
-                    remediation.error_code = "CAPABILITY_DRIFT"
-                    remediation.error_message = f"Actuator capability hash drifted since baseline: baseline={baseline_hash} live={live_hash or '<empty>'}"
-                    # actuator_capability_hash itself is left untouched — it
-                    # stays the historical, pre-approval baseline for audit;
-                    # the observed drifted value lives in error_message only.
-                    await uow.patrol.save_remediation(remediation)
-                    await uow.commit()
-                self._governance_metrics.record_remediation_transition(remediation.status.value)
-                await self._audit(
-                    "patrol_remediation_capability_drift",
-                    remediation,
-                    scope.user_id,
-                    {"baseline": baseline_hash, "live": live_hash},
-                )
-                raise ConflictError(
-                    "Actuator capability 已漂移，拒绝执行",
-                    error_key="apiErrors.patrolRemediation.capabilityDrift",
-                )
-
-            live_mode = await self._remediation_mode()
-            if live_mode is not PatrolRemediationMode.ENABLED:
-                remediation.status = PatrolRemediationStatus.FAILED
-                remediation.error_code = "POLICY_DENIED"
-                remediation.error_message = "Current Operations Policy denied remediation"
-                async with self._uow_factory() as uow:
-                    await uow.patrol.save_remediation(remediation)
-                    await uow.commit()
-                self._governance_metrics.record_remediation_transition(remediation.status.value)
-                await self._audit(
-                    "patrol_remediation_policy_denied",
-                    remediation,
-                    scope.user_id,
-                    {"mode": live_mode.value},
-                )
-                raise BadRequestError(
-                    "Ops Patrol Remediation execution is disabled",
-                    error_key="apiErrors.patrolRemediation.executionDisabled",
-                )
-
             envelope = await self._actuator_client.execute_action(
                 server,
                 remediation.action.value,
-                action_args,
+                arguments,
                 policy=policy,
             )
-        except (BadRequestError, ConflictError):
-            raise
-        except (OSError, RuntimeError, ValueError) as exc:
-            async with self._uow_factory() as uow:
-                remediation.status = PatrolRemediationStatus.FAILED
-                remediation.error_code = "ACTUATOR_UNREACHABLE"
-                remediation.error_message = str(exc)[:2000]
-                await uow.patrol.save_remediation(remediation)
-                await uow.commit()
-            self._governance_metrics.record_remediation_transition(remediation.status.value)
-            await self._audit(
-                "patrol_remediation_executed",
-                remediation,
-                scope.user_id,
-                {"outcome": "actuator_unreachable"},
+        except Exception:  # noqa: BLE001 - every post-send failure leaves the effect unresolved.
+            return await self._record_operation_result(
+                remediation, scope, None, "ACTUATOR_OUTCOME_UNKNOWN", persist=persist_outcome
             )
-            raise
-
-        # 5. Record before/after + outcome; status -> EXECUTED / FAILED.
-        # actuator_capability_hash is intentionally left as the pre-approval
-        # baseline (live_hash == baseline_hash on this path anyway, since the
-        # drift check above already required equality to reach here).
-        remediation.before_observation = envelope.get("before")
-        remediation.after_observation = envelope.get("after")
-        outcome = envelope.get("action_outcome")
-        if outcome == "failed":
-            remediation.status = PatrolRemediationStatus.FAILED
-            remediation.error_code = envelope.get("error_code") or "ACTUATOR_FAILED"
-            remediation.error_message = envelope.get("error_message")
-        else:
-            remediation.status = PatrolRemediationStatus.EXECUTED
-        async with self._uow_factory() as uow:
-            await uow.patrol.save_remediation(remediation)
-            await uow.commit()
-        self._governance_metrics.record_remediation_transition(remediation.status.value)
-        await self._audit(
-            "patrol_remediation_executed",
-            remediation,
-            scope.user_id,
-            {"outcome": outcome},
+        return await self._record_operation_result(
+            remediation, scope, envelope, persist=persist_outcome
         )
 
-        # 6. EXECUTED -> auto-dispatch a recheck Patrol run so finalize_run can
-        # close the loop (resolve the Finding + mark the remediation VERIFIED,
-        # or FAILED(recheck_failed) if the check still doesn't pass).
-        remediation = await self._ensure_recheck(remediation, scope)
+    async def resolve_operation(
+        self,
+        remediation_id: str,
+        scope: OwnerScope,
+        *,
+        policy: ActivityExecutionPolicy,
+        persist_outcome: bool = True,
+    ) -> dict:
+        """Trusted provider query used by recovery; never calls a write tool.
 
-        return remediation.model_dump(mode="json")
+        Returns the original operation identity and verified provider receipt for
+        the formal EffectStore adapter. It does not settle physical usage holds.
+        """
+        remediation = await self.get(remediation_id, scope)
+        if remediation.error_code == "ACTUATOR_EVIDENCE_CONFLICT" or remediation.status not in {
+            PatrolRemediationStatus.EXECUTING,
+            PatrolRemediationStatus.UNKNOWN,
+        }:
+            return remediation.model_dump(mode="json")
+        if not _valid_operation_identity(remediation):
+            return await self._record_operation_result(
+                remediation, scope, None, "OPERATION_IDENTITY_MISSING", persist=persist_outcome
+            )
+        async with self._uow_factory() as uow:
+            server = await uow.mcp_server.get_by_name(ACTUATOR_MCP_SERVER_NAME)
+        try:
+            if server is None or not server.enabled:
+                raise ValueError("Actuator unavailable")
+            live = await self._actuator_client.get_capabilities(server, policy=policy)
+            _require_effect_capabilities(
+                live, remediation.action.value, remediation.actuator_target_ref
+            )
+            if live.get("overall_capability_hash") != remediation.actuator_capability_hash:
+                raise ValueError("Actuator contract changed")
+            envelope = await self._actuator_client.get_operation(
+                server,
+                remediation.actuator_operation_id,
+                policy=policy,
+            )
+        except Exception:  # noqa: BLE001 - resolution failure never proves not_applied.
+            return await self._record_operation_result(
+                remediation, scope, None, "ACTUATOR_RESOLVE_UNAVAILABLE", persist=persist_outcome
+            )
+        return await self._record_operation_result(
+            remediation, scope, envelope, persist=persist_outcome
+        )
+
+    async def _reject_unsent(self, remediation, scope, code):
+        async with self._uow_factory() as uow:
+            current = await uow.patrol.get_remediation(remediation.id, scope, for_update=True)
+            if current is None or current.status != PatrolRemediationStatus.PROPOSED:
+                return
+            current.status = PatrolRemediationStatus.FAILED
+            current.error_code = code
+            current.error_message = code
+            await uow.patrol.save_remediation(current)
+            await uow.commit()
+        self._governance_metrics.record_remediation_transition("failed")
+        await self._audit(
+            "patrol_remediation_rejected_before_send", current, scope.user_id, {"reason": code}
+        )
+
+    async def _record_operation_result(
+        self, remediation, scope, envelope, error_code=None, *, persist=True
+    ):
+        receipt = None
+        state = "unknown"
+        try:
+            if envelope is not None:
+                state, receipt = _verified_operation_receipt(remediation, envelope)
+        except (TypeError, ValueError, KeyError):
+            error_code = "ACTUATOR_RECEIPT_INVALID"
+        # Applied without result material remains explicitly unresolved for the
+        # Activity; root's result-supply protocol may later complete it once.
+        missing_result = state == "applied" and not isinstance(receipt.get("after"), dict)
+        if missing_result:
+            error_code = "ACTUATOR_RESULT_MATERIAL_MISSING"
+        if not persist:
+            observed = remediation.model_copy(deep=True)
+            observed.actuator_receipt = receipt
+            observed.before_observation = receipt.get("before") if receipt else None
+            observed.after_observation = receipt.get("after") if receipt else None
+            observed.status = (
+                PatrolRemediationStatus.EXECUTED
+                if state == "applied" and not missing_result
+                else PatrolRemediationStatus.FAILED
+                if state == "not_applied"
+                else PatrolRemediationStatus.UNKNOWN
+            )
+            observed.error_code = error_code
+            return observed.model_dump(mode="json")
+        async with self._uow_factory() as uow:
+            current = await uow.patrol.get_remediation(remediation.id, scope, for_update=True)
+            if current is None:
+                raise NotFoundError("Remediation not found")
+            if current.error_code == "ACTUATOR_EVIDENCE_CONFLICT" or current.status not in {
+                PatrolRemediationStatus.EXECUTING,
+                PatrolRemediationStatus.UNKNOWN,
+            }:
+                return current.model_dump(mode="json")
+            if receipt is not None:
+                current.actuator_receipt = receipt
+                current.before_observation = receipt.get("before")
+                current.after_observation = receipt.get("after")
+            if state == "applied" and not missing_result:
+                current.status = PatrolRemediationStatus.EXECUTED
+                current.error_code = current.error_message = None
+            elif state == "not_applied":
+                current.status = PatrolRemediationStatus.FAILED
+                current.error_code = receipt.get("error_code") or "ACTUATOR_NOT_APPLIED"
+                current.error_message = current.error_code
+            else:
+                current.status = PatrolRemediationStatus.UNKNOWN
+                current.error_code = error_code or "ACTUATOR_OUTCOME_UNKNOWN"
+                current.error_message = "Original provider operation remains unresolved; query its receipt before any new action."
+            await uow.patrol.save_remediation(current)
+            await uow.commit()
+        self._governance_metrics.record_remediation_transition(current.status.value)
+        await self._audit(
+            "patrol_remediation_operation_observed",
+            current,
+            scope.user_id,
+            {"operation_id": current.actuator_operation_id, "provider_state": state},
+        )
+        if current.status == PatrolRemediationStatus.EXECUTED:
+            current = await self._ensure_recheck(current, scope)
+        return current.model_dump(mode="json")
+
+    async def apply_effect_fact(self, remediation_id, scope, *, state, result, receipt):
+        """Project a committed Run effect fact. This cannot create operation authority."""
+        async with self._uow_factory() as uow:
+            current = await uow.patrol.get_remediation(remediation_id, scope, for_update=True)
+            if current is None or current.status == PatrolRemediationStatus.CANCELLED:
+                return
+            quarantined = (
+                state == "integrity_conflict" or current.error_code == "ACTUATOR_EVIDENCE_CONFLICT"
+            )
+            if current.status == PatrolRemediationStatus.VERIFIED and not quarantined:
+                return
+            if quarantined:
+                current.status = PatrolRemediationStatus.UNKNOWN
+                current.error_code = "ACTUATOR_EVIDENCE_CONFLICT"
+                current.error_message = "Contradictory external receipts require evidence review"
+            elif state == "applied" and result is not None:
+                current.status = PatrolRemediationStatus.EXECUTED
+                current.after_observation = result.get("after_observation")
+                current.error_code = current.error_message = None
+            elif state == "not_applied":
+                current.status = PatrolRemediationStatus.FAILED
+                current.error_code = "ACTUATOR_NOT_APPLIED"
+                current.error_message = "External operation verified not applied"
+            else:
+                current.status = PatrolRemediationStatus.UNKNOWN
+                current.error_code = (
+                    "ACTUATOR_RESULT_MATERIAL_MISSING"
+                    if state == "applied"
+                    else "ACTUATOR_OUTCOME_UNKNOWN"
+                )
+            if receipt is not None and not quarantined:
+                current.actuator_receipt = receipt
+            await uow.patrol.save_remediation(current)
+            await uow.commit()
+        if current.status == PatrolRemediationStatus.EXECUTED:
+            await self._ensure_recheck(current, scope)
 
     async def retry_recheck(self, remediation_id: str, scope: OwnerScope) -> PatrolRemediation:
         remediation = await self.get(remediation_id, scope)
@@ -724,31 +891,7 @@ class PatrolRemediationService:
         return current
 
     async def cancel_if_pending(self, session_id: str) -> None:
-        """Best-effort cleanup when a Remediation session ends without ever
-        reaching a terminal state on its own.
-
-        Two cases, both of which would otherwise leave a Finding permanently
-        blocked (get_active_remediation_for_finding — and the DB partial
-        unique index behind it — treat PROPOSED/EXECUTING/EXECUTED as
-        in-flight, so a stuck row blocks any new proposal forever):
-
-        1. PROPOSED -> CANCELLED: approval rejected, session cancelled/failed,
-           or worker crash before the tool call ever ran.
-        2. EXECUTING -> FAILED(session_terminated_mid_execution): the worker
-           process died *during* execute() — after it flipped the row to
-           EXECUTING (see execute() step 3a/EXECUTING transition) but before
-           it could record an outcome. execute() only ever holds the
-           for_update row lock for the PROPOSED->EXECUTING transition itself
-           (it releases the lock before the actual Actuator network call), so
-           this cannot fully serialize against a still-running execute() —
-           but it reuses the same for_update-then-recheck-status pattern
-           execute() uses, which is what prevents this method from clobbering
-           a row that has *already* reached EXECUTED/FAILED by the time this
-           runs (those statuses fall through to the no-op branch below).
-
-        Mirrors PatrolRunService.mark_run_failed's role for
-        `on_session_terminal`.
-        """
+        """Cancellation stops waiting; it never proves an in-flight effect failed."""
         async with self._uow_factory() as uow:
             located = await uow.patrol.get_remediation_by_session_id(session_id)
             if located is None:
@@ -760,11 +903,11 @@ class PatrolRemediationService:
                 remediation.status = PatrolRemediationStatus.CANCELLED
                 remediation.error_code = "SESSION_TERMINATED"
             elif remediation.status == PatrolRemediationStatus.EXECUTING:
-                remediation.status = PatrolRemediationStatus.FAILED
+                remediation.status = PatrolRemediationStatus.UNKNOWN
                 remediation.error_code = "session_terminated_mid_execution"
                 remediation.error_message = (
                     "Session terminated while the Actuator call was in flight; "
-                    "outcome unknown. Verify the workload's actual state before re-proposing."
+                    "outcome unknown. Resolve the original provider operation before any new action."
                 )
             else:
                 return

@@ -54,7 +54,7 @@ spec:
             - name: OPS_COLLECTOR_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "opencitadel.fullname" . }}-ops-collector-secret
+                  name: {{ include "opencitadel.secretName" (dict "root" . "group" "opsCollector") }}
                   key: OPS_COLLECTOR_TOKEN
           readinessProbe:
             tcpSocket: {port: mcp}

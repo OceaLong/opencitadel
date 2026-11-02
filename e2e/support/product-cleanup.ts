@@ -5,6 +5,11 @@ import type { Page } from "@playwright/test";
 
 import { appApi } from "./api";
 import type { CleanupAction } from "./cleanup-journal";
+import {
+  validatePublishedTeamRetention,
+  verifyPublishedTeamRetention,
+  type PublishedTeamRetention,
+} from "./published-team-retention";
 
 type ProductResource = Extract<
   CleanupAction,
@@ -39,6 +44,7 @@ const RESOURCE_PATHS = {
   "inference-model": "/inference/models",
   "inference-binding": "/inference/bindings",
   memory: "/memories",
+  skill: "/skills",
   "evaluation-dataset": "/evaluation/datasets",
   "evaluation-config": "/evaluation/configs",
   "evaluation-rubric": "/evaluation/rubrics",
@@ -105,6 +111,7 @@ export async function cleanupProductResource(
     retainedRevision?: number;
     retainedAccounting?: boolean;
     expectedUnknownRetention?: true;
+    expectedTeamRetention?: PublishedTeamRetention;
     createdAt?: string;
     workspaceId?: string;
     expectedRetention?: {
@@ -113,6 +120,15 @@ export async function cleanupProductResource(
     };
   } = {},
 ): Promise<void> {
+  if (options.expectedTeamRetention) {
+    if (resource !== "team" || options.workspaceId !== undefined)
+      throw new Error("published retention requires an exact owned team");
+    validatePublishedTeamRetention(
+      options.expectedTeamRetention,
+      resourceId,
+      process.env.ACCEPTANCE_RUN_ID ?? "",
+    );
+  }
   if (
     options.expectedUnknownRetention !== undefined &&
     (resource !== "evaluation-batch" ||
@@ -498,12 +514,54 @@ export async function cleanupProductResource(
       });
     }
   }
-  const removed = await appApi(page, resourcePath, {
+  const removed = await appApi<{
+    resource_kind?: string;
+    resource_id?: string;
+  }>(page, resourcePath, {
     method: "DELETE",
     headers: scopedHeaders,
     expectStatus: resource === "team" ? [200, 404, 409, 500] : [200, 404],
   });
+  if (options.expectedTeamRetention && [200, 404].includes(removed.status))
+    throw new Error(
+      "expected permanent team history is unavailable; obligation pending",
+    );
   if (resource === "team" && [409, 500].includes(removed.status)) {
+    if (
+      removed.status === 409 &&
+      removed.errorKey === "resource_pinned" &&
+      removed.data?.resource_kind === "team" &&
+      removed.data?.resource_id === resourceId &&
+      options.expectedTeamRetention
+    ) {
+      const evidence = await verifyPublishedTeamRetention(
+        page,
+        options.expectedTeamRetention,
+      );
+      if (!process.env.ACCEPTANCE_EVIDENCE_DIR)
+        throw new Error("retention evidence directory required");
+      const directory = resolve(
+        process.env.ACCEPTANCE_EVIDENCE_DIR,
+        "retained-resources",
+      );
+      mkdirSync(directory, { recursive: true });
+      const identity = createHash("sha256")
+        .update(
+          JSON.stringify([
+            "retained-published-history",
+            process.env.ACCEPTANCE_RUN_ID,
+            resourceId,
+          ]),
+        )
+        .digest("hex");
+      const path = resolve(directory, `${identity}.json`);
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, JSON.stringify(evidence, null, 2), {
+        mode: 0o600,
+      });
+      renameSync(temporary, path);
+      return;
+    }
     const observed = await appApi<{ id: string }>(page, resourcePath, {
       headers: scopedHeaders,
     });

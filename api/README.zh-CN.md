@@ -14,6 +14,10 @@ Redis 仅是可丢失的唤醒通道。
 API 不执行 Agent 或摄取步骤。执行内核轮询 PostgreSQL 中的持久工作，也可等待
 Redis 提示。删除 Redis 不会删除已接受的 Command、Activity、Timer、Event 或结果。
 
+Migration 在新数据库中初始化知识库文本提取和关键词检索；向量检索、重排、GraphRAG 与
+OCR 初始关闭，后续通过可选模型与 Execution Policy 字段开启。升级保留已有策略 Head、
+Revision 和 Run Snapshot。详见[知识库摄取](../docs/architecture/knowledge-base-ingestion.zh-CN.md)。
+
 ## 技术栈
 
 - Python 3.12、FastAPI、Pydantic 2
@@ -89,7 +93,22 @@ post-commit 阶段作为提示发生。
 
 数据库测试需要全新 schema 的独立角色与 PostgreSQL/Redis。缺失依赖时普通测试可跳过部分集成项；`make test-api-strict` 强制验证依赖，不能用跳过结果证明集成通过。部署步骤见[部署指南](../docs/operations/deployment.zh-CN.md)。
 
+Runtime Policy 种子测试只需要 PostgreSQL。将 `SQLALCHEMY_DATABASE_URI` 指向应用角色，
+`SQLALCHEMY_MIGRATION_DATABASE_URI` 指向迁移角色，目标必须是可清空的独立测试数据库：
+fixture 会执行完整 `upgrade head` 并清空策略表。数据库授权使用
+`DATABASE_AUTHORIZATION_SIGNING_SECRET`，它可以与 `SESSION_SECRET` 不同。
+以下命令要求真实数据库验证，连接失败时不会跳过：
+
+```bash
+ENV=test OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 uv run pytest -q tests/app/test_migrate_runtime_policy_seed.py
+```
+
 CI 与这两个 Make 入口只排除 `test_execution_visualization_closed_loop.py`；它的六项当次验收消费者由[验收 Runner](../e2e/README.zh-CN.md)在原生 strict 报告与恢复回执校验后执行，要求零跳过。
+
+完整本地服务栈在仓库根目录运行 `make quickstart`，自动生成持久凭据并使用 Compose
+服务默认值。可选覆盖分类见
+[`deploy/config/.env.reference`](../deploy/config/.env.reference)。在宿主直接运行 API
+时需要可访问的宿主数据库/Redis/存储端点；Docker 内部服务名只由 Compose 推导。
 
 ## 本地开发
 
@@ -100,7 +119,8 @@ uv run lint-imports
 uv run ruff check --config ../ruff.toml . ../ops-actuator ../ops-collector ../sandbox ../scripts ../demo
 ```
 
-配置 `.env` 与 PostgreSQL 后，在不同终端运行：
+宿主开发在进程环境变量（或 `api/.env`）中配置可访问的 PostgreSQL/Redis/存储端点，
+然后在不同终端运行；根目录的 Compose `.env` 由 Compose 传入容器：
 
 ```bash
 uv run ./migrate.sh
@@ -108,7 +128,31 @@ uv run ./run.sh
 uv run ./execution-kernel.sh
 ```
 
-Alembic 使用从 `0001greenfield` 到 `0030evaluation_judge_history` 的单一线性谱系，新库执行完整 `upgrade head`。这不是旧生产版本的数据升级契约；不存在历史数据转换命令或备用执行 schema。
+Alembic 使用从 `0001greenfield` 到 `0045execution_object_retention` 的单一线性谱系，新库执行完整 `upgrade head`。这不是旧生产版本的数据升级契约；不存在历史数据转换命令或备用执行 schema。
+
+## 外部操作结果待核验
+
+Worker 先保留本地执行 slot，再领取任务。调用开始、内容保存和结算以 PostgreSQL
+时钟、Worker 身份和 claim generation 验证权限；续租不会延长业务 deadline。
+审批绑定选中工具契约、最终参数、目标和授权。漂移在发送前停止；工作台可以在同一
+Run 内刷新未发送的意图并请求新审批，旧审批不能授权替换后的意图。
+
+外部写操作结果不确定时等待核验，operation 与 key 跨 Worker 恢复保持不变。
+工作台按 Provider 实际能力提供查询原操作、核验历史、基于关联证据的人工结算、
+补结果材料和放弃等待。查询不会重发原写操作；效果已应用但完整结果不符合冻结
+schema 时继续等待材料。Run 取消后仍保留晚到的外部事实，且不会复活 Run。
+业务核验不会清空未知物理 usage 或预算 hold。
+
+API 位于 `/api/execution-runs/{run_id}/effects`：list、operation detail、
+`/{operation_id}/queries`、`/{operation_id}/resolutions`、`/{operation_id}/abandon` 和
+`/{operation_id}/requests/{request_id}`。写请求要求 `Idempotency-Key` 和
+`expected_revision`；人工结算还要求完整关联证据与 attestation。
+scope、角色和撤权在受理与异步消费时分别复验。
+
+KB 与 memory 向量保留 embedding-space descriptor，不能仅凭 model ID 或相同维度
+混合空间。查询及缓存命中仍检查冻结 descriptor 与当前权限；credential 和价格变更
+不改变空间。严格不可变 revision 策略拒绝 Adapter 无法验证的 alias。
+未标明空间的旧向量需要重建。
 
 ## 容器
 
@@ -122,3 +166,21 @@ Helm 使用相同的 API/Kernel 分离与独立凭据。
 
 - [执行分析、比较与导出](../docs/architecture/execution-analysis.zh-CN.md)
 - [评测控制面](../docs/architecture/evaluation-control-plane.zh-CN.md)
+
+### 私有执行对象保留
+
+内核在上传私有输入、结果、来源分片和上下文文档前，使用独立有界连接池持久登记对象。
+发布与回收共用 Scope Append Lock。外部 DELETE 开始前先提交不可逆删除墓碑，阻止后续
+上传、读取和新 Pin。
+
+`EXECUTION_OBJECT_RETENTION_DAYS` 默认从最后正式事实起保留 30 天；未发布上传有
+24 小时宽限期（`EXECUTION_OBJECT_ORPHAN_HOURS`）。活跃执行、审批、未决外部操作
+（包括 abandoned/unknown）、保留的 Session（含回收站）、待处理录制、可用内容 Pin 和
+保留的评测证据优先于年龄。Session 摘要及父子 Run 保留整个相连原文集合。无法验证或过大
+的闭包继续保留，其他执行 Family 沿用既有策略。每次维护最多检查 10 个 Run，删除
+`EXECUTION_OBJECT_GC_BATCH_SIZE` 个对象（默认 100）。删除失败一分钟后重试，墓碑一小时
+后重扫以删除失联 Worker 的迟到上传。保留检查失败不删除原文，并轮转检查其他 Run。
+此回收器不删除正式事件和审计证据。
+
+迁移 `0045execution_object_retention` 创建生命周期表。API 只有窄授权签名 Scope 函数，
+直接写入生命周期表的权限归 Kernel。本开发基线要求重建旧未登记执行对象，不猜测其归属。

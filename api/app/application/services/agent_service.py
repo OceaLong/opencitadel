@@ -11,16 +11,19 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from app.application.execution.admission import RunAdmissionService
 from app.application.execution.command_ingress import CommandIngress
+from app.application.execution.decisions.context import context_enabled
 from app.application.execution.public_projection import (
     PublicEventPage,
     PublicExecutionEvent,
 )
 from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
 from app.application.ports.streams import WakeupBroadcastPort
+from app.domain.errors import ConflictError, ForbiddenError
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.run import RunFamily
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.file import File
-from app.domain.models.scope import OwnerScope
+from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.session_mode import SessionMode
 from app.domain.repositories.uow import IUnitOfWork
 
@@ -60,6 +63,7 @@ class AgentService:
         poll_interval_seconds: float = 0.2,
         idle_timeout_seconds: float = 120.0,
         fallback_poll_seconds: float = 30.0,
+        context_sources_factory=None,
     ) -> None:
         if poll_interval_seconds <= 0 or idle_timeout_seconds <= 0:
             raise ValueError("poll and idle timeouts must be positive")
@@ -77,6 +81,7 @@ class AgentService:
         self._poll_interval = poll_interval_seconds
         self._idle_timeout = idle_timeout_seconds
         self._fallback_poll = fallback_poll_seconds
+        self._context_sources_factory = context_sources_factory
 
     async def chat(
         self,
@@ -126,8 +131,6 @@ class AgentService:
         if effective_model_id is None and skill is not None:
             effective_model_id = skill.recommended_model_id
         resolved_mode = mode or session.mode
-        if attachment_files and resolved_mode == SessionMode.ASK:
-            raise ValueError("temporary attachments require agent mode")
         private_attachments = [_private_attachment(file) for file in attachment_files]
         public_attachments = [_public_attachment(file) for file in attachment_files]
         resource_bindings = [
@@ -145,7 +148,7 @@ class AgentService:
                 limit=1,
             )
             cursor = current.events[-1].cursor if current.events else None
-        if message is not None:
+        if message is not None and self._context_sources_factory is None:
             history = await self.list_events(
                 session_id,
                 owner_scope=owner_scope,
@@ -177,6 +180,24 @@ class AgentService:
                         raise ValueError("session already has an active Run")
                     admitted_run_id = locked_session.active_execution_run_id
                 else:
+
+                    async def context_input(payload, definition):
+                        sources = self._context_sources_factory(uow)
+                        payload = dict(payload)
+                        payload.pop("_context_boundary", None)
+                        if context_enabled(definition):
+                            cut = await sources.freeze(
+                                owner_scope, session_id, request_id=request_id
+                            )
+                            payload.update(
+                                conversation=[], _context_boundary=cut.model_dump(mode="json")
+                            )
+                        else:
+                            payload["conversation"] = await sources.legacy_conversation(
+                                owner_scope, session_id
+                            )
+                        return payload
+
                     if model_id is not None:
                         locked_session.model_id = model_id or None
                     if skill_id is not None:
@@ -228,6 +249,11 @@ class AgentService:
                         idempotency_key=idempotency_key,
                         command_sink=uow.execution_commands,
                         inference_read_context=uow,
+                        **(
+                            {"input_adapter": context_input}
+                            if self._context_sources_factory is not None
+                            else {}
+                        ),
                     )
                     locked_session.attach_run(admitted_run_id, request_id)
                     await uow.session.save(locked_session)
@@ -372,6 +398,10 @@ class AgentService:
         )
         if run_id is None:
             raise ValueError("pending approval does not exist")
+        async with self._uow_factory() as uow:
+            subject_digest = await uow.execution_usage.approval_subject(
+                owner_scope, run_id, approval_id
+            )
         owner_user_id, team_id = self._scope_parts(owner_scope)
         await self._commands.submit(
             RegisteredCommand(
@@ -380,6 +410,7 @@ class AgentService:
                     f"opencitadel:approval:{approval_id}:{decision}",
                 ),
                 command_type="DecideApproval",
+                command_schema_version=2,
                 run_id=run_id,
                 expected_stream_version=None,
                 payload={
@@ -387,6 +418,7 @@ class AgentService:
                     "decision": decision,
                     "actor_user_id": actor_user_id,
                     "feedback": feedback,
+                    "expected_subject_digest": subject_digest,
                 },
             ),
             CommandContext(
@@ -398,6 +430,76 @@ class AgentService:
             ),
         )
         return run_id
+
+    async def refresh_tool_intent(
+        self,
+        *,
+        run_id,
+        activity_id,
+        owner_scope: OwnerScope,
+        principal: Principal,
+        expected_subject_digest,
+        reason,
+        idempotency_key,
+    ):
+        if principal.is_auditor:
+            raise ForbiddenError()
+        refresh_id = uuid5(
+            NAMESPACE_URL,
+            f"opencitadel:tool-intent-refresh:{owner_scope.team_id or owner_scope.user_id}:{run_id}:{idempotency_key}",
+        )
+        owner_user_id, team_id = self._scope_parts(owner_scope)
+        auth = AuthorizationContext.for_principal(principal, scope=owner_scope)
+        async with self._uow_factory(auth) as uow:
+            try:
+                await uow.execution_usage.authorize_principal(owner_scope, principal, lock=True)
+                # Renewal cannot silently replace the Run's signed requester.
+                await uow.execution_usage.invocation_authority(owner_scope, run_id, lock=True)
+            except PermissionError as error:
+                raise ForbiddenError("Current Run authorization is no longer valid") from error
+            await uow.execution_usage.tool_intent_refresh_target(
+                owner_scope, run_id, activity_id, expected_subject_digest
+            )
+            try:
+                await self._commands.submit(
+                    RegisteredCommand(
+                        command_id=refresh_id,
+                        command_type="RefreshToolIntent",
+                        run_id=run_id,
+                        expected_stream_version=None,
+                        payload={
+                            "refresh_id": str(refresh_id),
+                            "activity_id": str(activity_id),
+                            "expected_subject_digest": expected_subject_digest,
+                            "actor_user_id": principal.user_id,
+                            "reason": reason,
+                        },
+                    ),
+                    CommandContext(
+                        owner_user_id=owner_user_id,
+                        team_id=team_id,
+                        correlation_id=run_id,
+                        causation_id=None,
+                        issued_at=datetime.now(UTC),
+                    ),
+                    sink=uow.execution_commands,
+                )
+            except ValueError as error:
+                raise ConflictError(
+                    "Refresh request identity was reused with a different intent"
+                ) from error
+            await uow.commit()
+        return {"command_id": refresh_id, "status": "pending"}
+
+    async def tool_intent_refresh_status(
+        self, *, run_id, activity_id, command_id, owner_scope, principal
+    ):
+        async with self._uow_factory(
+            AuthorizationContext.for_principal(principal, scope=owner_scope)
+        ) as uow:
+            return await uow.execution_usage.tool_intent_refresh_status(
+                owner_scope, run_id, activity_id, command_id
+            )
 
     async def shutdown(self) -> None:
         """The API facade owns no background tasks or Redis resources."""

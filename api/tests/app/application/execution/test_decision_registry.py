@@ -17,6 +17,7 @@ from app.application.execution.activities import (
     RemediationActivityHandler,
     RetrievalActivityHandler,
     ToolCallActivityHandler,
+    ToolIntentRefreshActivityHandler,
 )
 from app.application.execution.decisions import (
     DECISION_PLANNERS,
@@ -37,6 +38,7 @@ _ALL_HANDLER_TYPES = {
         RemediationActivityHandler,
         RetrievalActivityHandler,
         ToolCallActivityHandler,
+        ToolIntentRefreshActivityHandler,
     )
 }
 

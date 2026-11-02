@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from tests.app.alembic.test_execution_view_migration import isolated_database
 from tests.app.application.services.test_execution_usage_postgres import fresh_f07_database
+from tests.app.execution_test_support import dispatched_activity_timeout, with_current_test_claim
 from tests.app.infrastructure.repositories.test_evaluation_budget_binding import (
     budget_binding_fixture,
 )
@@ -134,7 +135,7 @@ async def scheduled_batch(budget_binding_fixture, *, preflights=None):
             return pair.execution
 
     class Objects:
-        async def put_input(self, run, body):
+        async def put_input(self, run, body, **_ownership):
             from app.domain.evaluation.configuration import digest
 
             return f"test/{run}/input", digest(body)
@@ -171,7 +172,9 @@ async def scheduled_batch(budget_binding_fixture, *, preflights=None):
     return service, scheduler, batch
 
 
-async def test_scheduler_enqueue_is_not_acceptance_and_early_cancel_waits(budget_binding_fixture):
+async def test_scheduler_enqueue_is_not_acceptance_and_early_cancel_waits(
+    budget_binding_fixture, monkeypatch
+):
     from app.domain.models.authorization import AuthorizationContext
     from app.infrastructure.repositories.db_evaluation_batch_repository import (
         DBEvaluationBatchRepository,
@@ -179,6 +182,15 @@ async def test_scheduler_enqueue_is_not_acceptance_and_early_cancel_waits(budget
 
     _suites, scope, principal, _suite, _config, _pair, factory = budget_binding_fixture
     service, scheduler, batch = await scheduled_batch(budget_binding_fixture)
+    dispatch = scheduler._dispatch
+
+    async def checked_dispatch(*args):
+        try:
+            return await dispatch(*args)
+        except (ValueError, PermissionError) as error:
+            pytest.fail(f"unexpected admission rejection: {error}")
+
+    monkeypatch.setattr(scheduler, "_dispatch", checked_dispatch)
     tick = await scheduler.tick(datetime.now(UTC))
     assert tick.claimed == 1
     assert tick.dispatched == 1
@@ -381,6 +393,7 @@ async def test_accepted_cancel_and_late_rejection_never_revive_batch(budget_bind
         update={
             "command_id": uuid4(),
             "command_type": "CompleteRun",
+            "command_schema_version": 1,
             "expected_stream_version": None,
             "payload": {},
         }
@@ -413,6 +426,7 @@ async def test_unknown_effect_is_recorded_and_not_eligible_for_manual_retry(budg
                 update={
                     "command_id": uuid4(),
                     "command_type": "StartRun",
+                    "command_schema_version": 1,
                     "expected_stream_version": None,
                     "payload": {},
                 }
@@ -423,6 +437,7 @@ async def test_unknown_effect_is_recorded_and_not_eligible_for_manual_retry(budg
         update={
             "command_id": uuid4(),
             "command_type": "FailRun",
+            "command_schema_version": 1,
             "expected_stream_version": None,
             "payload": {"failure_code": "NON_IDEMPOTENT_OUTCOME_UNKNOWN"},
         }
@@ -798,12 +813,8 @@ async def test_safe_pre_call_timeout_creates_linked_bounded_replacement(
                 2,
             )
         ).status == "accepted"
-        assert (
-            await command(
-                "FailActivity",
-                {"activity_id": str(activity), "generation": 0, "failure_code": "ACTIVITY_TIMEOUT"},
-            )
-        ).status == "accepted"
+        timeout = await dispatched_activity_timeout(handler, activity)
+        assert (await handler.handle(timeout)).status == "accepted"
         assert (
             await command("FailRun", {"failure_code": "ACTIVITY_TIMEOUT", "retryable": False})
         ).status == "accepted"
@@ -937,9 +948,12 @@ async def test_safe_pre_call_timeout_creates_linked_bounded_replacement(
 async def test_timer_after_real_call_start_redirects_to_durable_unknown(
     budget_binding_fixture, kind, idempotent, started, redirected, boundary
 ):
+    import asyncio
+
     from app.application.execution.activity_registry import ActivityRegistry
     from app.domain.execution.commands import CommandEnvelope
     from app.domain.models.authorization import AuthorizationContext
+    from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
     from app.infrastructure.execution.postgres_activity_timeout import PostgresActivityTimeoutGuard
     from app.infrastructure.repositories.db_evaluation_batch_repository import (
         DBEvaluationBatchRepository,
@@ -978,75 +992,91 @@ async def test_timer_after_real_call_start_redirects_to_durable_unknown(
 
     assert (await command("StartRun", {})).status == "accepted"
     activity = uuid4()
+    deadline = datetime.now(UTC) + timedelta(seconds=2)
     assert (
         await command(
             "RequestActivity",
             {
                 "activity_id": str(activity),
                 "activity_type": kind,
-                "timeout_at": datetime.now(UTC).isoformat(),
+                "timeout_at": deadline.isoformat(),
                 "input_ref": "test/input",
                 "input_digest": "a" * 64,
             },
             2,
         )
     ).status == "accepted"
+    auth = AuthorizationContext.system("execution-kernel")
+    store = PostgresActivityStore(
+        session_factory=handler._session_factory,
+        authorization=auth,
+        max_claim_attempts=1,
+    )
+    claim = (
+        await store.claim(
+            now=datetime.now(UTC),
+            limit=1,
+            worker_id="first-claim",
+            claim_ttl=timedelta(milliseconds=500)
+            if boundary == "deadletter"
+            else timedelta(seconds=5),
+        )
+    )[0]
     if started:
-        assert (
-            await command(
-                "MarkActivityCallStarted", {"activity_id": str(activity), "generation": 0}, 2
-            )
-        ).status == "accepted"
-    async with factory(AuthorizationContext.system("execution-kernel")) as work:
-        timer = (
-            await work.db_session.execute(
-                text(
-                    "SELECT command_envelope FROM execution_scheduled_commands WHERE cancellation_activity_id=:id"
-                ),
-                {"id": activity},
-            )
-        ).scalar_one()
-    timeout = CommandEnvelope.model_validate(timer)
+        assert await store.mark_call_started(claim, now=datetime.now(UTC))
+        started_command = create.model_copy(
+            update={
+                "command_id": uuid4(),
+                "command_type": "MarkActivityCallStarted",
+                "command_schema_version": 2,
+                "expected_stream_version": None,
+                "payload": {
+                    "activity_id": str(activity),
+                    "generation": 0,
+                    "claim_generation": claim.claim_generation,
+                },
+                "activity_lease_proof": claim.lease_proof,
+            }
+        )
+        assert (await handler.handle(started_command)).status == "accepted"
     if boundary == "deadletter":
-        from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
-
-        store = PostgresActivityStore(
-            session_factory=handler._session_factory,
-            authorization=AuthorizationContext.system("execution-kernel"),
-            max_claim_attempts=1,
-        )
-        assert (
-            len(
-                await store.claim(
-                    now=datetime.now(UTC),
-                    limit=1,
-                    worker_id="first-claim",
-                    claim_ttl=timedelta(seconds=1),
-                )
-            )
-            == 1
-        )
-        assert not await store.claim(
-            now=datetime.now(UTC) + timedelta(seconds=2),
+        await asyncio.sleep(0.55)
+        reclaimed = await store.claim(
+            now=datetime.now(UTC),
             limit=1,
             worker_id="cap-claim",
-            claim_ttl=timedelta(seconds=1),
+            claim_ttl=timedelta(seconds=5),
         )
-        async with factory(AuthorizationContext.system("execution-kernel")) as work:
-            row = (
+        if started:
+            # A claim cap is not proof that a possibly-sent call failed.
+            assert len(reclaimed) == 1
+            assert reclaimed[0].recovered_after_call_started
+            assert reclaimed[0].claim_generation == claim.claim_generation + 1
+        else:
+            assert not reclaimed
+        async with factory(auth) as work:
+            deadletter = (
                 (
                     await work.db_session.execute(
                         text(
-                            "SELECT * FROM execution_command_inbox WHERE command_type='FailActivity'"
+                            "SELECT * FROM execution_command_inbox WHERE command_type='FailActivity' "
+                            "AND payload->>'failure_code'='ACTIVITY_DEAD_LETTERED'"
                         )
                     )
                 )
                 .mappings()
-                .one()
+                .one_or_none()
             )
+        if started:
+            assert deadletter is None
+        else:
+            assert deadletter is not None
             timeout = CommandEnvelope.model_validate(
-                {k: row[k] for k in CommandEnvelope.model_fields if k in row}
+                {k: deadletter[k] for k in CommandEnvelope.model_fields if k in deadletter}
             )
+    if boundary == "timer" or started:
+        await asyncio.sleep(max(0, (deadline - datetime.now(UTC)).total_seconds()) + 0.05)
+        timeout = await dispatched_activity_timeout(handler, activity)
     assert (await handler.handle(timeout)).status == ("rejected" if redirected else "accepted")
     if not redirected:
         async with factory(AuthorizationContext.system("execution-kernel")) as work:
@@ -1332,6 +1362,10 @@ async def test_durable_timer_wins_against_actual_worker_unknown_outcome(
         registry=registry,
         worker_id="e06-real-worker",
         execution_gate=handler._evaluation_execution,
+        claim_ttl=timedelta(milliseconds=500)
+        if boundary == "deadletter"
+        else timedelta(seconds=30),
+        cancellation_grace_seconds=5,
     )
     worker_task = asyncio.create_task(worker.run_once(now=datetime.now(UTC), limit=1))
     try:
@@ -1340,69 +1374,38 @@ async def test_durable_timer_wins_against_actual_worker_unknown_outcome(
             release.set()
             assert (await worker_task).unknown == 1
         else:
-            await asyncio.sleep(1.1)
-            from app.infrastructure.adapters.execution_ports import SqlAlchemyTimerDispatcher
-
-            if boundary == "timer":
-                fired = await SqlAlchemyTimerDispatcher(
-                    session_factory=handler._session_factory, authorization=auth
-                ).fire_due(limit=10, now=datetime.now(UTC), claim_ttl=timedelta(seconds=30))
-                assert fired.fired == 1
+            await asyncio.sleep(1.6 if boundary == "deadletter" else 1.1)
+            reclaimed = await PostgresActivityStore(
+                session_factory=handler._session_factory,
+                authorization=auth,
+                max_claim_attempts=1,
+            ).claim(
+                now=datetime.now(UTC) + timedelta(minutes=2),
+                limit=1,
+                worker_id="deadletter-recovery",
+                claim_ttl=timedelta(seconds=30),
+            )
+            if boundary == "deadletter":
+                # The real expired lease is recovered without treating a
+                # possibly-sent call as a poison pill or sending it again.
+                assert len(reclaimed) == 1
+                assert reclaimed[0].recovered_after_call_started
+                assert reclaimed[0].claim_generation == 2
             else:
-                reclaimed = await PostgresActivityStore(
-                    session_factory=handler._session_factory,
-                    authorization=auth,
-                    max_claim_attempts=1,
-                ).claim(
-                    now=datetime.now(UTC) + timedelta(minutes=2),
-                    limit=1,
-                    worker_id="deadletter-recovery",
-                    claim_ttl=timedelta(seconds=30),
-                )
+                # Caller time cannot steal the current database-owned lease.
                 assert not reclaimed
-            async with factory(auth) as work:
-                timer = (
-                    (
-                        await work.db_session.execute(
-                            text(
-                                "SELECT * FROM execution_command_inbox WHERE command_type='FailActivity'"
-                            )
-                        )
-                    )
-                    .mappings()
-                    .one()
-                )
-                timeout = CommandEnvelope.model_validate(
-                    {k: timer[k] for k in CommandEnvelope.model_fields if k in timer}
-                )
+            timeout = await dispatched_activity_timeout(handler, activity)
             assert (await handler.handle(timeout)).status == "rejected"
-            if boundary == "timer":
-                await PostgresActivityStore(
-                    session_factory=handler._session_factory,
-                    authorization=auth,
-                    max_claim_attempts=1,
-                ).claim(
-                    now=datetime.now(UTC) + timedelta(minutes=2),
-                    limit=1,
-                    worker_id="concurrent-deadletter",
-                    claim_ttl=timedelta(seconds=30),
-                )
-                async with factory(auth) as work:
-                    other = (
-                        (
-                            await work.db_session.execute(
-                                text(
-                                    "SELECT * FROM execution_command_inbox WHERE command_type='FailActivity' AND payload->>'failure_code'='ACTIVITY_DEAD_LETTERED'"
-                                )
-                            )
+            async with factory(auth) as work:
+                assert (
+                    await work.db_session.scalar(
+                        text(
+                            "SELECT count(*) FROM execution_command_inbox WHERE command_type='FailActivity' "
+                            "AND payload->>'failure_code'='ACTIVITY_DEAD_LETTERED'"
                         )
-                        .mappings()
-                        .one()
                     )
-                    competing = CommandEnvelope.model_validate(
-                        {k: other[k] for k in CommandEnvelope.model_fields if k in other}
-                    )
-                assert (await handler.handle(competing)).status == "rejected"
+                    == 0
+                )
             async with factory(auth) as work:
                 unknown = (
                     (
@@ -1434,7 +1437,9 @@ async def test_durable_timer_wins_against_actual_worker_unknown_outcome(
         projection = await work.evaluation_batch.projection(scope, row)
         state = RunState.model_validate(projection["state"])
         decision = fail_for_activity(state, "unknown", activity_id=activity, max_retries=3)
-        assert decision.payload["retryable"] is False
+        assert decision is None
+        assert state.status.value == "waiting"
+        assert state.wait_reason == "external_outcome_unknown"
         assert (
             await work.db_session.scalar(
                 text("SELECT count(*) FROM execution_command_inbox WHERE command_type='RetryRun'")
@@ -1534,6 +1539,7 @@ async def test_scoring_candidates_require_actual_success_and_keep_batch_running(
                     update={
                         "command_id": uuid4(),
                         "command_type": kind,
+                        "command_schema_version": 1,
                         "expected_stream_version": None,
                         "payload": {},
                     }
@@ -1564,16 +1570,23 @@ async def test_batch_deadline_expiring_during_input_preparation_fences_sink(budg
     _, scheduler, batch = await scheduled_batch(budget_binding_fixture)
     original = scheduler.admission._objects.put_input
 
-    async def expires_during_prepare(run, body):
-        saved = await original(run, body)
-        async with factory(AuthorizationContext.system("execution-kernel")) as work:
-            await work.db_session.execute(
+    async def expires_during_prepare(run, body, *, scope):
+        saved = await original(run, body, scope=scope)
+        # Simulate an independent expiry writer while admission owns its UoW.
+        from app.infrastructure.security.db_authorization import configure_session_authorization
+        from tests.app.execution_test_support import execution_admin_session
+
+        async with execution_admin_session() as db:
+            await configure_session_authorization(
+                db, AuthorizationContext.system("execution-kernel")
+            )
+            await db.execute(
                 text(
                     "UPDATE evaluation_batches SET deadline=clock_timestamp()-interval '1 second' WHERE id=:id"
                 ),
                 {"id": batch.id},
             )
-            await work.commit()
+            await db.commit()
         return saved
 
     scheduler.admission._objects.put_input = expires_during_prepare
@@ -1665,6 +1678,7 @@ async def test_retry_failed_creates_new_lineage_and_rechecks_current_requester(
                     update={
                         "command_id": uuid4(),
                         "command_type": kind,
+                        "command_schema_version": 1,
                         "expected_stream_version": None,
                         "payload": payload,
                     }
@@ -1849,17 +1863,16 @@ async def late_physical_case(budget_binding_fixture, terminal):
     assert (await handler.handle(create)).status == "accepted"
 
     async def command(kind, payload, version=1):
-        result = await handler.handle(
-            create.model_copy(
-                update={
-                    "command_id": uuid4(),
-                    "command_type": kind,
-                    "command_schema_version": version,
-                    "expected_stream_version": None,
-                    "payload": payload,
-                }
-            )
+        envelope = create.model_copy(
+            update={
+                "command_id": uuid4(),
+                "command_type": kind,
+                "command_schema_version": version,
+                "expected_stream_version": None,
+                "payload": payload,
+            }
         )
+        result = await handler.handle(await with_current_test_claim(handler, envelope))
         assert result.status == "accepted"
 
     await command("StartRun", {})
@@ -2260,3 +2273,91 @@ async def test_effect_read_authorizes_current_team_member_not_only_original_requ
             )
             is False
         )
+
+
+async def test_scheduler_pins_definition_with_its_durable_prepared_request(budget_binding_fixture):
+    from app.composition.execution_definitions import build_code_definitions
+    from app.domain.execution.commands import CommandEnvelope
+    from app.domain.models.authorization import AuthorizationContext
+    from app.infrastructure.execution.admission_definition_resolver import (
+        AdmissionDefinitionResolver,
+    )
+    from app.infrastructure.execution.postgres_definition_store import PostgresDefinitionStore
+
+    _, scope, _, _, _, _, factory = budget_binding_fixture
+    _, scheduler, batch = await scheduled_batch(budget_binding_fixture)
+    registry = build_code_definitions()
+    async with factory(AuthorizationContext.system("execution-kernel")) as work:
+        for value in registry.manifests:
+            await PostgresDefinitionStore(work.db_session).seed_head(value)
+        await work.commit()
+    scheduler.admission._definition_resolver = AdmissionDefinitionResolver()
+    result = await scheduler.tick(datetime.now(UTC))
+    assert result.dispatched == 1
+    async with factory(AuthorizationContext.system("execution-kernel")) as work:
+        row = (await work.evaluation_batch.results(scope, batch.id))[0]
+        create = CommandEnvelope.model_validate(row["envelope"])
+        pin = create.payload["definition_pin"]
+        definition = next(
+            value for value in registry.manifests if value.family.value == create.payload["family"]
+        )
+        assert pin == definition.pin.model_dump(mode="json")
+        assert row["prepared_envelope"]["payload"]["definition_pin"] == pin
+    assert (
+        await actual_handler(budget_binding_fixture, scheduler.execution_policy).handle(create)
+    ).status == "accepted"
+
+
+async def test_kernel_child_admission_owns_pin_and_ingress_transaction(budget_binding_fixture):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.application.execution.admission import RunAdmissionService
+    from app.application.execution.command_ingress import CommandIngress
+    from app.composition.execution_definitions import build_code_definitions
+    from app.domain.models.authorization import AuthorizationContext
+    from app.infrastructure.execution.admission_definition_resolver import (
+        AdmissionDefinitionResolver,
+    )
+    from app.infrastructure.execution.postgres_definition_store import PostgresDefinitionStore
+
+    _, scope, _, _, _, pair, factory = budget_binding_fixture
+    registry = build_code_definitions()
+    async with factory(AuthorizationContext.system("execution-kernel")) as work:
+        for definition in registry.manifests:
+            await PostgresDefinitionStore(work.db_session).seed_head(definition)
+        await work.commit()
+    writer = SimpleNamespace(receive=AsyncMock(side_effect=AssertionError("unbound ingress")))
+    objects = SimpleNamespace(put_input=AsyncMock(return_value=("owned/child-input", "a" * 64)))
+    admission = RunAdmissionService(
+        command_ingress=CommandIngress(writer=writer),
+        activity_objects=objects,
+        policy_heads=SimpleNamespace(active_execution=AsyncMock(return_value=pair.execution)),
+        definition_resolver=AdmissionDefinitionResolver(),
+        transaction_factory=lambda: factory(AuthorizationContext.system("execution-kernel")),
+    )
+    from app.domain.execution.family import RunFamily
+
+    run = await admission.admit(
+        family=RunFamily.KB_INGEST,
+        source_entity_type="resource_build",
+        source_entity_id="owned-child-build",
+        owner_scope=scope,
+        private_input={"build_id": "owned-child-build"},
+        public_input={},
+        idempotency_key="owned-kernel-child-admission",
+    )
+    writer.receive.assert_not_awaited()
+    async with factory(AuthorizationContext.system("execution-kernel")) as work:
+        pin = await work.db_session.scalar(
+            text("SELECT manifest_digest FROM execution_definition_admissions WHERE run_id=:run"),
+            {"run": run},
+        )
+        assert pin == next(v.digest for v in registry.manifests if v.family == RunFamily.KB_INGEST)
+        payload = await work.db_session.scalar(
+            text(
+                "SELECT payload FROM execution_command_inbox WHERE stream_id=:run AND command_type='CreateRun'"
+            ),
+            {"run": str(run)},
+        )
+        assert payload["definition_pin"]["manifest_digest"] == pin

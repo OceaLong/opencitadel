@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
+from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -18,14 +22,17 @@ from app.application.execution.activity_registry import (
 from app.application.execution.orchestrator import CommandResult
 from app.application.execution.progress import ActivityProgressRecord, ActivityProgressSink
 from app.application.execution.run_context import RunContextSource, RunContextUnavailableError
+from app.application.ports.inference_dispatch import activity_lease_context
 from app.domain.evaluation.errors import ReplayMismatch
 from app.domain.execution.activity import (
     ActivityClaim,
     ActivityContext,
+    ActivityLeaseConfirmation,
     ActivityOutcome,
 )
 from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.context import RunExecutionContext
+from app.domain.execution.definition import DefinitionIntegrityError, DefinitionUnavailable
 from app.domain.models.scope import OwnerScopeType
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
 from core.otel import get_tracer
@@ -34,8 +41,9 @@ logger = logging.getLogger(__name__)
 _tracer = get_tracer("opencitadel.execution.activity")
 
 # Exception types treated as transient worker infrastructure faults (K2-2/D5):
-# a claim hitting one of these is deferred with backoff instead of settling the
-# activity as failed. The persistence adapter extends this tuple with its own
+# before an unsafe external call, these defer with backoff rather than settle
+# the activity as failed. After a non-idempotent call they remain unknown.
+# The persistence adapter extends this tuple with its own
 # driver exceptions (e.g. SQLAlchemy's) at wiring time — the application layer
 # deliberately does not import persistence libraries.
 DEFAULT_INFRASTRUCTURE_ERRORS: tuple[type[Exception], ...] = (OSError, TimeoutError)
@@ -48,6 +56,43 @@ DEFAULT_INFRASTRUCTURE_ERRORS: tuple[type[Exception], ...] = (OSError, TimeoutEr
 # ``settings.execution_activity_max_concurrency`` (kept <= pool capacity), as
 # ``build_execution_kernel_runtime`` does.
 DEFAULT_ACTIVITY_MAX_CONCURRENCY = 8
+
+
+class ActivityLeaseLostError(RuntimeError):
+    """The local worker no longer has confirmed permission to make progress."""
+
+
+class ActivityWorkerUnresponsiveError(RuntimeError):
+    """A cancelled handler did not exit; this worker must stop admitting work."""
+
+
+@dataclass
+class _LeaseState:
+    deadline: float
+    timeout_deadline: float
+    lost: bool = False
+    active: asyncio.Event = field(default_factory=asyncio.Event)
+    renewal_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    children: set[asyncio.Task] = field(default_factory=set)
+
+    def require_active(self) -> None:
+        if (
+            self.lost
+            or not self.active.is_set()
+            or time.monotonic() >= min(self.deadline, self.timeout_deadline)
+        ):
+            raise ActivityLeaseLostError("Activity lease is lost or unconfirmed")
+
+    async def wait_active(self) -> None:
+        await self.active.wait()
+        self.require_active()
+
+    def lose(self) -> None:
+        self.lost = True
+        self.active.set()  # Wake blocked submitters, which then reject locally.
+
+
+_current_lease: ContextVar[_LeaseState | None] = ContextVar("activity_lease", default=None)
 
 
 class ActivityStore(Protocol):
@@ -73,7 +118,7 @@ class ActivityStore(Protocol):
         *,
         now: datetime,
         claim_ttl: timedelta,
-    ) -> bool: ...
+    ) -> ActivityLeaseConfirmation | None: ...
 
     async def defer(
         self,
@@ -81,6 +126,7 @@ class ActivityStore(Protocol):
         *,
         now: datetime,
         retry_after: timedelta,
+        consume_attempt: bool = False,
     ) -> bool: ...
 
 
@@ -114,10 +160,13 @@ class ActivityWorker:
         worker_id: str,
         claim_ttl: timedelta = timedelta(seconds=30),
         max_concurrency: int = DEFAULT_ACTIVITY_MAX_CONCURRENCY,
+        definitions=None,
         progress_sink: ActivityProgressSink | None = None,
         content_writer=None,
         execution_gate=None,
         infrastructure_errors: tuple[type[Exception], ...] = DEFAULT_INFRASTRUCTURE_ERRORS,
+        cancellation_grace_seconds: float = 1.0,
+        lease_observer: Callable[[str], None] | None = None,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("worker_id must not be empty")
@@ -125,10 +174,13 @@ class ActivityWorker:
             raise ValueError("claim_ttl must be positive")
         if max_concurrency <= 0:
             raise ValueError("max_concurrency must be positive")
+        if cancellation_grace_seconds <= 0:
+            raise ValueError("cancellation_grace_seconds must be positive")
         self._store = store
         self._run_contexts = run_contexts
         self._run_service = run_service
         self._registry = registry
+        self._definitions = definitions
         self._worker_id = worker_id
         self._claim_ttl = claim_ttl
         self._max_concurrency = max_concurrency
@@ -136,9 +188,21 @@ class ActivityWorker:
         self._content_writer = content_writer
         self._execution_gate = execution_gate
         self._infrastructure_errors = infrastructure_errors
-        # Bounds concurrent claim execution (and therefore concurrent connection
-        # demand) regardless of the claim batch size. See module docstring above.
+        self._cancellation_grace_seconds = cancellation_grace_seconds
+        self._lease_observer = lease_observer
+        self._run_lock = asyncio.Lock()
+        self._quarantined: set[asyncio.Task] = set()
+        self._drainers: set[asyncio.Task] = set()
+        self._unresponsive = False
+        # A slot is reserved BEFORE asking PostgreSQL to grant its lease.
         self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    def _observe_lease(self, event: str) -> None:
+        if self._lease_observer is not None:
+            try:
+                self._lease_observer(event)
+            except Exception:
+                logger.warning("Activity lease observer failed", exc_info=True)
 
     async def run_once(
         self,
@@ -148,32 +212,146 @@ class ActivityWorker:
     ) -> ActivityBatchStats:
         if limit <= 0:
             raise ValueError("limit must be positive")
-        claims = await self._store.claim(
-            now=now,
-            limit=limit,
-            worker_id=self._worker_id,
-            claim_ttl=self._claim_ttl,
-        )
+        async with self._run_lock:
+            return await self._run_batch(now=now, limit=limit)
+
+    async def serve(
+        self,
+        *,
+        stop: asyncio.Event,
+        idle_poll_seconds: float,
+        shutdown_grace_seconds: float = 30.0,
+    ) -> None:
+        """Continuously refill each slot without waiting for a batch barrier.
+
+        run_once remains a bounded administration/test operation. The process
+        activity plane uses this method so a long claim never holds up another
+        slot when a batch counter is exhausted.
+        """
+        if idle_poll_seconds <= 0 or shutdown_grace_seconds <= 0:
+            raise ValueError("poll and shutdown grace must be positive")
+
+        async def wait_for_work() -> None:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=idle_poll_seconds)
+
+        async def slot_loop() -> None:
+            while not stop.is_set():
+                if self._unresponsive:
+                    raise ActivityWorkerUnresponsiveError("Activity worker has quarantined work")
+                await self._semaphore.acquire()
+                requested_at = time.monotonic()
+                try:
+                    claims = await self._store.claim(
+                        now=datetime.now(UTC),
+                        limit=1,
+                        worker_id=self._worker_id,
+                        claim_ttl=self._claim_ttl,
+                    )
+                except self._infrastructure_errors:
+                    self._semaphore.release()
+                    logger.warning("Activity slot claim failed", exc_info=True)
+                    await wait_for_work()
+                    continue
+                except BaseException:
+                    self._semaphore.release()
+                    raise
+                if not claims:
+                    self._semaphore.release()
+                    await wait_for_work()
+                    continue
+                if len(claims) != 1:
+                    self._semaphore.release()
+                    raise RuntimeError("Activity store exceeded reserved slot")
+                await self._execute_claim(
+                    claims[0], now=datetime.now(UTC), reserved=True, requested_at=requested_at
+                )
+
+        async with self._run_lock:
+            slots = {
+                asyncio.create_task(slot_loop(), name=f"activity-slot:{index}")
+                for index in range(self._max_concurrency)
+            }
+            stopping = asyncio.create_task(stop.wait(), name="activity-stop")
+            try:
+                done, _ = await asyncio.wait(
+                    (*slots, stopping), return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done - {stopping}:
+                    task.result()
+                # Stop admission immediately; let supervised ownership drain
+                # within both its lease/deadline and this process grace.
+                _, pending = await asyncio.wait(slots, timeout=shutdown_grace_seconds)
+                for task in pending:
+                    task.cancel()
+                results = await asyncio.gather(*slots, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, ActivityWorkerUnresponsiveError):
+                        raise result
+            finally:
+                stopping.cancel()
+                for task in slots:
+                    task.cancel()
+                await asyncio.gather(stopping, *slots, return_exceptions=True)
+
+    async def _run_batch(self, *, now: datetime, limit: int) -> ActivityBatchStats:
+        if self._unresponsive:
+            raise ActivityWorkerUnresponsiveError("Activity worker has quarantined work")
         counts = {
-            "claimed": len(claims),
+            "claimed": 0,
             "succeeded": 0,
             "failed": 0,
             "unknown": 0,
             "stale": 0,
             "deferred": 0,
         }
-        # Worker resilience (D5): one claim raising must never abort its batch
-        # siblings or tear down the activity lane. Exceptions are collected per
-        # claim and classified below instead of propagating out of the batch.
-        statuses = await asyncio.gather(
-            *(self._execute_claim(claim, now=now) for claim in claims),
-            return_exceptions=True,
-        )
-        for claim, status in zip(claims, statuses, strict=True):
-            if isinstance(status, BaseException):
-                counts[await self._absorb_claim_failure(claim, status)] += 1
-                continue
-            counts[status] += 1
+        pending: dict[asyncio.Task[str], ActivityClaim] = {}
+        exhausted = False
+        try:
+            while pending or (counts["claimed"] < limit and not exhausted):
+                free = min(self._max_concurrency - len(pending), limit - counts["claimed"])
+                if free > 0 and not exhausted:
+                    for _ in range(free):
+                        await self._semaphore.acquire()
+                    requested_at = time.monotonic()
+                    try:
+                        claims = await self._store.claim(
+                            now=now,
+                            limit=free,
+                            worker_id=self._worker_id,
+                            claim_ttl=self._claim_ttl,
+                        )
+                    except BaseException:
+                        for _ in range(free):
+                            self._semaphore.release()
+                        raise
+                    if len(claims) > free:
+                        for _ in range(free):
+                            self._semaphore.release()
+                        raise RuntimeError("Activity store exceeded reserved slots")
+                    for _ in range(free - len(claims)):
+                        self._semaphore.release()
+                    counts["claimed"] += len(claims)
+                    exhausted = len(claims) < free
+                    for claim in claims:
+                        task = asyncio.create_task(
+                            self._execute_claim(
+                                claim, now=now, reserved=True, requested_at=requested_at
+                            ),
+                            name=f"activity-claim:{claim.request.activity_id}",
+                        )
+                        pending[task] = claim
+                if not pending:
+                    break
+                done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    pending.pop(task)
+                    counts[task.result()] += 1
+        finally:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         return ActivityBatchStats(**counts)
 
     async def _absorb_claim_failure(self, claim: ActivityClaim, error: BaseException) -> str:
@@ -187,6 +365,8 @@ class ActivityWorker:
         if isinstance(error, asyncio.CancelledError):
             # Process shutdown cancellation must keep propagating.
             raise error
+        if isinstance(error, ActivityLeaseLostError):
+            return "stale"
         if isinstance(error, RunContextUnavailableError):
             # The scope's formal projection is being rebuilt (K4-1): the Run
             # context row will reappear once the rebuild completes, so this is
@@ -217,6 +397,9 @@ class ActivityWorker:
                 claim,
                 now=datetime.now(UTC),
                 retry_after=retry_after,
+                consume_attempt=not isinstance(
+                    error, (RunContextUnavailableError, *self._infrastructure_errors)
+                ),
             )
         except Exception as defer_error:  # noqa: BLE001 - absorbing boundary
             # The defer itself failed (e.g. database still down). The claim
@@ -234,13 +417,105 @@ class ActivityWorker:
         claim: ActivityClaim,
         *,
         now: datetime,
+        reserved: bool = False,
+        requested_at: float | None = None,
     ) -> str:
-        # Backpressure: cap the number of claims executing at once (P1-3). The
-        # whole batch is still ``gather``-ed, but only ``max_concurrency`` claims
-        # hold their DB connections at any moment. The tracing span and status
-        # accounting are unchanged inside the guard.
-        async with self._semaphore:
-            return await self._execute_claim_span(claim, now=now)
+        if not reserved:
+            await self._semaphore.acquire()
+        release_slot = True
+        origin = requested_at if requested_at is not None else time.monotonic()
+        lease = _LeaseState(
+            deadline=self._safe_deadline(origin, claim.server_now, claim.lease_deadline),
+            timeout_deadline=origin + (claim.request.timeout_at - claim.server_now).total_seconds(),
+        )
+        lease.active.set()
+
+        async def execute() -> str:
+            token = _current_lease.set(lease)
+            try:
+                lease.require_active()
+                if claim.worker_id != self._worker_id:
+                    raise ActivityLeaseLostError("Activity belongs to another worker")
+                try:
+                    with activity_lease_context(lease.require_active):
+                        return await self._execute_claim_span(claim, now=now)
+                except ActivityWorkerUnresponsiveError:
+                    raise
+                except Exception as error:  # noqa: BLE001 - supervised claim boundary
+                    await lease.wait_active()
+                    return await self._absorb_claim_failure(claim, error)
+            finally:
+                _current_lease.reset(token)
+
+        task = asyncio.create_task(execute(), name=f"activity-owned:{claim.request.activity_id}")
+        heartbeat = asyncio.create_task(
+            self._keep_claim_alive(claim, lease),
+            name=f"activity-heartbeat:{claim.request.activity_id}",
+        )
+        try:
+            while True:
+                deadline = min(lease.deadline, lease.timeout_deadline)
+                remaining = max(0.0, deadline - time.monotonic())
+                done, _ = await asyncio.wait(
+                    (task, heartbeat),
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if task in done:
+                    try:
+                        result = task.result()
+                        if result == "stale":
+                            self._observe_lease("lease_lost")
+                        return result
+                    except ActivityLeaseLostError:
+                        self._observe_lease("lease_lost")
+                        return "stale"
+                if (
+                    heartbeat in done
+                    or lease.lost
+                    or time.monotonic() >= min(lease.deadline, lease.timeout_deadline)
+                ):
+                    break
+            # Any supervisor failure fails closed, including bugs unrelated to
+            # the database. Never leave an unsupervised handler running.
+            if heartbeat.done() and not heartbeat.cancelled() and heartbeat.exception() is not None:
+                logger.error("Activity lease supervisor failed", exc_info=heartbeat.exception())
+            lease.lose()
+            self._observe_lease("lease_lost")
+            return "stale"
+        finally:
+            lease.lose()
+            cleanup_tasks = {task, heartbeat, *lease.children}
+            for cleanup_task in cleanup_tasks:
+                cleanup_task.cancel()
+            done, pending = await asyncio.wait(
+                cleanup_tasks, timeout=self._cancellation_grace_seconds
+            )
+            for finished in done:
+                if not finished.cancelled():
+                    finished.exception()
+            if pending:
+                self._observe_lease("cancellation_timeout")
+                # Retain the slot while Python code still runs. The process
+                # owner sees a fail-stop error and must restart this worker.
+                release_slot = False
+                self._unresponsive = True
+                self._quarantined.update(pending)
+
+                async def release_when_stopped() -> None:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    self._quarantined.difference_update(pending)
+                    self._semaphore.release()
+
+                drainer = asyncio.create_task(
+                    release_when_stopped(), name="activity-quarantine-drain"
+                )
+                self._drainers.add(drainer)
+                drainer.add_done_callback(self._drainers.discard)
+            if release_slot:
+                self._semaphore.release()
+            else:
+                raise ActivityWorkerUnresponsiveError("Activity cancellation exceeded grace")
 
     async def _execute_claim_span(
         self,
@@ -263,7 +538,8 @@ class ActivityWorker:
         *,
         now: datetime,
     ) -> str:
-        claim_started = time.monotonic()
+        lease = _current_lease.get()
+        assert lease is not None
         try:
             run_context = await self._run_contexts.load(UUID(claim.request.aggregate_id))
             self._validate_claim_context(claim, run_context)
@@ -272,7 +548,27 @@ class ActivityWorker:
             result = await self._submit_outcome(claim, outcome, now=now)
             return "failed" if result.status == "accepted" else "stale"
         try:
-            handler = self._registry.resolve(claim.request.activity_type)
+            version = "1"
+            if run_context.definition_pin is not None:
+                if self._definitions is None:
+                    raise DefinitionUnavailable("no exact local Activity definition")
+                registered = self._definitions.resolve(run_context.definition_pin)
+                version = registered.manifest.handler_version(claim.request.activity_type)
+                if (
+                    claim.request.definition_digest != registered.manifest.digest
+                    or claim.request.handler_version != version
+                ):
+                    raise DefinitionIntegrityError(
+                        "Activity routing differs from its formal definition"
+                    )
+            elif self._definitions is not None:
+                raise DefinitionUnavailable("legacy Activity has no reliable implementation pin")
+            handler = self._registry.resolve(claim.request.activity_type, handler_version=version)
+        except DefinitionUnavailable:
+            await self._store.defer(
+                claim, now=now, retry_after=timedelta(seconds=2), consume_attempt=False
+            )
+            return "deferred"
         except UnknownActivityTypeError:
             outcome = ActivityOutcome.failed(failure_code="UNKNOWN_ACTIVITY_TYPE")
             result = await self._submit_outcome(claim, outcome, now=now)
@@ -293,14 +589,15 @@ class ActivityWorker:
             result = await self._submit_outcome(claim, outcome, now=now)
             return "unknown" if result.status == "accepted" else "stale"
 
-        if claim.request.timeout_at <= now:
-            outcome = ActivityOutcome.failed(failure_code="ACTIVITY_TIMEOUT")
-            result = await self._submit_outcome(claim, outcome, now=now)
-            return "failed" if result.status == "accepted" else "stale"
+        if time.monotonic() >= lease.timeout_deadline:
+            return "stale"  # Only the trusted timeout path may settle an expired request.
 
         if self._execution_gate is not None:
             await self._execution_gate.before_activity(claim, run_context)
 
+        await lease.wait_active()
+        if time.monotonic() >= lease.timeout_deadline:
+            return "stale"
         if not await self._store.mark_call_started(claim, now=now):
             return "stale"
 
@@ -339,53 +636,40 @@ class ActivityWorker:
             owner_user_id=claim.owner_user_id,
             team_id=claim.team_id,
             run=run_context,
-            heartbeat=lambda: self._store.heartbeat(
-                claim,
-                now=datetime.now(UTC),
-                claim_ttl=self._claim_ttl,
-            ),
+            heartbeat=lambda: self._renew_lease(claim, lease),
+            require_active_lease=lease.require_active,
             report_progress=self._progress_reporter(claim, run_context),
         )
-        stop_heartbeat = asyncio.Event()
-        claim_lost = asyncio.Event()
+        await lease.wait_active()
+        if time.monotonic() >= lease.timeout_deadline:
+            return "stale"
         handler_task = asyncio.create_task(
             handler.execute(claim.request, context),
             name=f"activity-handler:{claim.request.activity_id}",
         )
-        heartbeat_task = asyncio.create_task(
-            self._keep_claim_alive(
-                claim,
-                stop_heartbeat,
-                claim_lost,
-                handler_task,
-            ),
-            name=f"activity-heartbeat:{claim.request.activity_id}",
-        )
+        lease.children.add(handler_task)
         try:
-            remaining_seconds = max(
-                0.0,
-                (claim.request.timeout_at - now).total_seconds()
-                - (time.monotonic() - claim_started),
-            )
-            outcome = await asyncio.wait_for(
-                handler_task,
-                timeout=remaining_seconds,
-            )
-        except TimeoutError:
-            # Cancellation of a Python task cannot prove an external write stopped.
-            outcome = (
-                ActivityOutcome.failed(failure_code="ACTIVITY_TIMEOUT")
-                if handler.idempotent or recovery_safe
-                else ActivityOutcome.unknown(failure_code="NON_IDEMPOTENT_OUTCOME_UNKNOWN")
-            )
-        except asyncio.CancelledError:
-            if claim_lost.is_set():
+            remaining_seconds = max(0.0, lease.timeout_deadline - time.monotonic())
+            done, _ = await asyncio.wait((handler_task,), timeout=remaining_seconds)
+            if not done:
+                handler_task.cancel()
+                done, _ = await asyncio.wait(
+                    (handler_task,), timeout=self._cancellation_grace_seconds
+                )
+                if not done:
+                    raise ActivityWorkerUnresponsiveError("Handler ignored timeout cancellation")
                 return "stale"
+            outcome = handler_task.result()
+        except asyncio.CancelledError:
+            raise
+        except ActivityWorkerUnresponsiveError:
             raise
         except ReplayMismatch:
             outcome = ActivityOutcome.failed(failure_code=ReplayMismatch.code)
         except Exception as error:
-            if isinstance(error, self._infrastructure_errors):
+            if isinstance(error, self._infrastructure_errors) and (
+                handler.idempotent or recovery_safe
+            ):
                 # A persistence/infrastructure fault during execution is not a
                 # handler bug: let it escape to run_once's per-claim
                 # classification, which defers the lease-fenced claim with
@@ -401,14 +685,10 @@ class ActivityWorker:
                 if handler.idempotent or recovery_safe
                 else ActivityOutcome.unknown(failure_code="NON_IDEMPOTENT_OUTCOME_UNKNOWN")
             )
-        finally:
-            stop_heartbeat.set()
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
-
         # The handler may have run for minutes: settlement uses a fresh clock,
         # not the stale batch-entry ``now`` (P2 幂等复核 / K2-8).
         if outcome.status == "deferred":
+            await lease.wait_active()
             retry_after = timedelta(seconds=outcome.retry_after_seconds or 1.0)
             if not await self._store.defer(
                 claim,
@@ -444,27 +724,67 @@ class ActivityWorker:
         if scope.type != OwnerScopeType.TEAM or scope.team_id != claim.team_id:
             raise ValueError("Activity Run team scope mismatch")
 
-    async def _keep_claim_alive(
-        self,
-        claim: ActivityClaim,
-        stop: asyncio.Event,
-        claim_lost: asyncio.Event,
-        handler_task: asyncio.Task[ActivityOutcome],
-    ) -> None:
-        interval = max(0.1, self._claim_ttl.total_seconds() / 3)
-        while not stop.is_set():
+    @staticmethod
+    def _safe_deadline(started_at: float, server_now: datetime, deadline: datetime) -> float:
+        duration = max(0.0, (deadline - server_now).total_seconds())
+        return started_at + duration - min(0.05, duration * 0.05)
+
+    async def _renew_lease(self, claim: ActivityClaim, lease: _LeaseState) -> bool:
+        async with lease.renewal_lock:
+            if lease.lost or time.monotonic() >= min(lease.deadline, lease.timeout_deadline):
+                lease.lose()
+                return False
+            started_at = time.monotonic()
             try:
-                await asyncio.wait_for(stop.wait(), timeout=interval)
-            except TimeoutError:
-                alive = await self._store.heartbeat(
-                    claim,
-                    now=datetime.now(UTC),
-                    claim_ttl=self._claim_ttl,
+                confirmation = await asyncio.wait_for(
+                    self._store.heartbeat(claim, now=datetime.now(UTC), claim_ttl=self._claim_ttl),
+                    # Leave time to retry while authority is still valid.
+                    timeout=min(
+                        self._claim_ttl.total_seconds() / 6,
+                        max(0.0, min(lease.deadline, lease.timeout_deadline) - started_at) / 2,
+                    ),
                 )
-                if not alive:
-                    claim_lost.set()
-                    handler_task.cancel()
-                    return
+            except Exception:
+                lease.active.clear()
+                self._observe_lease("heartbeat_error")
+                logger.warning(
+                    "Activity heartbeat failed activity_id=%s claim_generation=%s",
+                    claim.request.activity_id,
+                    claim.claim_generation,
+                    exc_info=True,
+                )
+                if time.monotonic() >= min(lease.deadline, lease.timeout_deadline):
+                    lease.lose()
+                return False
+            if confirmation is None:
+                self._observe_lease("heartbeat_rejected")
+                lease.lose()
+                return False
+            # A late response cannot resurrect local authority, even if the
+            # server happened to extend the row before its response was lost.
+            if lease.lost or time.monotonic() >= min(lease.deadline, lease.timeout_deadline):
+                lease.lose()
+                return False
+            lease.deadline = self._safe_deadline(
+                started_at, confirmation.server_now, confirmation.lease_deadline
+            )
+            if time.monotonic() >= min(lease.deadline, lease.timeout_deadline):
+                lease.lose()
+                return False
+            if not lease.active.is_set():
+                self._observe_lease("heartbeat_recovered")
+            lease.active.set()
+            return True
+
+    async def _keep_claim_alive(self, claim: ActivityClaim, lease: _LeaseState) -> None:
+        interval = self._claim_ttl.total_seconds() / 3
+        while not lease.lost:
+            remaining = min(lease.deadline, lease.timeout_deadline) - time.monotonic()
+            if remaining <= 0:
+                lease.lose()
+                return
+            await asyncio.sleep(min(interval, remaining))
+            await self._renew_lease(claim, lease)
 
     async def _submit_outcome(
         self,
@@ -495,6 +815,8 @@ class ActivityWorker:
                 "claim_generation": claim.claim_generation,
                 "failure_code": outcome.failure_code,
             }
+            if outcome.status == "failed":
+                payload["public_data"] = outcome.public_data
         return await self._submit(
             claim,
             command_type=command_type,
@@ -561,20 +883,24 @@ class ActivityWorker:
                     "opencitadel",
                     str(claim.request.activity_id),
                     command_type,
-                    dedupe_suffix,
+                    dedupe_suffix or f"{claim.request.generation}:{claim.claim_generation}",
                 )
                 if part is not None
             ),
         )
+        lease = _current_lease.get()
+        assert lease is not None
+        await lease.wait_active()
         if self._content_writer is not None:
             await self._content_writer.prepare(
                 claim, command_id, command_type, payload, citations=content_citations
             )
+        await lease.wait_active()
         return await self._run_service.submit(
             RegisteredCommand(
                 command_id=command_id,
                 command_type=command_type,
-                command_schema_version=2,
+                command_schema_version=3 if command_type == "FailActivity" else 2,
                 run_id=claim.request.aggregate_id,
                 expected_stream_version=None,
                 payload=payload,
@@ -585,6 +911,7 @@ class ActivityWorker:
                 correlation_id=claim.request.activity_id,
                 causation_id=claim.request.activity_id,
                 issued_at=now,
+                activity_lease_proof=claim.lease_proof,
             ),
         )
 

@@ -1,0 +1,64 @@
+# HTTP -> HTTPS 重定向，目标使用公开 Origin，保留非标准 HTTPS 宿主端口。
+server {
+    listen 80;
+    server_name ${OPENCITADEL_DOMAIN};
+    return 301 ${HTTPS_REDIRECT_ORIGIN}$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${OPENCITADEL_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${OPENCITADEL_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${OPENCITADEL_DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # 安全响应头（纵深防御）。add_header 在 server 块声明后由所有 location 继承，
+    # 但 location 内一旦出现自己的 add_header 便不再继承——本文件的 location 无
+    # add_header，故此处声明对 /api/ 与 / 均生效。always 保证错误响应也带头。
+    # /share/artifact 渲染的是不可信 HTML，CSP frame-ancestors 'none' + object-src
+    # 'none' 是针对点击劫持/插件注入的纵深防御。
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
+    location /api/ {
+        set $api_upstream opencitadel-api;
+        proxy_pass http://$api_upstream:8000$request_uri;
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache     off;
+        proxy_set_header X-Accel-Buffering no;
+        gzip off;
+
+        proxy_read_timeout    86400s;
+        proxy_send_timeout    86400s;
+        proxy_connect_timeout 60s;
+    }
+
+    location / {
+        set $ui_upstream opencitadel-ui;
+        proxy_pass http://$ui_upstream:3000$request_uri;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}

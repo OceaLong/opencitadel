@@ -12,12 +12,10 @@ from core.config import (
 def isolate_database_overrides(monkeypatch):
     # These unit tests exercise explicit fields and defaults, independently of
     # connection overrides used by the PostgreSQL integration suite.
-    for name in (
-        "SQLALCHEMY_DATABASE_URI",
-        "SQLALCHEMY_MIGRATION_DATABASE_URI",
-        "DATABASE_AUTHORIZATION_SIGNING_SECRET",
-    ):
+    monkeypatch.setitem(DeploymentSettings.model_config, "env_file", None)
+    for name in (*DeploymentSettings.model_fields, "OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS"):
         monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.upper(), raising=False)
 
 
 def test_settings_derives_database_uri_from_postgres_fields():
@@ -122,6 +120,37 @@ def test_production_settings_reject_default_database_credentials():
         _production_settings(redis_password="")
 
 
+def test_production_does_not_require_a_disabled_bootstrap_account():
+    settings = _production_settings(bootstrap_admin_email="", bootstrap_admin_password="")
+
+    assert settings.bootstrap_admin_email == ""
+
+
+def test_production_bootstrap_requires_a_strong_password_when_enabled():
+    with pytest.raises(ValueError, match="bootstrap_admin_password"):
+        _production_settings(bootstrap_admin_email="admin@example.com", bootstrap_admin_password="")
+
+
+def test_production_validates_the_password_in_an_explicit_database_uri():
+    settings = _production_settings(
+        postgres_password="postgres",
+        sqlalchemy_database_uri=(
+            "postgresql+asyncpg://external:external-database-password@db.example:5432/external"
+        ),
+    )
+
+    assert settings.postgres_password == "postgres"
+    assert "@db.example:5432/external" in settings.sqlalchemy_database_uri
+
+
+@pytest.mark.parametrize("password", ["", "postgres", "too-short", "replace-with-db-password"])
+def test_production_rejects_weak_passwords_in_an_explicit_database_uri(password):
+    with pytest.raises(ValueError, match="postgres_password"):
+        _production_settings(
+            sqlalchemy_database_uri=f"postgresql+asyncpg://external:{password}@db:5432/external"
+        )
+
+
 def test_production_settings_accept_strong_distinct_secrets():
     settings = _production_settings()
 
@@ -182,6 +211,10 @@ def test_production_still_rejects_invalid_trusted_proxy_cidr():
     ],
 )
 def test_production_settings_reject_placeholder_credentials(field, value):
+    if field == "bootstrap_admin_password":
+        with pytest.raises(ValueError, match=field):
+            _production_settings(bootstrap_admin_email="admin@example.com", **{field: value})
+        return
     with pytest.raises(ValueError, match=field):
         _production_settings(**{field: value})
 
@@ -310,3 +343,99 @@ def test_deployment_settings_own_sandbox_topology() -> None:
     assert settings.sandbox_k8s_namespace == "default"
     assert settings.policy_head_refresh_interval_seconds == 5.0
     assert settings.policy_max_staleness_seconds == 30.0
+
+
+@pytest.mark.parametrize(
+    ("origin", "secure"),
+    [
+        ("http://localhost:8088", False),
+        ("https://app.example.com/", True),
+        ("http://[::1]:9000", False),
+    ],
+)
+def test_public_origin_derives_cookie_and_oauth_defaults(origin, secure):
+    settings = DeploymentSettings(frontend_base_url=origin)
+
+    assert settings.frontend_base_url == origin.rstrip("/")
+    assert settings.oauth_redirect_base == f"{origin.rstrip('/')}/api/auth/oauth"
+    assert settings.cookie_secure is secure
+
+
+def test_explicit_cookie_and_oauth_overrides_remain_effective(monkeypatch):
+    monkeypatch.setenv("FRONTEND_BASE_URL", "https://app.example.com")
+    monkeypatch.setenv("COOKIE_SECURE", "false")
+    monkeypatch.setenv("OAUTH_REDIRECT_BASE", "https://auth.example.com/api/auth/oauth")
+
+    settings = DeploymentSettings()
+
+    assert settings.cookie_secure is False
+    assert settings.oauth_redirect_base == "https://auth.example.com/api/auth/oauth"
+
+
+def test_empty_cookie_override_uses_the_site_scheme():
+    settings = DeploymentSettings(frontend_base_url="https://app.example.com", cookie_secure="")
+
+    assert settings.cookie_secure is True
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "app.example.com",
+        "ftp://app.example.com",
+        "http://example.com/path",
+        "https://example.com?a=1",
+        "https://user:password@example.com",
+        "http://localhost:99999",
+        "http://invalid host.example.com",
+        "https://:80",
+        "https://invalid<host>.example.com",
+        "https://invalid\\host.example.com",
+        "https://example.com;invalid",
+    ],
+)
+def test_public_origin_rejects_ambiguous_or_unsafe_values(origin):
+    with pytest.raises(ValueError, match="frontend_base_url"):
+        DeploymentSettings(frontend_base_url=origin)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("env", "prod"),
+        ("storage_provider", "typo"),
+        ("sandbox_driver", "typo"),
+        ("execution_activity_max_concurrency", 0),
+        ("postgres_pool_size", 0),
+        ("postgres_max_overflow", -1),
+    ],
+)
+def test_invalid_deployment_choices_and_resource_limits_fail_early(field, value):
+    with pytest.raises(ValueError, match=field):
+        DeploymentSettings(**{field: value})
+
+
+def test_deployment_choices_accept_existing_case_insensitive_overrides():
+    settings = DeploymentSettings(env=" TEST ", storage_provider="MINIO", sandbox_driver="DOCKER")
+
+    assert (settings.env, settings.storage_provider, settings.sandbox_driver) == (
+        "test",
+        "minio",
+        "docker",
+    )
+
+
+def test_production_rejects_weak_explicit_cursor_secrets():
+    with pytest.raises(ValueError, match="public_cursor_secret"):
+        _production_settings(public_cursor_secret="x")
+
+
+def test_production_https_site_derives_secure_cookies():
+    settings = _production_settings(frontend_base_url="https://app.example.com", cookie_secure=None)
+
+    assert settings.cookie_secure is True
+
+
+def test_production_http_site_does_not_silently_disable_secure_cookie_requirement():
+    with pytest.raises(ValueError, match="cookie_secure"):
+        _production_settings(frontend_base_url="http://app.example.com", cookie_secure=None)

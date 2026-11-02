@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.execution.aggregate import ReplaySnapshot
+from app.domain.execution.run import RunState
 from app.domain.execution.serialization import canonical_state_hash
 from app.infrastructure.execution.models import ExecutionSnapshotORM
 from app.infrastructure.observability.execution_metrics import record_replay_failure
@@ -120,6 +121,14 @@ class PostgresSnapshotStore:
             record_replay_failure("snapshot_hash_mismatch")
             await self._delete_record(record)
             return None
+        if isinstance(state, RunState) and (
+            str(state.run_id) != stream_id
+            or state.owner_user_id != record.owner_user_id
+            or state.team_id != record.team_id
+        ):
+            record_replay_failure("snapshot_hash_mismatch")
+            await self._delete_record(record)
+            return None
         return ReplaySnapshot(
             stream_id=record.stream_id,
             stream_version=record.stream_version,
@@ -133,6 +142,16 @@ class PostgresSnapshotStore:
             delete(ExecutionSnapshotORM).where(
                 ExecutionSnapshotORM.stream_type == stream_type,
                 ExecutionSnapshotORM.stream_id == stream_id,
+            )
+        )
+        return result.rowcount or 0
+
+    async def delete_version(self, stream_type: str, stream_id: str, stream_version: int) -> int:
+        result = await self._session.execute(
+            delete(ExecutionSnapshotORM).where(
+                ExecutionSnapshotORM.stream_type == stream_type,
+                ExecutionSnapshotORM.stream_id == stream_id,
+                ExecutionSnapshotORM.stream_version == stream_version,
             )
         )
         return result.rowcount or 0

@@ -8,6 +8,9 @@ export type FileInfo = {
   filename: string;
   filepath: string;
   key: string;
+  content_digest?: string | null;
+  object_identity?: string | null;
+  content_available?: boolean;
   extension: string;
   mime_type: string;
   size: number;

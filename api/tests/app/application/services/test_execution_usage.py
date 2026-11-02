@@ -402,3 +402,46 @@ async def test_resource_admission_captures_requester_in_caller_uow_without_chat_
     assert result == "configuration"
     repository.capture_requester.assert_awaited_once_with(scope, auth, run_id="resource-run")
     models.resolve_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_default_model_is_resolved_before_freezing_context_candidates():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.application.services.execution_usage_service import ExecutionUsageService
+    from app.domain.models.authorization import AuthorizationContext
+    from app.domain.models.inference import (
+        InferenceEndpoint,
+        InferenceModel,
+        ResolvedInferenceModel,
+    )
+    from app.domain.models.scope import OwnerScope, Principal
+
+    scope = OwnerScope.personal("original-user")
+    auth = AuthorizationContext.for_principal(Principal(user_id=scope.user_id), scope=scope)
+    model = ResolvedInferenceModel(
+        model=InferenceModel(id="resolved-default", model_name="alias"),
+        endpoint=InferenceEndpoint(credential="fixture"),
+    )
+    repository = SimpleNamespace(
+        capture_requester=AsyncMock(return_value={"proof": "sealed"}),
+        admission_snapshot=AsyncMock(return_value="configuration"),
+    )
+    work = SimpleNamespace(execution_usage=repository, authorization_context=auth)
+    models = SimpleNamespace(resolve_chat=AsyncMock(return_value=model))
+    dispatch = SimpleNamespace(freeze_context_candidates=AsyncMock(return_value={"frozen": True}))
+    service = ExecutionUsageService(repository_context=None, physical_dispatch=dispatch)
+    payload = {"message": "hello", "model_id": None, "_execution_definition": {"pin": "fixed"}}
+    result = await service.admission_resolver(models)(
+        scope, "run", "policy", payload, "production", inference_read_context=work
+    )
+    assert result == "configuration"
+    models.resolve_chat.assert_awaited_once_with(None, scope=scope, uow=work)
+    frozen = dispatch.freeze_context_candidates.await_args.args[4]
+    assert frozen["model_id"] == model.id
+    assert frozen["_execution_definition"] == payload["_execution_definition"]
+    assert payload["model_id"] is None
+    snapshot = repository.admission_snapshot.await_args.args[2]
+    assert snapshot["model_id"] == model.id
+    assert snapshot["context_candidate_proof"] == {"frozen": True}

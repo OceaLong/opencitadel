@@ -22,6 +22,9 @@ Resource。Workspace Binding 覆盖可见的 Global Binding；删除 Workspace O
 Global Binding 修改需平台 Admin。没有显式 Rerank Binding 时，Rerank 可以解析 Chat Binding。
 资源缺失、不可访问或 Kind 不匹配时，绝不会回退到无关 Provider。
 
+当前知识库重排解析 Ask/Agent 任务所选的 Chat 模型；未选择时使用 Chat Binding，不消费
+独立的 `rerank` Binding。Binding API 与 Capability 投影仍保留 `rerank` 用途契约。
+
 ## Provider 与 Credential
 
 Provider Registry 是 Provider/Kind 支持矩阵的唯一事实来源：OpenAI、Azure OpenAI、
@@ -43,6 +46,12 @@ Chat 执行、Knowledge/Memory 向量化与 Rerank 在 OwnerScope 下解析控�
 Configuration Record 固定所选 Identity，供执行证据使用。Vector Enablement 与 Resilience
 采用 Run 冻结的 Execution Policy。Execution Policy 可分别禁用向量消费者，但已启用的消费者不会读取独立 API Key 或 Base URL。能力缺失时，
 UI 引导用户前往 **设置 → 推理**。
+
+新安装初始策略关闭知识库向量检索、重排、GraphRAG 与 OCR。文本摄取和关键词检索无需
+Binding；Ask/Agent 生成回答需要 Chat。先配置增强模型，再开启对应 Execution Policy
+字段：向量使用 1536 维 Embedding 模型，GraphRAG 使用 Chat Binding，视觉 OCR 需要支持
+视觉的 Chat 模型。已有知识库需重建才能补充向量或图数据。升级保留已有策略 Revision；
+步骤见[知识库教程](../tutorials/02-internal-knowledge-base.zh-CN.md)。
 
 ## API 与运维
 

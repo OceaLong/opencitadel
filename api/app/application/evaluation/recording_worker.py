@@ -1,5 +1,6 @@
 """Lease-fenced recording generation. Reads finish before publication transaction."""
 
+import hashlib
 import json
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from app.domain.evaluation.recording import (
     recording_key,
     sanitize_result,
 )
+from app.domain.execution.context_resources import ContextResourceEvidence
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.knowledge_citation import KnowledgeCitation, deduplicate_citations
 from app.domain.models.resource_pin import ResourceIdentity
@@ -93,6 +95,10 @@ class RecordingWorker:
         if any(step.activity_id is not None and step.status != "completed" for step in steps):
             raise ReplayMismatch("source_activity_incomplete")
         selections = {s.tool: s for s in map(RecordingSelection.model_validate, job["selection"])}
+        from app.application.evaluation.context_recording import SUMMARY_RECORDING_TOOL
+
+        if SUMMARY_RECORDING_TOOL in selections:
+            raise ReplayMismatch("context_recording_selection_reserved")
         evidence, pins, contracts, slots, catalog = {}, {}, {}, [], None
         citation_evidence = {}
         total_bytes = 0
@@ -141,6 +147,8 @@ class RecordingWorker:
                         output_digest=pins[str(output_id)].resource_version,
                         citations=tuple(deduplicate_citations(citations)),
                     )
+        disabled_catalog = hashlib.sha256(canonical({"tools": [], "available": False})).hexdigest()
+        saw_disabled = False
         for step, _inp, out, _input_redacted, _output_redacted in evidence.values():
             kind = out.get("kind")
             if kind == "model":
@@ -148,6 +156,9 @@ class RecordingWorker:
                     captured = await uow.evaluation_recording.captured(
                         scope, run_id, step.activity_id
                     )
+                if not captured["contracts"] and captured["fingerprint"] == disabled_catalog:
+                    saw_disabled = True
+                    continue
                 if catalog is not None and catalog != captured["fingerprint"]:
                     raise ReplayMismatch("source_catalog_changed")
                 catalog = captured["fingerprint"]
@@ -158,6 +169,16 @@ class RecordingWorker:
                     if contract.name in contracts and contracts[contract.name] != contract:
                         raise ReplayMismatch("source_contract_changed")
                     contracts[contract.name] = contract
+        if catalog is None and saw_disabled:
+            catalog = disabled_catalog
+        for step, inp, out, _input_redacted, output_redacted in evidence.values():
+            if out.get("kind") != "context_compact":
+                continue
+            contract, slot = await self._summary_slot(
+                scope, principal, job, token, step, inp, out, output_redacted, evidence
+            )
+            contracts[contract.name] = contract
+            slots.append(slot)
         for step, inp, out, input_redacted, _output_redacted in evidence.values():
             kind = out.get("kind")
             if kind not in {"tool", "retrieval"}:
@@ -211,6 +232,13 @@ class RecordingWorker:
                 raise ReplayMismatch("recording_selection_incomplete")
             if step.step_id in citation_evidence and "sources" in selection.replacements:
                 raise ReplayMismatch("recording_citations_replacement_forbidden")
+            resources = (
+                ContextResourceEvidence.model_validate(out["resource_evidence"])
+                if "resource_evidence" in out
+                else None
+            )
+            if resources is not None and "sources" in selection.replacements:
+                raise ReplayMismatch("recording_sources_replacement_forbidden")
             if input_redacted and not selection.argument_replacements:
                 raise ReplayMismatch("recording_arguments_redacted")
             if (
@@ -261,6 +289,7 @@ class RecordingWorker:
                     result_bytes=size,
                     simulated_effect=contract.policy.effect != ToolEffect.READ_ONLY,
                     citation_evidence=citation_evidence.get(step.step_id),
+                    resource_evidence=resources,
                 )
             )
         if catalog is None or not any(slot.tool == "__retrieval__" for slot in slots):
@@ -273,6 +302,86 @@ class RecordingWorker:
             contracts=tuple(contracts.values()),
             slots=tuple(slots),
             pins=tuple(pins.values()),
+        )
+
+    async def _summary_slot(self, scope, principal, job, token, step, inp, out, redacted, evidence):
+        from app.application.evaluation.context_recording import summary_recording_contract
+        from app.application.execution.native_request_evidence import reconstruct_native_request
+        from app.domain.evaluation.recording import MatchRule
+        from app.domain.execution.context_models import context_digest
+
+        data, physical = out.get("_context_replay"), out.get("_context_dispatches")
+        if redacted or not isinstance(data, dict) or not isinstance(physical, dict):
+            raise ReplayMismatch("context_recording_evidence_unavailable")
+        request = data.get("request")
+        binding = inp.get("request", {})
+        prepares = [
+            item
+            for item in evidence.values()
+            if str(item[0].activity_id) == data.get("prepare_activity_id")
+        ]
+        if (
+            not isinstance(request, dict)
+            or context_digest(request) != data.get("request_digest")
+            or data.get("chunk_digest") != binding.get("chunk_digest")
+            or data.get("compaction_digest") != binding.get("compaction_digest")
+            or request.get("ordinal") != binding.get("ordinal")
+            or request.get("round_index") != binding.get("round_index")
+            or len(prepares) != 1
+            or prepares[0][2].get("kind") != "context_prepare"
+        ):
+            raise ReplayMismatch("context_recording_binding_changed")
+        calls = physical.get("calls")
+        if not isinstance(calls, list) or not calls:
+            raise ReplayMismatch("context_recording_physical_unavailable")
+        for call in calls:
+            if (
+                not call.get("native_payload_exact")
+                or reconstruct_native_request(call["request_snapshot"]) is None
+                or (call.get("settlement") or {}).get("call_identity") != call.get("call_identity")
+                or call.get("configuration", {}).get("context_summary", {}).get("chunk_digest")
+                != data["chunk_digest"]
+            ):
+                raise ReplayMismatch("context_recording_physical_inexact")
+        contract = summary_recording_contract()
+        branch, group, ordinal = (
+            "root",
+            f"context:round:{request['round_index']}",
+            request["ordinal"],
+        )
+        args = {"request_digest": data["request_digest"]}
+        body = canonical(
+            {
+                "summary": data["result"],
+                "request": request,
+                "physical": physical,
+                "compaction_digest": data["compaction_digest"],
+                "chunk_digest": data["chunk_digest"],
+            }
+        )
+        object_id, digest, size = await self.lifecycle.put(
+            self.service.auth(scope, principal),
+            job_id=job["id"],
+            claim_token=token,
+            body=body,
+        )
+        return contract, RecordingSlot(
+            id=uuid4(),
+            tool=contract.name,
+            contract_digest=contract.digest,
+            match_key=recording_key(
+                contract.name, contract.digest, args, branch, ordinal, parallel_group=group
+            ),
+            rule=MatchRule(),
+            branch=branch,
+            parallel_group=group,
+            ordinal=ordinal,
+            source_step_id=step.step_id,
+            source_parent_step_id=prepares[0][0].step_id,
+            object_id=object_id,
+            result_digest=digest,
+            result_bytes=size,
+            simulated_effect=False,
         )
 
 

@@ -102,3 +102,25 @@ async def test_cos_stream_body_uses_raw_stream_without_whole_body_getter():
     assert result.data == b"abc"
     assert result.truncated
     assert response.closed
+
+
+@pytest.mark.parametrize("provider", ["minio", "cos"])
+async def test_private_eight_mib_capture_streams_in_chunks_and_rejects_larger_limits(provider):
+    response = Response(b"x" * 8388608)
+    client = SimpleNamespace(
+        get_object=lambda *args, **kwargs: response if provider == "minio" else {"Body": response}
+    )
+    storage = SimpleNamespace(client=client, bucket="bucket")
+    adapter = (
+        MinioObjectStorageAdapter(storage)
+        if provider == "minio"
+        else CosObjectStorageAdapter(storage)
+    )
+    result = await adapter.get_bounded_bytes("immutable-private-object", 8388608)
+    assert len(result.data) == 8388608
+    assert not result.truncated
+    assert max(response.requested) <= 65536
+    assert response.closed
+    for invalid in (8388609, 0, True):
+        with pytest.raises(ValueError, match="invalid_object_read_limit"):
+            await adapter.get_bounded_bytes("immutable-private-object", invalid)

@@ -44,25 +44,25 @@ def _unreachable_k8s():
 
 
 @pytest.mark.asyncio
-async def test_unregistered_namespace_denied_before_client(actuator_settings):
+async def test_unregistered_namespace_denied_before_client(actuator_settings, invoke):
     actuator = Actuator(actuator_settings(), k8s_factory=_unreachable_k8s)
-    result = await actuator.restart_workload("production", "api", "deployment", "key-1")
+    result = await invoke(actuator, "restart_workload", namespace="production")
     assert result["action_outcome"] == "failed"
     assert result["error_code"] == "NAMESPACE_DENIED"
 
 
 @pytest.mark.asyncio
-async def test_unregistered_workload_denied(actuator_settings):
+async def test_unregistered_workload_denied(actuator_settings, invoke):
     actuator = Actuator(actuator_settings(), k8s_factory=_unreachable_k8s)
-    result = await actuator.restart_workload("demo", "unknown", "deployment", "key-1")
+    result = await invoke(actuator, "restart_workload", workload="unknown")
     assert result["action_outcome"] == "failed"
     assert result["error_code"] == "TARGET_DENIED"
 
 
 @pytest.mark.asyncio
-async def test_scale_replicas_out_of_bounds_denied(actuator_settings):
+async def test_scale_replicas_out_of_bounds_denied(actuator_settings, invoke):
     """scale 到注册 min/max 之外 -> denied before touching k8s (REPLICAS_OUT_OF_BOUNDS)."""
     actuator = Actuator(actuator_settings(), k8s_factory=_unreachable_k8s)
-    result = await actuator.scale_workload("demo", "api", "deployment", 99, "key-1")
+    result = await invoke(actuator, "scale_workload", replicas=99)
     assert result["action_outcome"] == "failed"
     assert result["error_code"] == "REPLICAS_OUT_OF_BOUNDS"

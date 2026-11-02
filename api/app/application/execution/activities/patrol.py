@@ -90,6 +90,7 @@ class PatrolExecutionActivityHandler:
                 "fail_count": finalized.fail_count,
                 "error_count": finalized.error_count,
             },
+            run_id=context.run.run_id,
         )
         return ActivityOutcome.succeeded(
             result_ref=result_ref,
@@ -196,6 +197,7 @@ class PatrolValidationActivityHandler:
                 "status": validated.status.value,
                 "ok": bool(validated.validation_summary.get("ok")),
             },
+            run_id=context.run.run_id,
         )
         return ActivityOutcome.succeeded(
             result_ref=result_ref,

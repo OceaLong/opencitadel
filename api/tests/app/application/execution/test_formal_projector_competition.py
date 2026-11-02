@@ -16,7 +16,9 @@ import pytest
 from sqlalchemy import text
 
 from app.domain.execution.events import StoredEvent
+from app.domain.execution.run import RunAggregate
 from app.domain.models.authorization import AuthorizationContext
+from app.infrastructure.execution.postgres_event_store import PostgresEventStore
 from app.infrastructure.execution.postgres_formal_projector import (
     PostgresFormalProjector as FormalProjector,
 )
@@ -75,6 +77,11 @@ async def _apply_run_event(projector, session, event) -> None:
     per-event product side effects and a final ``_flush_run`` UPSERT; these
     tests drive one event at a time, so each call folds and flushes.
     """
+    # Production read_scope upcasts before the projector fold. This direct
+    # product fixture must pass through that same schema adapter.
+    (event,) = PostgresEventStore(
+        session, event_registries={"run": RunAggregate().event_registry}
+    )._upcast((event,))
     trackers: dict = {}
     tracker = await projector._track_run(session, event, trackers)
     await projector._project_product_lifecycle(session, event, tracker.state)

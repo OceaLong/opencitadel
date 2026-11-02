@@ -128,6 +128,30 @@ class ReplayRuntime:
         )
         return await self._read(context, contract, result)
 
+    async def summary(self, request, context, plan, chunk, *, round_index):
+        from app.application.evaluation.context_recording import (
+            restore_summary,
+            summary_recording_contract,
+            summary_replay_request,
+        )
+        from app.domain.execution.context_models import context_digest
+
+        body, aliases = summary_replay_request(plan, chunk, round_index=round_index)
+        contract = summary_recording_contract()
+        result = await self.adapter.match(
+            context,
+            contract.name,
+            contract.digest,
+            {"request_digest": context_digest(body)},
+            "root",
+            chunk.ordinal,
+            parallel_group=f"context:round:{round_index}",
+        )
+        recorded = await self._read(context, contract, result)
+        if recorded.get("request") != body:
+            raise ReplayMismatch("context_recording_request_changed")
+        return restore_summary(recorded.get("summary", {}), aliases, chunk)
+
     async def _read(self, context, contract, result):
         async with self.authority.open(context) as access:
             await self.authority.approve(access, context, contract.policy)
@@ -162,7 +186,10 @@ class ReplayRuntime:
                     # These references originate from the fixed authorized source
                     # cut, not the replaceable recorded result or answer text.
                     await context.record_citations(list(metadata.citations))
-            return json.loads(data)
+            value = json.loads(data)
+            if slot.resource_evidence is not None:
+                value["_context_resource_evidence"] = slot.resource_evidence.model_dump(mode="json")
+            return value
 
     async def coverage(self, context):
         from app.domain.evaluation.recording import ReplayCoverage

@@ -30,6 +30,7 @@ services:
       <<: *evaluation-settings
       ACCEPTANCE_PROJECT_ID: ${ACCEPTANCE_PROJECT_ID}
       ACCEPTANCE_RUN_ID: ${ACCEPTANCE_RUN_ID}
+      ACCEPTANCE_PHASE1_BROWSER: ${ACCEPTANCE_PHASE1_BROWSER:-0}
     entrypoint: ["/app/.venv/bin/python", "/acceptance-driver/observed_kernel.py"]
     command: []
     volumes:

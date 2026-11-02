@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,7 @@ from app.domain.execution.activity import (
     ActivityRequest,
 )
 from app.domain.execution.commands import JsonValue
+from app.domain.execution.context_models import ContextCompilation
 from app.domain.external.llm import LLM
 from app.domain.models.scope import OwnerScope
 
@@ -66,6 +68,7 @@ class ModelCallActivityHandler:
         client_factory: Callable[..., LLM],
         judge=None,
         text_stream: bool = False,
+        context_validation=None,
     ) -> None:
         self._text_stream = text_stream
         self._judge = judge
@@ -79,6 +82,7 @@ class ModelCallActivityHandler:
         # 运行中 Token 预算拦截依赖；未注入时退化为无操作。
         self._quota = quota
         self._client_factory = client_factory
+        self._context_validation = context_validation
 
     async def execute(
         self,
@@ -87,10 +91,39 @@ class ModelCallActivityHandler:
     ) -> ActivityOutcome:
         if request.input_ref is None:
             return ActivityOutcome.failed(failure_code="ACTIVITY_INPUT_MISSING")
-        payload = await self._objects.load_input(
-            key=request.input_ref,
-            expected_digest=request.input_digest,
+        prepared = None
+        manifest = context.run.definition_manifest
+        expects_prepared = manifest is not None and any(
+            item.activity_type == activity_types.CONTEXT_PREPARE for item in manifest.handlers
         )
+        if expects_prepared:
+            if self._context_validation is None or self._execution_usage is None:
+                return ActivityOutcome.failed(failure_code="CONTEXT_VALIDATION_UNAVAILABLE")
+            ref = request.input_payload.get("context_ref")
+            if not isinstance(ref, str):
+                return ActivityOutcome.failed(failure_code="CONTEXT_MANIFEST_UNAVAILABLE")
+            body = await self._objects.load_context_document(ref)
+            prepared = ContextCompilation.model_validate(body.get("compilation")).manifest
+            if (
+                body.get("kind") != "context_prepare"
+                or prepared is None
+                or prepared.definition_pin != context.run.definition_pin
+                or prepared.policy != manifest.context_policy
+                or prepared.boundary.current_input_digest != request.input_digest
+                or prepared.digest != request.input_payload.get("context_digest")
+            ):
+                return ActivityOutcome.failed(failure_code="CONTEXT_MANIFEST_MISMATCH")
+            payload = await self._objects.load_input_bounded(
+                key=request.input_ref,
+                expected_digest=request.input_digest,
+                limit=prepared.policy.read_bytes,
+            )
+            if payload.get("thinking_enabled"):
+                return ActivityOutcome.failed(failure_code="CONTEXT_INPUT_MODE_UNSUPPORTED")
+        else:
+            payload = await self._objects.load_input(
+                key=request.input_ref, expected_digest=request.input_digest
+            )
         prompt = payload.get("message")
         if not isinstance(prompt, str) or not prompt.strip():
             return ActivityOutcome.failed(failure_code="MODEL_PROMPT_INVALID")
@@ -108,7 +141,7 @@ class ModelCallActivityHandler:
                 "temperature_override": judge["temperature"],
                 "_execution_usage": {"purpose": "evaluation_judge"},
             }
-        history = [] if restricted else await self._load_history(request)
+        history = [] if restricted or prepared is not None else await self._load_history(request)
         if history is None:
             return ActivityOutcome.failed(failure_code="MODEL_HISTORY_INVALID")
         scope = _owner_scope(context)
@@ -171,8 +204,20 @@ class ModelCallActivityHandler:
                     await capture_disabled(context)
             definitions = snapshot.definitions if snapshot is not None else ()
             schemas = [definition.tool_schema for definition in definitions]
+            if prepared is not None and (
+                tuple(schemas) != prepared.tools
+                or tuple(
+                    definition.contract.digest if definition.contract else ""
+                    for definition in definitions
+                )
+                != prepared.tool_contract_digests
+            ):
+                return ActivityOutcome.failed(failure_code="CONTEXT_TOOL_CONTRACT_CHANGED")
             resolved_skill = {}
-            if restricted:
+            if prepared is not None:
+                messages = [message.wire() for message in prepared.messages]
+                skill_disabled = False
+            elif restricted:
                 from app.domain.evaluation.judge_protocol import SYSTEM_PROMPT
 
                 messages = [
@@ -219,24 +264,45 @@ class ModelCallActivityHandler:
             )
             if candidates is not None:
                 guard = BudgetPayloadGuard(candidates, guard)
+            if prepared is not None:
+                from app.domain.evaluation.context_profile import context_profiles
+
+                if (
+                    candidates is None
+                    or context_profiles(candidates, output_tokens=prepared.output_tokens)
+                    != prepared.candidates
+                ):
+                    return ActivityOutcome.failed(failure_code="CONTEXT_CANDIDATES_CHANGED")
+                guard = _PreparedContextGuard(
+                    guard, self._context_validation, prepared, request, context, snapshot
+                )
             with (
                 candidate_authority_context(candidates)
                 if candidates is not None
                 else nullcontext(),
                 dispatch_context(guard, model),
             ):
-                if (
-                    self._text_stream
-                    and model.provider.value in {"openai", "azure", "ollama"}
-                    and callable(getattr(client, "stream_invoke", None))
-                    and context.run.family.value == "ask"
-                    and context.run.source_entity_type == "session"
-                    and not allow_tools
-                    and purpose in {"production", "unknown"}
-                ):
-                    response = await self._stream_response(client, messages, context)
-                else:
-                    response = await client.invoke(messages, tools=schemas or None)
+                try:
+                    if (
+                        self._text_stream
+                        and model.provider.value in {"openai", "azure", "ollama"}
+                        and callable(getattr(client, "stream_invoke", None))
+                        and context.run.family.value == "ask"
+                        and context.run.source_entity_type == "session"
+                        and not allow_tools
+                        and purpose in {"production", "unknown"}
+                    ):
+                        response = await self._stream_response(client, messages, context)
+                    else:
+                        response = await client.invoke(messages, tools=schemas or None)
+                except Exception:
+                    if (
+                        isinstance(guard, _PreparedContextGuard)
+                        and guard.rejection_code is not None
+                        and guard.accepted == 0
+                    ):
+                        return ActivityOutcome.failed(failure_code=guard.rejection_code)
+                    raise
             await self._record_usage(
                 request=request,
                 context=context,
@@ -253,12 +319,24 @@ class ModelCallActivityHandler:
                 response.get("tool_calls") not in (None, []) or response.get("_raw_tool_calls")
             ):
                 return ActivityOutcome.failed(failure_code="JUDGE_TOOL_CALL_FORBIDDEN")
+            if (
+                prepared is not None
+                and not allow_tools
+                and (
+                    response.get("tool_calls") not in (None, []) or response.get("_raw_tool_calls")
+                )
+            ):
+                return ActivityOutcome.failed(failure_code="MODEL_TOOL_CALL_FORBIDDEN")
             normalized = _normalize_tool_calls(
                 response.get("tool_calls"),
                 definitions,
             )
             if normalized is None:
                 return ActivityOutcome.failed(failure_code="MODEL_TOOL_CALL_INVALID")
+            if snapshot is not None:
+                from app.application.execution.invocation_contracts import freeze_calls
+
+                normalized = await freeze_calls(self._objects, request, snapshot, normalized)
             provider_calls = [
                 {
                     "id": item["call_id"],
@@ -280,9 +358,15 @@ class ModelCallActivityHandler:
             }
             if provider_calls:
                 message["tool_calls"] = provider_calls
-            result_ref = await self._objects.put_result(
-                request.activity_id,
-                {"kind": "model", "message": message},
+            result_body = {"kind": "model", "message": message}
+            result_ref = (
+                await self._objects.put_context_result(
+                    request.activity_id, result_body, run=context.run
+                )
+                if prepared is not None
+                else await self._objects.put_result(
+                    request.activity_id, result_body, run_id=context.run.run_id
+                )
             )
             decision_data: dict[str, JsonValue] = {"tool_calls": normalized}
             if restricted:
@@ -612,6 +696,7 @@ def _normalize_tool_calls(
         return None
     by_name = {definition.name: definition for definition in definitions}
     normalized: list[dict[str, JsonValue]] = []
+    seen_call_ids: set[str] = set()
     for index, raw_call in enumerate(raw_calls):
         if not isinstance(raw_call, dict):
             return None
@@ -624,6 +709,11 @@ def _normalize_tool_calls(
         arguments = _arguments(function.get("arguments"))
         if arguments is None:
             return None
+        definition = by_name[name]
+        if definition.approval_feedback_param:
+            # The model may propose options, but cannot impersonate the user's
+            # eventual choice through a server-owned feedback parameter.
+            arguments.pop(definition.approval_feedback_param, None)
         encoded = json.dumps(
             arguments,
             ensure_ascii=False,
@@ -635,7 +725,9 @@ def _normalize_tool_calls(
         call_id = raw_call.get("id")
         if not isinstance(call_id, str) or not call_id.strip():
             call_id = hashlib.sha256(f"{index}:{name}:".encode() + encoded).hexdigest()[:32]
-        definition = by_name[name]
+        if call_id in seen_call_ids:
+            return None
+        seen_call_ids.add(call_id)
         entry: dict[str, JsonValue] = {
             "call_id": call_id,
             "name": name,
@@ -682,3 +774,35 @@ def _arguments(raw: object) -> dict[str, JsonValue] | None:
 
 
 __all__ = ["ModelCallActivityHandler"]
+
+
+class _PreparedContextGuard:
+    """Every fallback uses the same manifest and rechecks its live authority."""
+
+    def __init__(self, downstream, validation, manifest, request, context, catalog):
+        self.downstream, self.validation, self.manifest = downstream, validation, manifest
+        self.request, self.context, self.catalog = request, context, catalog
+        self.accepted = 0
+        self.rejection_code = None
+
+    async def before_send(self, model, payload):
+        try:
+            await self.validation.validate(
+                self.manifest, self.request, self.context, catalog=self.catalog
+            )
+            permit = await self.downstream.before_send(model, payload)
+        except PermissionError:
+            self.rejection_code = "CONTEXT_SOURCE_AUTHORIZATION_REVOKED"
+            raise
+        except ValueError as error:
+            if re.fullmatch(r"CONTEXT_[A-Z_]{1,80}", str(error)):
+                self.rejection_code = str(error)
+            raise
+        self.accepted += 1
+        return permit
+
+    async def after_send(self, identity, usage, revision):
+        return await self.downstream.after_send(identity, usage, revision)
+
+    async def after_completion(self, identity, revision):
+        return await self.downstream.after_completion(identity, revision)

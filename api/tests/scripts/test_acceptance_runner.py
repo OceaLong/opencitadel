@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -24,6 +28,8 @@ from scripts.acceptance.runner import (  # noqa: E402
     AcceptanceRunner,
     CommandResult,
     OwnershipError,
+    RunnerFailure,
+    SubprocessCommandRunner,
     assert_ports_available,
     compose_network_name,
     owned_resources,
@@ -317,6 +323,247 @@ def _config(tmp_path: Path, *, disposable: bool = True) -> AcceptanceConfig:
     )
 
 
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process-group cancellation")
+@pytest.mark.parametrize(
+    "signal_mode",
+    ["responsive", "descendant-ignores", "family-ignores"],
+)
+def test_subprocess_cancellation_ends_descendant_pipes_and_allows_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_mode: str
+) -> None:
+    if signal_mode != "responsive":
+        monkeypatch.setattr(SubprocessCommandRunner, "_CANCEL_GRACE_SECONDS", 0.1)
+    parent_ready = tmp_path / "parent-ready.json"
+    descendant_ready = tmp_path / "descendant-ready.json"
+    descendant_stopped = tmp_path / "descendant-stopped"
+    script = tmp_path / "owned-command.py"
+    script.write_text(
+        """import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import threading
+
+parent_ready, child_ready, child_stopped, mode = sys.argv[1:]
+if mode == "family-ignores":
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+parent_marker = Path(parent_ready)
+parent_temporary = parent_marker.with_suffix(".tmp")
+parent_temporary.write_text(json.dumps({"pid": os.getpid(), "pgid": os.getpgrp()}))
+parent_temporary.replace(parent_marker)
+child = r'''
+import json
+import os
+from pathlib import Path
+import signal
+import sys
+import threading
+
+ready, stopped = map(Path, sys.argv[1:3])
+def interrupted(signum, frame):
+    stopped.write_text(str(signum))
+    print("descendant-terminated", flush=True)
+    raise SystemExit(130)
+
+signal.signal(signal.SIGINT, interrupted if sys.argv[3] == "responsive" else signal.SIG_IGN)
+temporary = ready.with_suffix(".tmp")
+temporary.write_text(json.dumps({"pid": os.getpid(), "pgid": os.getpgrp()}))
+temporary.replace(ready)
+threading.Event().wait()
+'''
+# The child intentionally inherits both captured pipes. Killing only this
+# parent would leave communicate() waiting for the descendant indefinitely.
+subprocess.Popen([sys.executable, "-c", child, child_ready, child_stopped, mode])
+threading.Event().wait()
+""",
+        encoding="utf-8",
+    )
+    commands = SubprocessCommandRunner()
+    finished = threading.Event()
+    results: list[CommandResult] = []
+    errors: list[Exception] = []
+
+    def run_owned_command() -> None:
+        try:
+            results.append(
+                commands.run(
+                    [
+                        sys.executable,
+                        str(script),
+                        str(parent_ready),
+                        str(descendant_ready),
+                        str(descendant_stopped),
+                        signal_mode,
+                    ],
+                    cwd=tmp_path,
+                    timeout=10,
+                )
+            )
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=run_owned_command, daemon=True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not descendant_ready.exists() and not finished.is_set():
+            assert time.monotonic() < deadline, "owned descendant did not become ready"
+            finished.wait(0.01)
+        assert parent_ready.is_file()
+        assert descendant_ready.is_file()
+        parent = json.loads(parent_ready.read_text())
+        descendant = json.loads(descendant_ready.read_text())
+        assert parent["pgid"] == parent["pid"]
+        assert parent["pgid"] != os.getpgrp()
+        assert descendant["pid"] != parent["pid"]
+        assert descendant["pgid"] == parent["pgid"]
+
+        commands.cancel_pending()
+
+        assert finished.wait(3), "cancellation left the descendant holding captured pipes"
+        assert errors == []
+        assert len(results) == 1
+        assert results[0].returncode != 0
+        if signal_mode == "responsive":
+            assert descendant_stopped.read_text() == str(signal.SIGINT)
+            assert "descendant-terminated" in results[0].stdout
+        else:
+            assert not descendant_stopped.exists()
+            if signal_mode == "family-ignores":
+                assert results[0].returncode == -signal.SIGKILL
+
+        # Cancellation applies to the command that was pending. Later cleanup
+        # commands must not inherit it, including after an idle cancellation.
+        commands.cancel_pending()
+        cleanup = commands.run(
+            [sys.executable, "-c", "print('cleanup-complete')"], cwd=tmp_path, timeout=2
+        )
+        assert cleanup.returncode == 0
+        assert cleanup.stdout == "cleanup-complete\n"
+    finally:
+        # Only terminate the exact test-owned group if a broken implementation
+        # left it alive. Never signal pytest's process group or search by prefix.
+        if parent_ready.is_file():
+            parent = json.loads(parent_ready.read_text())
+            if parent["pgid"] == parent["pid"] and parent["pgid"] != os.getpgrp():
+                identities = [parent]
+                if descendant_ready.is_file():
+                    identities.append(json.loads(descendant_ready.read_text()))
+                for identity in identities:
+                    try:
+                        if os.getpgid(identity["pid"]) == parent["pgid"]:
+                            os.killpg(parent["pgid"], signal.SIGKILL)
+                            break
+                    except ProcessLookupError:
+                        pass
+        worker.join(timeout=3)
+
+
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process-group cancellation")
+def test_cancellation_during_process_creation_is_probed_without_cancelling_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands = SubprocessCommandRunner()
+    monkeypatch.setattr(SubprocessCommandRunner, "_CANCEL_GRACE_SECONDS", 0.1)
+    runner = AcceptanceRunner(
+        _config(tmp_path),
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    real_popen = subprocess.Popen
+    creations: list[int] = []
+
+    def create_then_cancel(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        creations.append(process.pid)
+        # The OS process exists but commands.run() has not registered it yet.
+        # Only the newly registered cancellation probe can close this window.
+        runner.request_cancel()
+        return process
+
+    monkeypatch.setattr("scripts.acceptance.runner.subprocess.Popen", create_then_cancel)
+    cancelled = commands.run(
+        [sys.executable, "-c", "import threading; threading.Event().wait()"],
+        cwd=tmp_path,
+        timeout=2,
+    )
+
+    assert len(creations) == 1
+    assert cancelled.returncode != 0
+    assert runner._cancel_requested is True
+
+    # The acceptance finally block enters this gate before starting cleanup.
+    # Cancellation remains requested, but it must no longer kill new commands.
+    runner._cleanup_in_progress = True
+    cleanup = commands.run(
+        [sys.executable, "-c", "print('cleanup-after-cancel')"], cwd=tmp_path, timeout=2
+    )
+    assert len(creations) == 2
+    assert cleanup.returncode == 0
+    assert cleanup.stdout == "cleanup-after-cancel\n"
+
+
+@pytest.mark.parametrize("with_cancel_hook", [False, True])
+def test_request_cancel_delegates_pending_hook_and_accepts_legacy_commands(
+    tmp_path: Path, with_cancel_hook: bool
+) -> None:
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(config.evidence_dir)
+    cancellations: list[bool] = []
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    if with_cancel_hook:
+        commands.cancel_pending = lambda: cancellations.append(runner._cancel_requested)
+    else:
+        assert not hasattr(commands, "cancel_pending")
+
+    runner.request_cancel()
+    # A repeated UI/signal cancellation must not interrupt a later cleanup
+    # command that now uses the same command runner.
+    runner.request_cancel()
+
+    assert cancellations == ([True] if with_cancel_hook else [])
+    assert commands.calls == []
+    with pytest.raises(RunnerFailure, match="cancelled: termination requested"):
+        runner._raise_if_cancelled()
+
+
+def test_first_cancellation_during_cleanup_preserves_commands_and_disables_probe(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(config.evidence_dir)
+    cancellations: list[bool] = []
+    probes = []
+    commands.cancel_pending = lambda: cancellations.append(True)
+    commands.set_cancel_probe = probes.append
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    assert len(probes) == 1
+    assert runner._cancel_requested is False
+    runner._cleanup_in_progress = True
+
+    runner.request_cancel()
+
+    assert runner._cancel_requested is True
+    assert cancellations == []
+    assert probes[0]() is False
+    assert commands.calls == []
+
+
 @pytest.mark.parametrize(
     "value",
     ["UPPERCASE", "has_underscore", "-leading", "ab", "a" * 49, "shell;command"],
@@ -482,18 +729,23 @@ def test_runner_success_writes_valid_evidence_and_removes_disposable_resources(
         "opencitadel-ops-collector",
         "opencitadel-ops-actuator",
         "acceptance-inference",
+        "ops-console",
     }
     assert any("--volumes" in call for call in commands.calls if "down" in call)
+    up_call = next(call for call in commands.calls if "up" in call)
+    assert "--no-build" in up_call
+    assert "--build" not in up_call
     logs = (config.evidence_dir / "logs/stack.log").read_text()
     assert "acceptance-provider-token" not in logs
     assert "externally-visible-secret" not in logs
 
 
+@pytest.mark.parametrize("playwright_exit", [0, 1])
 def test_execution_consumers_run_after_current_strict_receipt_and_before_capacity_failure(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, playwright_exit
 ):
     config = _config(tmp_path)
-    commands = FakeCommandRunner(config.evidence_dir)
+    commands = FakeCommandRunner(config.evidence_dir, playwright_exit=playwright_exit)
     runner = AcceptanceRunner(
         config,
         commands=commands,
@@ -530,6 +782,69 @@ def test_execution_consumers_run_after_current_strict_receipt_and_before_capacit
     assert commands.calls.index(playwright) < commands.calls.index(("strict-receipt-validated",))
     manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
     assert "AC21 capacity" in manifest["result"]["failure_reason"]
+    if playwright_exit:
+        assert "playwright: playwright failed" in manifest["result"]["failure_reason"]
+    assert manifest["result"]["status"] == "failed"
+    assert manifest["residue"]["containers"] == 0
+
+
+def test_browser_failure_and_invalid_strict_receipt_are_retained_without_running_consumers(
+    tmp_path, monkeypatch
+):
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(
+        config.evidence_dir, playwright_exit=1, playwright_stderr="original browser failure"
+    )
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    monkeypatch.setattr("scripts.acceptance.runner.assert_ports_available", lambda _ports: None)
+    monkeypatch.setattr(runner, "_prepare_strict_binding", lambda *_args: None)
+
+    def reject_receipt():
+        raise ValueError("foreign producer or unproved restoration")
+
+    monkeypatch.setattr(runner, "_validate_strict_receipt", reject_receipt)
+    assert runner.execute() == 1
+    manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
+    failure = manifest["result"]["failure_reason"]
+    assert "playwright: original browser failure" in failure
+    assert "strict receipt: foreign producer or unproved restoration" in failure
+    assert "AC21 capacity" in failure
+    assert not any(call[:3] == (sys.executable, "-m", "pytest") for call in commands.calls)
+    assert not (config.evidence_dir / "strict-pytest.xml").exists()
+    assert any("down" in call for call in commands.calls)
+    assert manifest["residue"]["containers"] == 0
+
+
+def test_browser_strict_consumer_and_capacity_failures_are_all_retained(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    commands = FakeCommandRunner(
+        config.evidence_dir,
+        playwright_exit=1,
+        playwright_stderr="original browser failure",
+        strict_pytest_exit=1,
+    )
+    runner = AcceptanceRunner(
+        config,
+        commands=commands,
+        repository_root=REPOSITORY_ROOT,
+        readiness_probe=lambda _url: True,
+    )
+    monkeypatch.setattr("scripts.acceptance.runner.assert_ports_available", lambda _ports: None)
+    monkeypatch.setattr(runner, "_prepare_strict_binding", lambda *_args: None)
+    monkeypatch.setattr(runner, "_validate_strict_receipt", lambda: None)
+    assert runner.execute() == 1
+    manifest = json.loads((config.evidence_dir / "manifest.json").read_text())
+    failure = manifest["result"]["failure_reason"]
+    assert "playwright: original browser failure" in failure
+    assert "strict execution consumers" in failure
+    assert "AC21 capacity" in failure
+    assert (config.evidence_dir / "strict-pytest.xml").is_file()
+    assert any("down" in call for call in commands.calls)
     assert manifest["residue"]["containers"] == 0
 
 

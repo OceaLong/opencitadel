@@ -12,6 +12,7 @@ from app.composition.execution_content import build_execution_view_service
 from app.domain.execution.run import RunAggregate, RunFamily
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.runtime_policy.snapshot import derive_run_policy_snapshot
+from app.infrastructure.execution.postgres_activity_store import PostgresActivityStore
 from app.infrastructure.execution.postgres_execution_view import PostgresExecutionView
 from app.infrastructure.execution.postgres_formal_projector import PostgresFormalProjector
 from app.infrastructure.execution.sqlalchemy_orchestrator import SqlAlchemyExecutionOrchestrator
@@ -32,8 +33,10 @@ async def parallel_views(context):
         formal_now=lambda: clock[0],
     )
 
-    async def send(kind, payload=None, version=1):
-        result = await handler.handle(command(context, run_id, kind, payload, version))
+    async def send(kind, payload=None, version=1, *, lease_proof=None):
+        result = await handler.handle(
+            command(context, run_id, kind, payload, version, lease_proof=lease_proof)
+        )
         assertion(kind + "_accepted", result.status == "accepted")
 
     # New Run identity is the command's actual resource; source session was made
@@ -70,6 +73,21 @@ async def parallel_views(context):
         context.own("activity", identity)
 
     await request(root, "model.call", None)
+    store = PostgresActivityStore(
+        session_factory=context.resources.postgres.session_factory, authorization=KERNEL
+    )
+    root_claims = await store.claim(
+        now=datetime.now(UTC),
+        limit=1,
+        worker_id="acceptance-parallel-views",
+        claim_ttl=timedelta(minutes=5),
+    )
+    assertion("parallel_root_claimed", len(root_claims) == 1)
+    root_claim = root_claims[0]
+    assertion(
+        "parallel_root_call_started",
+        await store.mark_call_started(root_claim, now=datetime.now(UTC)),
+    )
     # The formal projection links only a unique completed parent at the
     # child's request. Settle the root first while keeping the two children
     # concurrent and their controlled start/end times tied.
@@ -77,6 +95,7 @@ async def parallel_views(context):
         "MarkActivityCallStarted",
         {"activity_id": str(root), "generation": 0, "claim_generation": 1},
         version=2,
+        lease_proof=root_claim.lease_proof,
     )
     await send(
         "CompleteActivity",
@@ -87,15 +106,30 @@ async def parallel_views(context):
             "public_data": {"success": True},
         },
         version=2,
+        lease_proof=root_claim.lease_proof,
     )
     await request(direct, "tool.call", root)
     await request(missing, "tool.call", None)
+    child_claims = await store.claim(
+        now=datetime.now(UTC),
+        limit=2,
+        worker_id="acceptance-parallel-views",
+        claim_ttl=timedelta(minutes=5),
+    )
+    proof_by_activity = {claim.request.activity_id: claim.lease_proof for claim in child_claims}
+    assertion("parallel_children_claimed", set(proof_by_activity) == {direct, missing})
+    for claim in child_claims:
+        assertion(
+            "parallel_child_call_started",
+            await store.mark_call_started(claim, now=datetime.now(UTC)),
+        )
     clock[0] = now + timedelta(seconds=1)
     for identity in (direct, missing):
         await send(
             "MarkActivityCallStarted",
             {"activity_id": str(identity), "generation": 0, "claim_generation": 1},
             version=2,
+            lease_proof=proof_by_activity[identity],
         )
     clock[0] = now + timedelta(seconds=3)
     for identity in (direct, missing):
@@ -108,6 +142,7 @@ async def parallel_views(context):
                 "public_data": {"success": identity != missing},
             },
             version=2,
+            lease_proof=proof_by_activity[identity],
         )
     await send("CompleteRun")
     # The view's observation boundary must be no earlier than the controlled

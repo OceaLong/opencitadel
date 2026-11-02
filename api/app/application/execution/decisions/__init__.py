@@ -22,6 +22,7 @@ from app.application.execution.decisions.patrol import patrol_plan
 from app.application.execution.decisions.resource_build import resource_build_plan
 from app.domain.execution.commands import JsonValue, RegisteredCommand
 from app.domain.execution.context import RunExecutionContext
+from app.domain.execution.definition import DefinitionUnavailable
 from app.domain.execution.run import RunFamily, RunState
 
 PlannerFn = Callable[
@@ -119,6 +120,7 @@ DECISION_PLANNERS: Mapping[RunFamily, DecisionPlannerSpec] = {
                 activity_types.RETRIEVAL_SEARCH,
                 activity_types.MODEL_CALL,
                 activity_types.TOOL_CALL,
+                activity_types.TOOL_INTENT_REFRESH,
             }
         ),
     ),
@@ -188,11 +190,19 @@ def next_command(
     *,
     outcomes: Mapping[UUID, dict[str, JsonValue]] | None = None,
     now: datetime,
+    definitions=None,
 ) -> RegisteredCommand | None:
     if state.family is None:
         raise ValueError("Run family is required")
     if state.run_id != context.run_id or state.family != context.family:
         raise ValueError("Run context does not match decision state")
+    if state.definition_pin is not None:
+        if definitions is None:
+            raise DefinitionUnavailable("no local exact definition registry")
+        registered = definitions.resolve(state.definition_pin)
+        return registered.planner(state, context, outcomes or {}, now)
+    if definitions is not None:
+        raise DefinitionUnavailable("legacy Run has no trustworthy definition pin")
     spec = DECISION_PLANNERS.get(state.family)
     if spec is None:
         raise ValueError(f"unsupported Run family: {state.family}")

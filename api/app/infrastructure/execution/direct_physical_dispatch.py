@@ -7,6 +7,8 @@ from app.application.evaluation.budget_service import BudgetDemandFactory, requi
 from app.domain.evaluation.budget import BudgetSettlement, DirectPhysicalRequest
 from app.domain.evaluation.configuration import digest
 from app.domain.models.authorization import AuthorizationMode
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
+from app.domain.models.inference import EmbeddingModelSettings
 from app.infrastructure.execution.budget_dispatch import CommittedDispatchPermit
 
 
@@ -35,6 +37,13 @@ class DirectPhysicalDispatchGuard:
         self.receipts = {}
 
     async def before_send(self, model, payload):
+        wire_model = payload.get("model", model.model_name)
+        space_digest = (
+            EmbeddingSpaceDescriptor.from_resolved(model).digest
+            if isinstance(model.model.settings, EmbeddingModelSettings)
+            and wire_model == model.model_name
+            else None
+        )
         demand = self.service.demands.physical(
             self.authorization,
             endpoint_id=model.endpoint.id,
@@ -51,8 +60,9 @@ class DirectPhysicalDispatchGuard:
                     endpoint_id=model.endpoint.id,
                     provider=model.provider.value,
                     configured_model=model.model_name,
-                    wire_model=payload.get("model", model.model_name),
+                    wire_model=wire_model,
                     payload_digest=digest(payload),
+                    embedding_space_digest=space_digest,
                 )
             }
         )

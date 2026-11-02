@@ -20,9 +20,11 @@ import { useClientDataScope } from "@/providers/client-data-provider";
 
 import { type ApprovalActionContext, ApprovalDetail } from "./approval-detail";
 import { ArtifactPanel } from "./artifact-panel";
+import { ContextSummary } from "./context-summary";
 import { ContentSection, InvocationDetail } from "./invocation-detail";
 import { RetainedDetailPanel, type RetainedDetailPanelProps } from "./retained-detail-panel";
 import { type SourceLocator, SourcePanel } from "./source-panel";
+import { ToolIntentRefreshAction } from "./tool-intent-refresh";
 export type DetailPanelProps = {
   renderReady?: boolean;
   selection: WorkbenchSelection;
@@ -81,13 +83,33 @@ function LiveDetailPanel(props: DetailPanelProps) {
       </p>
     );
   return (
-    <AuthorizedDetail
-      key={key}
-      {...props}
-      page={page}
-      run={run}
-      owner={{ key, workspaceId: scope.workspaceId, at: page.at }}
-    />
+    <>
+      {detail?.contract_drift &&
+        detail.activity_id &&
+        selection.at === null &&
+        run.status === "waiting" &&
+        ["contract_changed", "authorization_changed", "tool_intent_refresh_failed"].includes(
+          run.wait_reason ?? "",
+        ) && (
+          <div className="p-3" hidden={props.historical ?? false}>
+            <ToolIntentRefreshAction
+              runId={run.run_id}
+              activityId={detail.activity_id}
+              subjectDigest={detail.contract_drift.subject_digest}
+              onChanged={props.onChanged}
+              onRevoked={props.onRevoked}
+              disabled={props.historical ?? false}
+            />
+          </div>
+        )}
+      <AuthorizedDetail
+        key={key}
+        {...props}
+        page={page}
+        run={run}
+        owner={{ key, workspaceId: scope.workspaceId, at: page.at }}
+      />
+    </>
   );
 }
 function AuthorizedDetail({
@@ -382,6 +404,7 @@ function AuthorizedDetail({
       ) : run.public_summary ? (
         <MarkdownContent content={run.public_summary} />
       ) : null}
+      {detail?.context && <ContextSummary step={detail} />}
       <Tabs
         value={panel}
         onValueChange={(value) => {

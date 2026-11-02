@@ -54,6 +54,7 @@ class DirectPhysicalRequest(ImmutableModel):
     configured_model: str = Field(min_length=1)
     wire_model: str = Field(min_length=1)
     payload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_space_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class BudgetDemand(ImmutableModel):

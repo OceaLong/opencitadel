@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeDocument
+from app.domain.models.knowledge_base import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
     KnowledgeVersionState,
@@ -17,6 +17,7 @@ from app.domain.runtime_policy import (
     KnowledgeRetrievalRunPolicy,
 )
 from app.domain.services.knowledge_base.retriever import HybridRetriever
+from tests.app.embedding_test_support import embedding_space
 
 _POLICY = KnowledgeRetrievalRunPolicy(
     vector_enabled=True,
@@ -28,6 +29,7 @@ _POLICY = KnowledgeRetrievalRunPolicy(
 
 class _FakeKbRepo:
     def __init__(self):
+        self.get_kb = AsyncMock(return_value=KnowledgeBase(id="kb-1", name="Fixture"))
         self.vector_search_chunks = AsyncMock(return_value=[])
         self.bm25_search_chunks = AsyncMock(return_value=[])
         self.get_related_chunk_ids = AsyncMock(return_value=[])
@@ -55,6 +57,8 @@ class _FakeUow:
                     "graph_search": False,
                 },
                 published_at=datetime.now(UTC),
+                embedding_space=embedding_space(),
+                embedding_space_digest=embedding_space().digest,
             )
         )
 

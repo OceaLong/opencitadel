@@ -135,6 +135,10 @@ class DBEvaluationEnvironmentRepository:
                 forget_result(result)
         return registered_original(row, kind, revision, current=current)
 
+    async def lock_registrations(self, scope, references):
+        for kind, identity in sorted(references, key=lambda value: (value[0], str(value[1]))):
+            await self.lock(f"registry:{params(scope)['scope']}:{kind}:{identity}")
+
     async def lease(self, scope, identity, *, lock=False):
         row = (
             (
@@ -584,7 +588,7 @@ class DBEvaluationEnvironmentRepository:
             )
         )
 
-    async def validate_connector(self, scope, target):
+    async def validate_connector(self, scope, target, *, lock=False):
         from app.domain.models.integration_runtime import normalize_integration_tool_policies
         from app.domain.models.tool_policy import CONSERVATIVE_TOOL_POLICY, ToolExecutionPolicy
 
@@ -594,6 +598,7 @@ class DBEvaluationEnvironmentRepository:
         row = await self.db.scalar(
             text(
                 f"SELECT to_jsonb(c) FROM {pack}_servers c WHERE id=:id AND enabled AND (visibility='global' OR (CAST(:team AS text) IS NOT NULL AND team_id=:team) OR (CAST(:team AS text) IS NULL AND owner_user_id=:owner AND team_id IS NULL))"
+                + (" FOR SHARE" if lock else "")
             ),
             params(scope, id=target.connector_id),
         )

@@ -4,6 +4,19 @@ export type HistoricalView = {
   artifacts: unknown[];
   run: { status: string; public_summary: string | null };
 };
+
+/** Messages need not share the newest-first ordering of model steps. */
+export function selectAssistantMessageForStep<
+  T extends { message_id: string; role: string; step_id?: string | null },
+>(messages: T[], stepId: string): T {
+  const matching = messages.filter(
+    (message) => message.role === "assistant" && message.step_id === stepId,
+  );
+  if (matching.length !== 1)
+    throw new Error("exact final model assistant message required");
+  return matching[0]!;
+}
+
 /** Input order must be the server timeline's observed order; opaque strings are never sorted. */
 export function selectHistoryCuts<T extends HistoricalView>(views: T[]) {
   const before = views.find(

@@ -14,6 +14,7 @@ from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.application.execution.activity_worker import ActivityWorkerUnresponsiveError
 from app.application.ports.streams import WakeupPort
 from app.application.security.authorization_context import authorization_scope
 from app.composition.kernel import open_kernel_runtime
@@ -42,6 +43,7 @@ class ExecutionKernelProcess:
         stopping: asyncio.Event | None = None,
         health_file: Path | None = None,
         heartbeat_interval_seconds: float = 5.0,
+        activity_shutdown_grace_seconds: float = 25.0,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -49,6 +51,8 @@ class ExecutionKernelProcess:
             raise ValueError("idle_poll_seconds must not be negative")
         if heartbeat_interval_seconds <= 0:
             raise ValueError("heartbeat_interval_seconds must be positive")
+        if activity_shutdown_grace_seconds <= 0:
+            raise ValueError("activity_shutdown_grace_seconds must be positive")
         self._runtime = runtime
         self._wakeup = wakeup
         self._policy_reader = policy_reader
@@ -62,6 +66,7 @@ class ExecutionKernelProcess:
             )
         )
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._activity_shutdown_grace_seconds = activity_shutdown_grace_seconds
         self._wakeup_cursor = "$"
         self._redis_hint_failed = False
 
@@ -177,31 +182,14 @@ class ExecutionKernelProcess:
             return processed
 
     async def _run_activity_plane(self) -> None:
-        # Loop condition doubles as the shutdown drain gate: once stop is
-        # requested no new claims are taken; the in-flight batch finishes and
-        # run() waits for this plane to exit (K2-3).
-        while not self._stopping.is_set():
-            # Lane isolation, symmetric with _run_lane on the control plane
-            # (D5): a store outage or unexpected bug in one batch must not tear
-            # down the activity plane (previously a CRITICAL, un-restarted task
-            # whose death CrashLoopBackOff'ed every replica). Failed batches log
-            # and count as zero work, then back off on the idle poll below.
-            claimed = 0
-            try:
-                claimed = (
-                    await self._runtime.run_activities_once(
-                        limit=self._batch_size,
-                        now=datetime.now(UTC),
-                    )
-                ).claimed
-            except Exception:
-                logger.exception("execution kernel activity plane batch failed")
-            if claimed == 0:
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(
-                        self._stopping.wait(),
-                        timeout=self._idle_poll_seconds,
-                    )
+        # The Worker isolates ordinary per-claim faults and transient claim
+        # outages. An unresponsive cancelled handler must reach the critical
+        # process supervisor; swallowing it would admit work beside a zombie.
+        await self._runtime.serve_activities(
+            stop=self._stopping,
+            idle_poll_seconds=max(0.001, self._idle_poll_seconds),
+            shutdown_grace_seconds=self._activity_shutdown_grace_seconds,
+        )
 
     async def run_heartbeat(self) -> None:
         """Refresh the liveness marker under external task supervision.
@@ -323,6 +311,9 @@ async def run_kernel(
                 stopping=runtime.supervisor.stop_event,
                 batch_size=settings.execution_activity_batch_size,
                 idle_poll_seconds=settings.execution_idle_poll_seconds,
+                # Leave the outer process supervisor time to cancel and close
+                # transport/storage resources after the Activity drain.
+                activity_shutdown_grace_seconds=settings.shutdown_timeout_seconds * 0.8,
             )
             install_signal_handlers(runtime.supervisor.request_stop)
             await runtime.supervisor.start(
@@ -330,9 +321,20 @@ async def run_kernel(
                 process.run_heartbeat,
                 kind=TaskKind.CRITICAL,
             )
+
+            async def run_supervised_process() -> None:
+                try:
+                    await process.run()
+                except ActivityWorkerUnresponsiveError:
+                    # asyncio.run() also gathers cancelled tasks while exiting.
+                    # A cancellation-resistant handler would hang that cleanup.
+                    # This must run even when a signal already requested stop.
+                    logger.critical("Unresponsive Activity requires immediate kernel exit")
+                    os._exit(70)
+
             await runtime.supervisor.start(
                 "execution-kernel",
-                process.run,
+                run_supervised_process,
                 kind=TaskKind.CRITICAL,
             )
             failure = await _wait_for_stop_or_failure(runtime)

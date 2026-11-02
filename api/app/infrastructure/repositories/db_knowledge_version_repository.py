@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor, EmbeddingSpaceMismatch
 from app.domain.models.knowledge_version import (
     DocumentRevisionState,
     KnowledgeBaseVersion,
@@ -271,6 +272,26 @@ class DBKnowledgeVersionRepository(
             "deleted_entity_refs": deleted_entity_refs,
             "retained_shared_revisions": retained_shared_revisions,
         }
+
+    async def freeze_embedding_space(
+        self, version_id: str, *, knowledge_base_id: str, space: EmbeddingSpaceDescriptor
+    ) -> None:
+        result = await self.db_session.execute(
+            select(KnowledgeBaseVersionORM)
+            .where(
+                KnowledgeBaseVersionORM.id == version_id,
+                KnowledgeBaseVersionORM.knowledge_base_id == knowledge_base_id,
+            )
+            .with_for_update()
+        )
+        version = result.scalar_one_or_none()
+        if version is None or version.state != "building" or version.published_at is not None:
+            raise EmbeddingSpaceMismatch("embedding space requires an unpublished candidate")
+        if version.embedding_space_digest not in (None, space.digest):
+            raise EmbeddingSpaceMismatch()
+        version.embedding_space = space.model_dump(mode="json")
+        version.embedding_space_digest = space.digest
+        await self.db_session.flush()
 
     async def create_candidate(
         self,

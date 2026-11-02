@@ -21,11 +21,14 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
     from app.application.execution.activity_registry import create_activity_registry
     from app.application.execution.activity_worker import ActivityWorker
     from app.application.execution.agent_tool_catalog import AgentToolCatalog
+    from app.application.execution.invocation_contracts import freeze_calls
     from app.application.execution.run_service import RunService
     from app.application.services.execution_content_service import ExecutionContentService
     from app.application.services.execution_view_service import ExecutionViewService
     from app.domain.execution.activity import ActivityClaim
+    from app.domain.execution.tool_contract import ToolApprovalSubject
     from app.domain.models.authorization import AuthorizationContext
+    from app.domain.models.scope import Principal
     from app.domain.runtime_policy import KnowledgeRetrievalRunPolicy
     from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
     from app.infrastructure.execution.models import ExecutionActivityTaskORM
@@ -37,11 +40,17 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
     from app.infrastructure.repositories.db_execution_content_repository import (
         DBExecutionContentRepository,
     )
+    from app.infrastructure.repositories.db_execution_usage_repository import (
+        DBExecutionUsageRepository,
+    )
     from app.infrastructure.repositories.db_knowledge_base_repository import (
         DBKnowledgeBaseRepository,
     )
+    from app.infrastructure.security.db_authorization import configure_session_authorization
+    from core.config import load_deployment_settings
 
     _session_id, producer, command, handler = await production_run()
+    signing_secret = load_deployment_settings().database_authorization_signing_secret
     kb, version, doc, revision, chunk = [uuid4().hex for _ in range(5)]
     source = "旧版本正文🙂汉字" * 100
     async with execution_admin_session() as db:
@@ -84,9 +93,17 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
     @asynccontextmanager
     async def uow():
         async with execution_admin_session() as db:
+            await configure_session_authorization(
+                db,
+                AuthorizationContext.for_principal(
+                    Principal(user_id=producer.scope.user_id), scope=producer.scope
+                ),
+            )
             yield SimpleNamespace(
                 knowledge_base=DBKnowledgeBaseRepository(db),
                 execution_content=DBExecutionContentRepository(db),
+                execution_usage=DBExecutionUsageRepository(db, signing_secret=signing_secret),
+                db_session=db,
                 commit=db.commit,
             )
 
@@ -107,12 +124,45 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
             return SimpleNamespace(packs=[tool], clients=(), fingerprint="fixed")
 
     catalog = object.__new__(Catalog)
+    catalog._uow_factory = uow
     objects = ActivityObjectStore(Objects())
     input_ref, digest = await objects.put_input(
         producer.run_id, {"message": "read source", "attachments": []}
     )
     activity = uuid4()
     tool_call = {"call_id": "call-fixed", "name": "get_document", "arguments": {"doc_id": doc}}
+    # Use the same admission authority and selected contract freeze as model.call.
+    async with uow() as work:
+        requester_authority = AuthorizationContext.for_principal(
+            Principal(user_id=producer.scope.user_id)
+        )
+        await configure_session_authorization(work.db_session, requester_authority)
+        requester = await work.execution_usage.capture_requester(
+            producer.scope,
+            requester_authority,
+            run_id=producer.run_id,
+        )
+        await configure_session_authorization(work.db_session, AuthorizationContext.system("f06"))
+        await work.execution_usage.snapshot(
+            producer.scope,
+            producer.run_id,
+            {"stage": "admission", "physical_requester": requester},
+            "production",
+        )
+        await work.commit()
+    auth = AuthorizationContext.system("f06")
+    await PostgresFormalProjector(
+        session_factory=execution_admin_session, authorization=auth
+    ).run_once(producer.scope, limit=1000)
+    run_context = await PostgresRunContextSource(
+        session_factory=execution_admin_session, authorization=auth
+    ).load(producer.run_id)
+    origin = SimpleNamespace(activity_id=uuid4(), aggregate_id=str(producer.run_id))
+    catalog_snapshot = await catalog.definitions(
+        {"message": "read source", "attachments": []},
+        SimpleNamespace(run=run_context, activity_id=origin.activity_id),
+    )
+    await freeze_calls(objects, origin, catalog_snapshot, [tool_call])
     await command(
         "RequestActivity",
         {
@@ -121,9 +171,11 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
             "timeout_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
             "input_ref": input_ref,
             "input_digest": digest,
-            "input_payload": {"tool_call": tool_call},
+            "input_payload": {"tool_call": tool_call, "subject": tool_call["subject"]},
+            "subject_digest": ToolApprovalSubject.model_validate(tool_call["subject"]).digest,
+            "invocation_id": tool_call["subject"]["invocation_id"],
         },
-        2,
+        3,
     )
     async with execution_admin_session() as db:
         await db.execute(
@@ -136,6 +188,9 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
         claim = ActivityClaim(
             request=PostgresActivityStore._request(row),
             claim_generation=1,
+            worker_id="f06-worker",
+            server_now=datetime.now(UTC),
+            lease_deadline=row.claim_deadline,
             owner_user_id=producer.scope.user_id,
             team_id=None,
             recovered_after_call_started=False,
@@ -189,7 +244,11 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
     input_page = await reader.read_step_content(
         producer.scope, producer.run_id, step.step_id, view.at, content_kind="input"
     )
-    assert json.loads(input_page.content)["request"]["tool_call"] == tool_call
+    captured_call = json.loads(input_page.content)["request"]["tool_call"]
+    assert {key: captured_call[key] for key in ("call_id", "name", "arguments")} == {
+        key: tool_call[key] for key in ("call_id", "name", "arguments")
+    }
+    assert captured_call["subject"]["contract_digest"] == tool_call["subject"]["contract_digest"]
     source_page = await reader.read_source(producer.scope, citation, limit_bytes=64)
     parts = [source_page.content]
     while source_page.next_cursor:
@@ -240,6 +299,12 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
             resource_id=step.output_ref.content_id,
             resource_version=digest,
         )
+        await configure_session_authorization(
+            db,
+            AuthorizationContext.for_principal(
+                Principal(user_id=producer.scope.user_id), scope=producer.scope
+            ),
+        )
         await DBResourcePinRepository(db).acquire(
             producer.scope, "run", str(producer.run_id), [pin]
         )
@@ -279,6 +344,12 @@ async def test_real_worker_catalog_captures_full_inputs_outputs_and_owned_fixed_
         await reader.read_step_content(producer.scope, producer.run_id, step.step_id, view.at)
 
     async with execution_admin_session() as db:
+        await configure_session_authorization(
+            db,
+            AuthorizationContext.for_principal(
+                Principal(user_id=producer.scope.user_id), scope=producer.scope
+            ),
+        )
         repo = DBResourcePinRepository(db)
         assert not (await repo.validate(producer.scope, "run", str(producer.run_id), [pin]))[
             0

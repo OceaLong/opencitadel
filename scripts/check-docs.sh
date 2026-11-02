@@ -80,10 +80,10 @@ check_size_parity() {
 check_size_parity docs/tutorials 60
 
 echo "==> Checking module README bilingual pairs ..."
-for en in README.md api/README.md ui/README.md sandbox/README.md nginx/README.md \
+for en in README.md api/README.md ui/README.md sandbox/README.md deploy/nginx/README.md \
   ops-collector/README.md ops-actuator/README.md \
   deploy/helm/opencitadel/README.md demo/ops-console/README.md \
-  deploy/patrol-demo/README.md e2e/README.md scripts/README.md deploy/scripts/README.md; do
+  demo/patrol/README.md e2e/README.md scripts/README.md deploy/scripts/README.md; do
   check_pair "$en"
 done
 
@@ -129,7 +129,7 @@ echo "==> Checking knowledge-base-ingestion bilingual pair ..."
 check_pair docs/architecture/knowledge-base-ingestion.md
 
 echo "==> Checking nginx README bilingual pair ..."
-check_pair nginx/README.md
+check_pair deploy/nginx/README.md
 
 echo "==> Checking inventory diagram fields against document contents ..."
 if ! python3 - <<'PY_CHECK'
@@ -251,20 +251,25 @@ for f in deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.
   require_marker "$f" "rolbypassrls" "runtime-role verification"
 done
 
-echo "==> Checking .env.example / .env.e2e key-set parity ..."
-# .env.example is the single env schema. Every active key in it must also be
-# declared in .env.e2e (values may differ); every key in .env.e2e must exist
-# in .env.example at least as a commented-out entry. ACCEPTANCE_* keys are
-# acceptance-run-only and exempt.
+echo "==> Checking minimal and advanced environment declarations ..."
+# The root template is the local entrypoint, not a complete settings schema.
+# Advanced/optional overrides are documented separately; acceptance keeps its
+# explicit isolated deployment values without mirroring every optional setting.
 env_keys() { rg -o '^[A-Z][A-Z0-9_]*(?==)' -N --pcre2 "$1" | sort -u; }
 env_keys_incl_commented() { rg -o '^#?\s*[A-Z][A-Z0-9_]*(?==)' -N --pcre2 "$1" | tr -d '# ' | sort -u; }
+env_schema_keys() {
+  { env_keys .env.example; env_keys_incl_commented deploy/config/.env.reference; } | sort -u
+}
 while IFS= read -r key; do
-  fail ".env.example key $key is missing from .env.e2e (declare it, even empty)"
+  fail "local entrypoint key $key is missing from .env.e2e"
 done < <(comm -23 <(env_keys .env.example) <(env_keys .env.e2e))
 while IFS= read -r key; do
   case "$key" in ACCEPTANCE_*) continue ;; esac
-  fail ".env.e2e key $key is not declared in .env.example (the env schema)"
-done < <(comm -23 <(env_keys .env.e2e) <(env_keys_incl_commented .env.example))
+  fail ".env.e2e key $key is absent from the local template and advanced reference"
+done < <(comm -23 <(env_keys .env.e2e) <(env_schema_keys))
+if [[ "$(sed -n 's/^OPENCITADEL_ENV_FILE=//p' .env.example)" != .env ]]; then
+  fail "the local template must select .env, never load .env.example into services"
+fi
 
 echo "==> Checking production examples for empty Redis passwords ..."
 if rg -n '^REDIS_PASSWORD=[[:space:]]*$' \

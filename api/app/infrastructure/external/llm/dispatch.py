@@ -7,14 +7,18 @@ from urllib.parse import urlsplit
 import httpx
 from openai import APIStatusError
 
-from app.application.ports.inference_dispatch import current_dispatch
+from app.application.ports.inference_dispatch import current_dispatch, require_active_activity_lease
 from app.infrastructure.external.llm.base_llm import normalize_usage
 
 
 async def _physical_identity(guard, model, payload):
+    require_active_activity_lease()
     if guard is None:
         return None
     permit = await guard.before_send(model, payload)
+    # Budget/storage admission may suspend longer than the confirmed Activity
+    # lease. Recheck immediately before consuming the permit and network send.
+    require_active_activity_lease()
     # New durable guards expose a one-use permit only after commit. Existing
     # F07-only guards remain compatible during the explicit composition rollout.
     return permit.consume() if hasattr(permit, "consume") else permit

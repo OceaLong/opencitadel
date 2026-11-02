@@ -125,5 +125,7 @@ def _bounded_response(response, limit, *, observed=None):
 
 
 def _bounded_limit(limit):
-    if type(limit) is not int or not 1 <= limit <= 2097152:
+    # Private attachment admission and immutable result capture allow 8 MiB.
+    # Context paging and public downloads enforce their smaller limits upstream.
+    if type(limit) is not int or not 1 <= limit <= 8388608:
         raise ValueError("invalid_object_read_limit")

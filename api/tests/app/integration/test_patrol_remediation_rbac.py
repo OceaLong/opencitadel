@@ -37,12 +37,14 @@ from app.domain.runtime_policy import (
 from app.interfaces.auth_dependencies import require_non_auditor
 from app.interfaces.endpoints.patrol_routes import router as patrol_router
 from tests.app.application_test_support import NoopGovernanceMetrics
+from tests.app.patrol_actuator_support import capabilities, target_identity
 from tests.runtime_policy_support import MutablePolicyReader
 
 
 class Repo:
     def __init__(self):
         config = load_patrol_template("kubernetes-baseline-v1")
+        config.checks[0].probe.args["workload"] = "api"
         self.pack = PatrolPack(
             owner_user_id="owner-a",
             name="Daily",
@@ -141,7 +143,8 @@ async def test_attacker_scope_get_remediation_is_indistinguishable_from_missing(
     service = PatrolRemediationService(
         lambda: Uow(repo),
         actuator_client=SimpleNamespace(
-            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
+            get_capabilities=AsyncMock(return_value=capabilities()),
+            get_target=AsyncMock(side_effect=target_identity),
         ),
         patrol_run_service=SimpleNamespace(),
         run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
@@ -174,7 +177,8 @@ async def test_attacker_scope_propose_against_foreign_finding_returns_not_found(
     service = PatrolRemediationService(
         lambda: Uow(repo),
         actuator_client=SimpleNamespace(
-            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
+            get_capabilities=AsyncMock(return_value=capabilities()),
+            get_target=AsyncMock(side_effect=target_identity),
         ),
         patrol_run_service=SimpleNamespace(),
         run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),

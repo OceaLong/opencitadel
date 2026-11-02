@@ -21,6 +21,7 @@ afterEach(() => {
 const ALL_STATUSES: PatrolRemediationStatus[] = [
   "proposed",
   "executing",
+  "unknown",
   "executed",
   "verified",
   "failed",

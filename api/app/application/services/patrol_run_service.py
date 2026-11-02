@@ -249,6 +249,7 @@ class PatrolRunService:
                     idempotency_key=idempotency_key,
                     run_id=admitted_run_id,
                     command_sink=uow.execution_commands,
+                    inference_read_context=uow,
                 )
             else:
                 automation_execution_run_id = await self._run_admission.admit(
@@ -272,6 +273,7 @@ class PatrolRunService:
                     idempotency_key=automation_idempotency_key,
                     run_id=admitted_run_id,
                     command_sink=uow.execution_commands,
+                    inference_read_context=uow,
                 )
                 automation_job.last_execution_run_id = automation_execution_run_id
                 await uow.scheduled_job.save(automation_job)
@@ -368,6 +370,7 @@ class PatrolRunService:
                 idempotency_key=key,
                 run_id=execution_id,
                 command_sink=uow.execution_commands,
+                inference_read_context=uow,
             )
             await uow.commit()
         return run

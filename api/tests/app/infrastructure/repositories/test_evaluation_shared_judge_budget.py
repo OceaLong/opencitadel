@@ -225,17 +225,18 @@ async def test_subject_and_judge_actual_sends_exhaust_one_total_with_separate_f0
         assert (await handler.handle(envelope)).status == "accepted"
 
         async def command(kind, payload, version=1):
-            result = await handler.handle(
-                envelope.model_copy(
-                    update={
-                        "command_id": uuid4(),
-                        "command_type": kind,
-                        "command_schema_version": version,
-                        "expected_stream_version": None,
-                        "payload": payload,
-                    }
-                )
+            from tests.app.execution_test_support import with_current_test_claim
+
+            submitted = envelope.model_copy(
+                update={
+                    "command_id": uuid4(),
+                    "command_type": kind,
+                    "command_schema_version": version,
+                    "expected_stream_version": None,
+                    "payload": payload,
+                }
             )
+            result = await handler.handle(await with_current_test_claim(handler, submitted))
             assert result.status == "accepted", result
 
         await command("StartRun", {})

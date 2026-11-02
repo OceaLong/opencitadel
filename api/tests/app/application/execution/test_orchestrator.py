@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.execution.aggregate import ReplaySnapshot, replay
-from app.domain.execution.commands import CommandEnvelope
+from app.domain.execution.commands import ActivityLeaseProof, CommandEnvelope
 from app.domain.execution.errors import CommandInProgressError
 from app.domain.execution.events import NewEvent
 from app.domain.execution.registry import UnregisteredSchemaError
@@ -36,6 +36,8 @@ from app.infrastructure.execution.sqlalchemy_orchestrator import (
 )
 from app.infrastructure.security.db_authorization import configure_session_authorization
 from core.config import load_deployment_settings
+from tests.app.alembic.test_execution_view_migration import isolated_database  # noqa: F401
+from tests.app.execution_database_fixture import isolated_execution_database  # noqa: F401
 from tests.app.execution_test_support import (
     authenticated_session_factory,
     execution_admin_session,
@@ -124,7 +126,7 @@ async def cleanup(session_factory, *, stream_ids: list[str], command_ids: list) 
 
 
 @pytest.fixture
-async def orchestrator_database(_db_schema):
+async def orchestrator_database(isolated_execution_database):  # noqa: F811
     engine = create_async_engine(execution_kernel_database_uri())
     session_factory = authenticated_session_factory(
         engine,
@@ -294,13 +296,13 @@ async def test_invalid_historical_event_schema_fails_closed_before_decision(
             StreamRef(stream_type="run", stream_id=stream_id),
             0,
             (
-                # A schema version the registry does not know (only v1 is
-                # registered) must fail closed at the read boundary before
+                # A schema version the registry does not know must fail closed
+                # at the read boundary before
                 # decide or append — as a ValueError the handler rolls back on,
                 # never as a bare KeyError escaping the control plane.
                 NewEvent(
                     event_type="RunCreated",
-                    event_schema_version=2,
+                    event_schema_version=999,
                     public_payload={"unexpected": True},
                     internal_payload={},
                 ),
@@ -315,7 +317,7 @@ async def test_invalid_historical_event_schema_fails_closed_before_decision(
         )
         await session.commit()
 
-    with pytest.raises(UnregisteredSchemaError, match="Unknown RunCreated version 2"):
+    with pytest.raises(UnregisteredSchemaError, match="Unknown RunCreated version 999"):
         await make_orchestrator(session_factory).handle(candidate)
 
     async with session_factory() as session:
@@ -497,7 +499,7 @@ async def test_activity_completion_event_and_operational_task_are_one_transactio
             payload={
                 "activity_id": str(activity_id),
                 "activity_type": "model.call",
-                "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
+                "timeout_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
                 "input_digest": "a" * 64,
             },
         ),
@@ -528,11 +530,23 @@ async def test_activity_completion_event_and_operational_task_are_one_transactio
         task.status = "call_started"
         task.claim_generation = 1
         task.claimed_by = "worker-before-crash"
-        task.claim_deadline = NOW + timedelta(seconds=30)
+        task.claim_deadline = datetime.now(UTC) + timedelta(seconds=30)
         task.call_started_at = NOW
         await session.commit()
 
-    result = await orchestrator.handle(commands[-1])
+    completion = commands[-1].model_copy(
+        update={
+            "command_schema_version": 2,
+            "payload": {**commands[-1].payload, "claim_generation": 1},
+            "activity_lease_proof": ActivityLeaseProof(
+                activity_id=activity_id,
+                request_generation=0,
+                claim_generation=1,
+                worker_id="worker-before-crash",
+            ),
+        }
+    )
+    result = await orchestrator.handle(completion)
 
     assert result.status == "accepted"
     async with session_factory() as session:

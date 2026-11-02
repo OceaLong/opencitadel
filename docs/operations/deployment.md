@@ -30,47 +30,71 @@ storage, provider, and connection-pool resources are never shared.
 ## Compose quick start
 
 ```bash
-cp .env.example .env
-# Replace every required secret and password; use COOKIE_SECURE=false for local HTTP.
-# Set FRONTEND_BASE_URL=http://localhost:8088 and OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth.
-# Set OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=30 to fit the Compose 45s grace period.
-docker compose build opencitadel-sandbox
-docker compose --profile local up -d --build
-docker compose ps
+make quickstart
 ```
 
-Open `http://localhost:8088`. The `local` profile enables bundled MinIO. Cloud
-deployments can use COS by setting `STORAGE_PROVIDER=cos` and the `COS_*`
-values.
+The first run creates a private `.env` (mode `0600`), generates independent
+random keys and passwords, builds the sandbox image, and starts PostgreSQL,
+Redis, MinIO, API, execution kernel, UI, and Nginx. After readiness succeeds,
+the terminal shows the initial administrator login. Open `http://localhost:8088`.
+Subsequent runs preserve the existing configuration and credentials. A failed
+health check exits with an error and diagnostic commands.
 
-Configure these deployment settings; passwords and keys need distinct strong values, while IDs, usernames, and timeouts are not secrets:
+To prepare configuration without starting containers, run `make configure`.
+The short [`.env.example`](../../.env.example) contains only basic choices;
+[the complete reference](../../deploy/config/.env.reference) groups optional
+integrations, external services, secret rotation, and advanced tuning. Copy
+only the overrides you need into `.env`; the reference is not loaded at runtime.
+Existing environment variable names and explicit overrides remain supported.
 
-- `POSTGRES_ADMIN_USER`, `POSTGRES_ADMIN_PASSWORD`,
-  `POSTGRES_MIGRATION_USER`, `POSTGRES_MIGRATION_PASSWORD`,
-  `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_KERNEL_USER`,
-  `POSTGRES_KERNEL_PASSWORD`
-- `REDIS_PASSWORD`, `BOOTSTRAP_ADMIN_PASSWORD`
-- `API_KEY_SECRET_ID`, `API_KEY_SECRET`, `API_KEY_PREVIOUS_SECRETS`
-- `AUDIT_SIGNING_KEY_ID`, `AUDIT_SIGNING_KEY`, `AUDIT_PREVIOUS_SIGNING_KEYS`
-- `JWT_SECRET`, `SESSION_SECRET`
-- `SANDBOX_BROKER_TOKEN`, `SANDBOX_TOKEN_SEED`
-- `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS`
+When upgrading an installation whose `OPENCITADEL_ENV_FILE` incorrectly pointed
+to `.env.example`, quickstart repairs that selector. Before restarting an
+existing database, preserve the encryption/signing credentials actually used
+by the previous processes in `.env`, using your original secret backup or
+running deployment's secret source. Values that were previously ignored cannot
+recover encrypted data by being newly activated; never regenerate credentials
+for an existing database.
 
-`SANDBOX_TOKEN_SEED` is required and must be at least 32 random bytes in
-production; the API and execution kernel both derive each sandbox's data-plane
-token from it. `JWT_PREVIOUS_SECRETS` (default `{}`) and
-`DATABASE_AUTHORIZATION_SIGNING_SECRET` (default: reuse `SESSION_SECRET`) are
-optional and covered under _Configuration and secrets_. When you run the Ops
-Patrol Collector/Actuator, also set strong `OPS_COLLECTOR_TOKEN` and
-`OPS_ACTUATOR_TOKEN` values; each server refuses to start without one.
+| Category                       | What the operator supplies                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| Basic startup                  | Optional site origin, project name, profiles, deployment mode, storage provider |
+| Generated credentials          | Nothing on a fresh local install; retain and back up `.env`                     |
+| Built-in services              | Database, Redis, MinIO and sandbox addresses are derived by Compose             |
+| Optional integrations          | COS, external services, OAuth or demo inference inputs when used                |
+| Advanced tuning                | Pool sizes, concurrency, network exceptions and timeouts only when needed       |
+| Runtime behavior and inference | **Settings → Runtime policy / Inference**, stored in PostgreSQL                 |
 
-Use at least 32 random bytes for cryptographic keys. Keep `COOKIE_SECURE=true`
-outside local HTTP development. Set `FRONTEND_BASE_URL` and
-`OAUTH_REDIRECT_BASE` to the public HTTPS origin, configure
-`TRUSTED_PROXY_CIDRS` precisely, and restrict `OUTBOUND_ALLOWED_PORTS` and
-`OUTBOUND_PRIVATE_HOST_ALLOWLIST`. In production `TRUSTED_PROXY_CIDRS` is
-validated at startup and rejects broad RFC1918 ranges that overlap the
-sandbox/pod network.
+`FRONTEND_BASE_URL` is the public site origin. OAuth redirect and secure-cookie
+defaults follow it. `make quickstart` also derives Nginx hostname, TLS mode and
+host ports from it; existing `OAUTH_REDIRECT_BASE`, `COOKIE_SECURE`,
+`OPENCITADEL_DOMAIN`, `HTTPS_ENABLED`, `NGINX_PORT` and `NGINX_HTTPS_PORT`
+overrides take precedence. Direct `docker compose up` with a custom host port
+requires the matching advanced port override. Production uses `ENV=production`,
+a real HTTPS origin, and operator-provided certificates; see
+[HTTPS setup](https-domain-setup.md). Trusted proxy CIDRs and external network
+exceptions still describe the actual deployment.
+
+New local installs generate these independent credentials automatically:
+
+- `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_MIGRATION_PASSWORD`,
+  `POSTGRES_PASSWORD`, `POSTGRES_KERNEL_PASSWORD`, `REDIS_PASSWORD`
+- `API_KEY_SECRET`, `AUDIT_SIGNING_KEY`, `JWT_SECRET`, `SESSION_SECRET`,
+  `DATABASE_AUTHORIZATION_SIGNING_SECRET`, `PUBLIC_CURSOR_SECRET`
+- `SANDBOX_BROKER_TOKEN`, `SANDBOX_TOKEN_SEED`, `MINIO_SECRET_KEY`
+- `OPS_COLLECTOR_TOKEN`, `OPS_ACTUATOR_TOKEN`, `METRICS_TOKEN`,
+  `BOOTSTRAP_ADMIN_PASSWORD`
+
+Usernames (`POSTGRES_ADMIN_USER`, `POSTGRES_USER`), key IDs (`API_KEY_SECRET_ID`,
+`AUDIT_SIGNING_KEY_ID`), rotation maps and `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS`
+have defaults. `SANDBOX_TOKEN_SEED` supplies the API and kernel's per-sandbox
+data-plane tokens. Ops servers validate their own tokens when enabled, so
+unused profiles do not block a basic Compose render. Cloud storage remains
+available via `STORAGE_PROVIDER=cos` and the `COS_*` overrides.
+
+Keep cryptographic keys at least 32 random bytes. In production,
+`TRUSTED_PROXY_CIDRS` rejects broad RFC1918 ranges overlapping sandbox/pod
+networks; configure precise proxy CIDRs, `OUTBOUND_ALLOWED_PORTS` and
+`OUTBOUND_PRIVATE_HOST_ALLOWLIST` as needed.
 
 ## Startup and recovery
 
@@ -89,6 +113,28 @@ pending work is reclaimed from PostgreSQL. Redis may be flushed or restarted;
 the kernel polls pending rows when no hint arrives. Never treat Redis keys as
 backup data.
 
+To recreate a default local installation's containers while keeping its state,
+retain `.env` and use the same Compose project:
+
+```bash
+docker compose down
+make quickstart
+```
+
+Keep the named volumes; `down --volumes` removes installation data. For a custom
+environment file or project, use the same selector and project for both commands.
+Migration runs again, but an existing administrator and Runtime Policy head are
+preserved. Initial generated login information is shown only after the first
+successful startup.
+
+Local verification on 2026-10-10 covered a fresh `make quickstart`, removal of all
+project containers while retaining volumes, and a second `make quickstart`.
+Both runs reached API liveness/readiness and served the UI. The original HTTP
+login cookie remained valid; stored credentials, administrator identity, and
+the PostgreSQL-seeded basic KB policy revision remained unchanged. This verifies
+that local startup and recovery path, not a portable capacity benchmark or the
+complete acceptance suite.
+
 ## Health probes and bounded drain
 
 The API exposes separate unauthenticated process probes:
@@ -103,9 +149,9 @@ readiness|liveness`; its owned heartbeat writes an atomic marker and removes it
 on shutdown. Readiness also verifies Runtime Policy, schema, and the dedicated
 kernel database role.
 
-Set `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=30` for the bounded application drain.
-Compose uses `stop_grace_period: 45s`; Helm uses `shutdown.timeoutSeconds: 30`
-and `shutdown.terminationGracePeriodSeconds: 45`. The platform termination
+The application drain defaults to `OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS=90`.
+Compose uses `stop_grace_period: 120s`; Helm uses `shutdown.timeoutSeconds: 90`
+and `shutdown.terminationGracePeriodSeconds: 120`. The platform termination
 grace must always be greater than the application timeout.
 
 ## Storage and sandbox
@@ -116,7 +162,8 @@ not a multi-replica option.
 
 Compose isolates Docker access in `opencitadel-sandbox-broker`. API and kernel
 receive only its narrow token-authenticated HTTP endpoint, never the Docker
-socket. On native Linux set `DOCKER_SOCK_GID` to the socket group. Kubernetes
+socket. Quickstart detects the socket group on native Linux; use `DOCKER_SOCK_GID`
+for an explicit override with a custom daemon. Kubernetes
 uses a dedicated execution-kernel ServiceAccount and restricted sandbox Pod
 RBAC. Keep the Squid sandbox egress proxy enabled; its static configuration uses private-range/metadata denials and Safe_ports, without a domain allowlist. Each sandbox's
 data-plane token is derived as `HMAC(SANDBOX_TOKEN_SEED, sandbox_id)` on both the
@@ -145,9 +192,9 @@ Rotate audit signing keys similarly with `AUDIT_PREVIOUS_SIGNING_KEYS`, and
 session JWTs with `JWT_PREVIOUS_SECRETS`: move the old key under its id into the
 previous map, set the new `JWT_SECRET`, and restart replicas; tokens still in
 flight keep validating until they expire. `DATABASE_AUTHORIZATION_SIGNING_SECRET`
-defaults to `SESSION_SECRET`, which keeps existing deployments and their seeded
-RLS `app.rls_signing_secret` value unchanged; set it to a distinct strong value
-only to split the DB authorization trust domain from the session cookie one. The
+is independently generated on new installs. When unset, it still defaults to
+`SESSION_SECRET` for compatibility with existing deployments and their seeded
+RLS `app.rls_signing_secret`. The
 database stamps its copy of the secret during the first migration, so setting or
 changing the value on an existing database requires running
 `python -m app.rotate_db_signing_secret` (re-entrant; updates the stored secret
@@ -161,9 +208,19 @@ consumers have no environment-key fallback; an unresolved binding is reported
 through `/api/capabilities` and fails closed. The optional `DEMO_INFERENCE_*`
 variables are only inputs to the explicit demo seed command.
 
+Compose and Helm share the same initial policy seed. A fresh database uses text
+extraction and keyword search for knowledge bases, with vector search,
+reranking, GraphRAG, and OCR off. Only chat inference is needed for initial
+Ask/Agent use; text indexing itself requires no inference model. Configure
+optional bindings and enable their fields under **Settings → Runtime policy**
+when needed. Upgrades preserve an existing policy head and history. See the
+[knowledge tutorial](../tutorials/02-internal-knowledge-base.md) before enabling
+enhancements or rebuilding existing libraries.
+
 ## Observability
 
-Set `METRICS_TOKEN` to expose authenticated API metrics. Set
+Local initialization generates `METRICS_TOKEN` for authenticated API metrics;
+external deployment can supply an explicit value. Set
 `EXECUTION_KERNEL_METRICS_PORT` (default `9108`) for the internal kernel
 Prometheus endpoint, and restrict it with network policy. Monitor:
 
@@ -181,21 +238,27 @@ do not bypass it by modifying event rows.
 The chart is under `deploy/helm/opencitadel`.
 
 ```bash
-helm lint deploy/helm/opencitadel --values values.production.yaml
+helm lint deploy/helm/opencitadel --set publicUrl=https://citadel.example.com
 helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
-  --values values.production.yaml
+  --set publicUrl=https://citadel.example.com
 ```
 
-Supply all secrets through a secret manager or protected values file. Keep
+The public HTTPS origin is the only required value for a self-contained first
+install. The chart defaults to bundled PostgreSQL, Redis and MinIO, derives
+service hosts and the sandbox namespace from the release, and generates
+independent credentials in role-specific Secrets. Upgrades reuse these Secrets;
+keep them with database and object-storage backups. Helm NOTES explains how
+to retrieve the initial administrator login. See the [chart guide](../../deploy/helm/opencitadel/README.md)
+for ingress/TLS, external services, and secret-manager overrides. Keep
 `networkPolicy.enabled=true`, separate API/kernel/migration database users,
-and configure `executionKernel.replicas` plus its HPA for Activity volume. Set `env.SANDBOX_K8S_NAMESPACE` to the release namespace (`opencitadel` here) to align sandbox RBAC and NetworkPolicy.
+and configure `executionKernel.replicas` plus its HPA for Activity volume.
 Optional Ops Collector and Actuator workloads must remain network-separated;
 the Actuator is reachable only from API/kernel and still requires a persisted
 approval. Their RBAC is a namespaced `Role`/`RoleBinding` rendered per allowed
 namespace, not a cluster-wide `ClusterRole`.
 
-These templates have separate deployment switches: NetworkPolicy and egress proxy default on; `pdb.enabled`, `backup.enabled`, `monitoring.serviceMonitor.enabled`, and `monitoring.prometheusRule.enabled` default off. The backup CronJob also requires chart-managed PostgreSQL. Squid uses the static address/port ACLs; `egressProxy.allowedDomains` is not consumed. Alerts require Prometheus Operator CRDs, matching selectors, and actual scrapes; API scraping also needs a strong `secrets.metricsToken`. Compose Nginx templates set CSP/nosniff and HTTPS HSTS. Helm supplies security headers only through optional Ingress annotations for ingress-nginx, subject to controller support.
+These templates have separate deployment switches: NetworkPolicy and egress proxy default on; `pdb.enabled`, `backup.enabled`, `monitoring.serviceMonitor.enabled`, and `monitoring.prometheusRule.enabled` default off. The backup CronJob also requires chart-managed PostgreSQL. Squid uses the static address/port ACLs; `egressProxy.allowedDomains` is not consumed. Alerts require Prometheus Operator CRDs, matching selectors, and actual scrapes; API scraping uses a generated strong token when ServiceMonitor is enabled, or an explicit `secrets.metricsToken` override. Compose Nginx templates set CSP/nosniff and HTTPS HSTS. Helm supplies security headers only through optional Ingress annotations for ingress-nginx, subject to controller support.
 
 For chart-managed PostgreSQL, `files/postgres/init-app-role.sh` creates the
 distinct migration, API, and kernel roles before the greenfield migration.
@@ -223,7 +286,7 @@ The same kernel owns four critical lanes: `evaluation-scheduler`, `evaluation-re
 
 ## Deterministic acceptance gate
 
-Run the same release-blocking full-stack gate used by CI:
+Run the same full-stack acceptance entrypoint used by CI:
 
 ```bash
 ./scripts/run-acceptance-e2e.sh --disposable
@@ -247,7 +310,18 @@ the gate fails. Inspect the manifest `failure_reason`, `logs/stack.log`, and
 Playwright traces/screenshots before retrying. Do not replace runner cleanup
 with a broad Docker prune.
 
-The full execution gate also requires `ACCEPTANCE_CAPACITY_REPORT` and `ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` with valid AC21 measured evidence. UI/unit-test success is not capacity acceptance. Full AC21 capacity acceptance remains incomplete; deployment success or other passing cases does not establish an all-green release gate.
+The full execution gate also requires `ACCEPTANCE_CAPACITY_REPORT` and
+`ACCEPTANCE_CAPACITY_FIXTURE_MANIFEST` with valid AC21 measured evidence and the
+original private `OfflineProofContext`. The normal CLI does not construct that
+context, and the full reference-round reuse and native collector remain
+incomplete. AC21 is retained as a known failure; no report, fixture, or smaller
+workload is substituted to make it pass. See the
+[capacity tooling status](../../scripts/execution_capacity/README.md).
+
+The current CI workflow reports the incomplete acceptance plane without blocking
+the job. This does not change failed or skipped requirements into passes.
+Deployment verification and other passing cases do not establish an all-green
+release gate.
 
 ## Release gates
 
@@ -273,7 +347,7 @@ npm run build
 
 cd ..
 docker compose config
-helm lint deploy/helm/opencitadel --values values.production.yaml
+helm lint deploy/helm/opencitadel --set publicUrl=https://citadel.example.com
 ./scripts/run-acceptance-e2e.sh --disposable
 ```
 
@@ -371,6 +445,28 @@ Docker must be running and the source PostgreSQL image plus `alpine:3.20` must b
 available (Docker may pull missing images) for a real recovery.
 
 ## Execution failures and verified recovery
+
+External writes have separate operational signals. `execution_effect_rows` and
+`execution_effect_oldest_age_seconds` read durable operations; age is measured
+from operation creation, including earlier preparation. Request gauges group
+query, human resolution and abandonment by status. Query observations and human
+resolution gauges retain recorded `pending`, `unknown`, `applied`, or `not_applied`
+facts across collector restarts. These are retained-row gauges, not lifetime counters.
+The optional Helm alerts distinguish an old unknown operation from newly failed
+verification infrastructure. Neither proves a business write failed, and neither
+permits replaying it. Use the original operation query or evidence-backed human
+resolution in the workbench. A new successful query does not erase prior failed
+query history or release physical accounting holds. Embedding refusal emits the
+bounded `embedding_space_mismatch` log with `model_identity` or `descriptor_changed`,
+without credentials or content; rebuild the affected vectors under a verified
+descriptor rather than mixing dimensions-compatible spaces.
+
+`execution_effect_integrity_conflict_rows` counts retained operations with
+contradictory outcomes or business results. The optional
+`OpencitadelEffectIntegrityConflict` alert requires evidence investigation.
+The workbench explains the quarantine and disables ordinary resolution actions;
+a matching late receipt cannot lift it. Cancel the Run to stop waiting if needed,
+without resending the write or clearing its accounting holds.
 
 The admin dashboard shows scope projection lag, quarantined Runs, planner retry times,
 and durable recovery outcomes. Planner errors retry after 5 and 10 seconds; the third

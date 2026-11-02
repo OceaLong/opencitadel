@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 
 import { appApi, expect, test } from "./fixtures/acceptance.fixture";
 import { registerCleanupAction } from "./support/cleanup-journal";
+import { registerOwnedSession } from "./support/session-retirement";
 import {
   createSession,
   readChatStream,
@@ -31,8 +32,57 @@ async function viewFor(page: Page, session: string): Promise<ViewPage> {
   ).data;
 }
 async function closeConversation(page: Page) {
-  const collapse = page.getByRole("button", { name: /^Collapse$|^收起$/ });
-  if (await collapse.isVisible()) await collapse.click();
+  const toggle = page
+    .getByTestId("workbench")
+    .locator("header")
+    .getByRole("button", {
+      name: /^Conversation(?: ·.*)?$|^对话(?: ·.*)?$/,
+    });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-expanded")) === "true")
+    await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+}
+async function approveExactIntent(page: Page, approval: any) {
+  const button = page
+    .locator("[data-execution-detail] section")
+    .filter({
+      has: page.getByRole("heading", {
+        name: approval.approval_id,
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: /^Approve$|^批准$/ });
+  await expect
+    .poll(
+      async () => {
+        const items = (await appApi<any>(page, "/approvals?limit=200")).data
+          .items;
+        const item = items.find(
+          (entry: any) => entry.approval_id === approval.approval_id,
+        );
+        expect(item?.subject_activity_id).toBe(approval.subject_activity_id);
+        if (item?.decision === "approved") return true;
+        expect(item?.status).toBe("pending");
+        // A live refresh can cancel read-only preflight. The UI unlocks only if
+        // no write was sent; an uncertain decision remains disabled and is read back.
+        if ((await button.count()) === 1 && (await button.isEnabled())) {
+          try {
+            await button.click({ timeout: 2000 });
+          } catch (cause) {
+            if (!(cause instanceof Error) || cause.name !== "TimeoutError")
+              throw cause;
+          }
+        }
+        return false;
+      },
+      {
+        timeout: 60_000,
+        intervals: [500, 1000],
+        message: "the exact current approval is durably approved",
+      },
+    )
+    .toBe(true);
 }
 async function assertLayout(page: Page) {
   expect(
@@ -779,12 +829,7 @@ test(
           body: { title: acceptanceId("scope-b") },
         })
       ).data;
-      registerCleanupAction({
-        action: "delete-resource",
-        resource: "session",
-        resource_id: scoped.session_id,
-        workspace_id: team.id,
-      });
+      await registerOwnedSession(page, scoped.session_id, team.id);
       let releaseScope!: () => void, capturedScope!: () => void;
       const scopeHeld = new Promise<void>((resolve) => {
         releaseScope = resolve;
@@ -1072,6 +1117,7 @@ test("real completed shell write loses its receipt and stays durably unknown wit
   bootstrapState,
 }) => {
   test.setTimeout(360_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
   const { physicalFault, unchangedFault, acquirePhysicalFaultLifecycle } =
     await import("./support/physical-fault");
   const session = await createSession(
@@ -1114,14 +1160,11 @@ test("real completed shell write loses its receipt and stays durably unknown wit
       `/sessions/${session}?run=${pending.run.run_id}&panel=approval`,
     );
     await closeConversation(page);
-    await page
-      .locator("[data-execution-detail]")
-      .getByRole("button", { name: /^Approve$|^批准$/ })
-      .click();
+    await approveExactIntent(page, approval);
     const unknown = await pollProjection(
       () => viewFor(page, session),
       (view) =>
-        view.run.status === "failed" &&
+        view.run.status === "waiting" &&
         view.steps.some(
           (step) =>
             step.activity_id === approval.subject_activity_id &&
@@ -1136,9 +1179,20 @@ test("real completed shell write loses its receipt and stays durably unknown wit
     const step = unknown.steps.find(
       (item) => item.activity_id === approval.subject_activity_id,
     )!;
-    expect(step.end_reason).toBe("NON_IDEMPOTENT_OUTCOME_UNKNOWN");
+    expect(step.end_reason).toBe("EXTERNAL_OUTCOME_UNKNOWN");
     const first = physicalFault("snapshot", { "fault-id": fault.fault_id });
     expect(first.counts).toEqual({ handler: 1, catalog: 1, replay: 0 });
+    expect(first.observation.effect.state).toBe("unknown");
+    const effectsPath = `/execution-runs/${pending.run.run_id}/effects`;
+    const operations = (await appApi<any[]>(page, effectsPath)).data;
+    expect(operations).toHaveLength(1);
+    const operation = operations[0];
+    expect(operation.operation_id).toBe(first.observation.effect.operation_id);
+    expect(operation.state).toBe("unknown");
+    const queryProfile = process.env.ACCEPTANCE_PHASE1_BROWSER === "1";
+    expect(operation.capability.kind).toBe(
+      queryProfile ? "resolve_only" : "manual_only",
+    );
     const target = `/sessions/${session}?run=${pending.run.run_id}&view=debug&step=${step.step_id}`;
     await page.goto(target);
     await closeConversation(page);
@@ -1151,6 +1205,96 @@ test("real completed shell write loses its receipt and stays durably unknown wit
     await expect(detail).toContainText(
       /external.*unknown|confirm.*external|外部.*未知|确认.*外部/i,
     );
+    const verification = page.getByRole("region", {
+      name: /^External operation verification$|^外部操作结果核验$/,
+    });
+    await expect(verification).toContainText(operation.operation_id);
+    let queryRequest: any;
+    const queryButton = verification.getByRole("button", {
+      name: /^Query original operation$|^查询原操作$/,
+    });
+    if (queryProfile) {
+      await expect(queryButton).toBeEnabled();
+      expect(
+        (await page.locator("[data-workspace]").boundingBox())!.height,
+      ).toBeGreaterThan(120);
+      for (let attempt = 0; attempt < 3 && !queryRequest; attempt++) {
+        const admission = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response
+              .url()
+              .endsWith(`${effectsPath}/${operation.operation_id}/queries`),
+        );
+        await queryButton.click();
+        const response = await admission;
+        expect([202, 409]).toContain(response.status());
+        if (response.status() === 202)
+          queryRequest = (await response.json()).data;
+        else {
+          // A concurrent automatic read can advance the exact revision. Refresh
+          // and retry this read-only query; never repeat the original write.
+          await page.reload();
+          await closeConversation(page);
+          await expect(queryButton).toBeEnabled();
+        }
+      }
+      expect(queryRequest).toBeTruthy();
+      expect(queryRequest.status).toBe("pending");
+      queryRequest = await pollProjection(
+        async () =>
+          (
+            await appApi<any>(
+              page,
+              `${effectsPath}/${operation.operation_id}/requests/${queryRequest.request_id}`,
+            )
+          ).data,
+        (value) => value.status === "completed",
+        {
+          timeout: 90_000,
+          message: "the durable user query is processed by the actual kernel",
+        },
+      );
+      await page.reload();
+      await expect(verification).toContainText(queryRequest.request_id);
+      const queried = physicalFault("snapshot", { "fault-id": fault.fault_id });
+      expect(queried.observation.queries.length).toBeGreaterThan(0);
+      expect(
+        queried.observation.queries.every(
+          (row: any) =>
+            row.operation_id === operation.operation_id &&
+            row.receipt_withheld === true,
+        ),
+      ).toBe(true);
+      unchangedFault(first, queried);
+    } else await expect(queryButton).toHaveCount(0);
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await appApi(page, "/auth/login", {
+      method: "POST",
+      body: {
+        email_or_username: process.env.BOOTSTRAP_ADMIN_EMAIL!,
+        password: process.env.BOOTSTRAP_ADMIN_PASSWORD!,
+      },
+    });
+    await page.goto(target);
+    await expect(verification).toContainText(operation.operation_id);
+    if (queryProfile) {
+      await expect(verification).toContainText(queryRequest.request_id);
+      expect(
+        (
+          await appApi<any>(
+            page,
+            `${effectsPath}/${operation.operation_id}/requests/${queryRequest.request_id}`,
+          )
+        ).data.status,
+      ).toBe("completed");
+      await expect(queryButton).toBeEnabled();
+    }
+    expect(
+      (await appApi<any>(page, `${effectsPath}/${operation.operation_id}`)).data
+        .state,
+    ).toBe("unknown");
     await page.goto("/analysis");
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/sessions/${session}`));
@@ -1166,7 +1310,7 @@ test("real completed shell write loses its receipt and stays durably unknown wit
         (item) => item.activity_id === approval.subject_activity_id,
       ),
     ).toHaveLength(1);
-    expect(refreshed.run.status).toBe("failed");
+    expect(refreshed.run.status).toBe("waiting");
     const later = physicalFault("snapshot", { "fault-id": fault.fault_id });
     unchangedFault(first, later);
     const cleaned = physicalFault("disarm", { "fault-id": fault.fault_id });
@@ -1185,6 +1329,164 @@ test("real completed shell write loses its receipt and stays durably unknown wit
       lifecycle.retainFailure();
     }
   }
+});
+
+test("phase 1 drift refresh preserves the Run and requires a new exact approval before writing", async ({
+  operatorPage: page,
+  bootstrapState,
+}) => {
+  test.setTimeout(360_000);
+  const skill = (
+    await appApi<{ id: string }>(page, "/skills", {
+      method: "POST",
+      body: {
+        name: acceptanceId("intent-refresh"),
+        allowed_tools: ["artifact_write"],
+      },
+    })
+  ).data;
+  registerCleanupAction({
+    action: "delete-resource",
+    resource: "skill",
+    resource_id: skill.id,
+  });
+  const session = (
+    await appApi<{ session_id: string }>(page, "/sessions", {
+      method: "POST",
+      body: {
+        title: acceptanceId("intent-refresh"),
+        mode: "agent",
+        model_id: bootstrapState.model_ids.chat!,
+        skill_id: skill.id,
+      },
+    })
+  ).data.session_id;
+  await registerOwnedSession(page, session);
+  await readChatStream(page, session, {
+    message: `[acceptance:intent-refresh:${session}] [acceptance:tool:artifact_write] [acceptance:workbench:artifact]`,
+    mode: "agent",
+    model_id: bootstrapState.model_ids.chat!,
+    request_id: randomUUID(),
+  });
+  const pending = await viewFor(page, session);
+  const approvals = async () =>
+    (
+      await appApi<any>(page, "/approvals?status=pending&limit=200")
+    ).data.items.filter((item: any) => item.run_id === pending.run.run_id);
+  const original = (await approvals())[0];
+  expect(original).toBeTruthy();
+  await appApi(page, `/skills/${skill.id}`, {
+    method: "PUT",
+    body: { allowed_tools: [] },
+  });
+  await page.goto(
+    `/sessions/${session}?run=${pending.run.run_id}&panel=approval`,
+  );
+  await closeConversation(page);
+  await approveExactIntent(page, original);
+  const drifted = await pollProjection(
+    () => viewFor(page, session),
+    (view) =>
+      view.run.status === "waiting" &&
+      view.steps.some(
+        (item) =>
+          item.activity_id === original.subject_activity_id &&
+          item.status === "failed" &&
+          Boolean(item.contract_drift),
+      ),
+    {
+      timeout: 90_000,
+      message: "approved selected tool drift stops before any write",
+    },
+  );
+  expect(drifted.run.run_id).toBe(pending.run.run_id);
+  expect(drifted.artifacts ?? []).toHaveLength(0);
+  expect(
+    (await appApi<any[]>(page, `/execution-runs/${pending.run.run_id}/effects`))
+      .data,
+  ).toHaveLength(0);
+  const driftStep = drifted.steps.find(
+    (item) => item.activity_id === original.subject_activity_id,
+  )!;
+  await appApi(page, `/skills/${skill.id}`, {
+    method: "PUT",
+    body: { allowed_tools: ["artifact_write"] },
+  });
+  await page.goto(
+    `/sessions/${session}?run=${pending.run.run_id}&view=debug&step=${driftStep.step_id}`,
+  );
+  await closeConversation(page);
+  await expect(page.locator("[data-execution-detail]")).toHaveAttribute(
+    "data-native-ready",
+    "true",
+  );
+  const refresh = page.getByRole("region", {
+    name: /^Refresh intent and request approval$|^刷新意图并重新审批$/,
+  });
+  await expect(refresh).toBeVisible();
+  await refresh
+    .getByRole("textbox")
+    .fill("Restore current tool policy and request a new exact approval");
+  await expect(refresh.getByRole("textbox")).toHaveValue(
+    "Restore current tool policy and request a new exact approval",
+  );
+  await expect(refresh.getByRole("button")).toBeEnabled();
+  const accepted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response
+        .url()
+        .endsWith(`/tool-intents/${original.subject_activity_id}/refresh`),
+  );
+  await refresh.getByRole("button").click();
+  const admission = await accepted;
+  expect(admission.status()).toBe(202);
+  expect((await admission.json()).code).toBe(202);
+  const replacement = await pollProjection(
+    approvals,
+    (items) =>
+      items.length === 1 && items[0].approval_id !== original.approval_id,
+    {
+      timeout: 90_000,
+      message: "new Invocation gets a distinct approval in the original Run",
+    },
+  );
+  expect(replacement[0].subject_activity_id).not.toBe(
+    original.subject_activity_id,
+  );
+  const renewed = await viewFor(page, session);
+  expect(renewed.run.run_id).toBe(pending.run.run_id);
+  expect(renewed.artifacts ?? []).toHaveLength(0);
+  await page.goto(
+    `/sessions/${session}?run=${pending.run.run_id}&panel=approval`,
+  );
+  await closeConversation(page);
+  await approveExactIntent(page, replacement[0]);
+  await waitForTerminalProfile(page, session, "completed");
+  const completed = await pollProjection(
+    () => viewFor(page, session),
+    (view) => (view.artifacts?.length ?? 0) === 1,
+    {
+      timeout: 60_000,
+      message: "only the newly approved intent writes an artifact",
+    },
+  );
+  expect(completed.run.run_id).toBe(pending.run.run_id);
+  expect(
+    completed.steps.find(
+      (item) => item.activity_id === original.subject_activity_id,
+    )?.status,
+  ).toBe("failed");
+  await test.info().attach("phase1-intent-refresh", {
+    body: JSON.stringify({
+      run_id: pending.run.run_id,
+      original,
+      replacement: replacement[0],
+      drift_step: driftStep,
+      artifacts: completed.artifacts,
+    }),
+    contentType: "application/json",
+  });
 });
 
 test(

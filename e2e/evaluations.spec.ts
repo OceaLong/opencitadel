@@ -15,6 +15,7 @@ import {
   cover,
 } from "./support/execution";
 import { acceptanceId } from "./support/ids";
+import { registerOwnedSession } from "./support/session-retirement";
 import {
   physicalFault,
   acquirePhysicalFaultLifecycle,
@@ -266,7 +267,7 @@ async function knowledgeFixture(page: Page) {
     {
       timeout: 180_000,
       message:
-        "actual local ingestion and fixture embedding publish a fixed knowledge version",
+        "actual text ingestion publishes a fixed keyword-search knowledge version",
     },
   );
   return {
@@ -293,12 +294,7 @@ async function sourceAndRecording(
         })
       ).data.session_id
     : await createSession(page, acceptanceId("evaluation-source"), mode, model);
-  if (knowledge)
-    registerCleanupAction({
-      action: "delete-resource",
-      resource: "session",
-      resource_id: session,
-    });
+  if (knowledge) await registerOwnedSession(page, session);
   const stream = await readChatStream(page, session, {
     message: example.input,
     mode,

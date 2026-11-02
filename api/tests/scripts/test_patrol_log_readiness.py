@@ -24,7 +24,7 @@ def test_prompt_injection_fixture_waits_and_propagates_readiness_failure(tmp_pat
     )
     script.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(ROOT / "deploy/patrol-demo/scripts/apply-fixture.sh"), "20-prompt-injection"],
+        ["bash", str(ROOT / "demo/patrol/scripts/apply-fixture.sh"), "20-prompt-injection"],
         env={
             **os.environ,
             "PATH": f"{binary_dir}:{os.environ['PATH']}",

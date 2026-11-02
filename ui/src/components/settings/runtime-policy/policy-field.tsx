@@ -52,6 +52,8 @@ export function PolicyField({
   definition,
   label,
   description,
+  optionLabels,
+  disabledOptions,
   value,
   disabled,
   onChange,
@@ -59,6 +61,8 @@ export function PolicyField({
   definition: PolicyFieldDefinition;
   label: string;
   description?: string;
+  optionLabels?: Readonly<Record<string, string>>;
+  disabledOptions?: readonly string[];
   value: unknown;
   disabled?: boolean;
   onChange: (value: unknown) => void;
@@ -89,7 +93,7 @@ export function PolicyField({
       <Field>
         {sharedLabel}
         <Select
-          value={typeof value === "string" ? value : definition.options?.[0]}
+          value={typeof value === "string" ? value : undefined}
           disabled={disabled}
           onValueChange={onChange}
         >
@@ -98,8 +102,13 @@ export function PolicyField({
           </SelectTrigger>
           <SelectContent>
             {definition.options?.map((option) => (
-              <SelectItem key={option} value={option} translate="no">
-                {option}
+              <SelectItem
+                key={option}
+                value={option}
+                disabled={disabledOptions?.includes(option)}
+                translate={optionLabels ? undefined : "no"}
+              >
+                {optionLabels?.[option] ?? option}
               </SelectItem>
             ))}
           </SelectContent>

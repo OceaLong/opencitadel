@@ -32,6 +32,11 @@ binding changes require platform admin). When no explicit rerank binding exists,
 binding. Missing, inaccessible, or mismatched resources never fall through to
 an unrelated provider.
 
+Knowledge-base reranking currently resolves the Ask/Agent task's selected chat
+model, falling back to the chat binding when no model is selected. It does not
+consume a separate `rerank` binding. The binding API and capability projection
+retain the `rerank` purpose contract.
+
 ## Providers and credentials
 
 The registry is the single source of truth for supported provider/kind pairs:
@@ -60,6 +65,15 @@ identities for execution evidence. Vector enablement and resilience use the
 Run's frozen Execution Policy. Vector consumers can be individually disabled
 through Execution Policy, but enabled consumers never read a standalone API key or
 base URL. The UI guides missing capabilities to **Settings → Inference**.
+
+Fresh installations seed knowledge vector search, reranking, GraphRAG, and OCR
+as disabled. Text ingestion and keyword retrieval do not require bindings;
+Ask/Agent answers require chat. Configure optional models first, then enable
+the corresponding Execution Policy fields. Embeddings use a 1536-dimensional
+model, GraphRAG uses the chat binding, and vision OCR requires a vision-capable
+chat model. Rebuild existing libraries to add vector or graph data. Existing
+policy revisions are retained on upgrade; see the
+[knowledge tutorial](../tutorials/02-internal-knowledge-base.md).
 
 ## API and operations
 

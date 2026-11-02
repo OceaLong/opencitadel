@@ -96,6 +96,19 @@ class ExecutionKernelRuntime:
     ) -> ActivityBatchStats:
         return await self._activities.run_once(limit=limit, now=now or datetime.now(UTC))
 
+    async def serve_activities(
+        self,
+        *,
+        stop: asyncio.Event,
+        idle_poll_seconds: float,
+        shutdown_grace_seconds: float,
+    ) -> None:
+        await self._activities.serve(
+            stop=stop,
+            idle_poll_seconds=idle_poll_seconds,
+            shutdown_grace_seconds=shutdown_grace_seconds,
+        )
+
     async def run_decisions_once(
         self,
         *,

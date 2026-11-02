@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 
 import type { RunView, StepView, ViewPage } from "@/lib/api/types/execution-view";
 
+import { ExecutionUsageSummary } from "./usage-summary";
+
 export function stageProgress(completed: number, total: number | null): number | null {
   return total !== null && total > 0 ? Math.min(100, Math.max(0, (completed / total) * 100)) : null;
 }
@@ -44,6 +46,7 @@ export function TaskView({
 }: TaskViewProps) {
   const [focusedStep, setFocusedStep] = useState<string | null>(null);
   const t = useTranslations("executionWorkbench");
+  const context = useTranslations("executionContext");
   const phases = steps.filter((step) => step.kind === "phase");
   const waiting = steps.filter(
     (step) =>
@@ -119,7 +122,11 @@ export function TaskView({
               data-public-revision={step.projection_revision}
               className="block min-w-0 flex-1 break-words"
             >
-              {step.public_summary ?? step.tool_name ?? step.phase ?? step.step_id}
+              {step.context
+                ? step.context.stage === "prepare"
+                  ? context("preparationStep")
+                  : context("summaryStep")
+                : (step.public_summary ?? step.tool_name ?? step.phase ?? step.step_id)}
             </span>
             <StatusBadge>{t(`status.${step.status}`)}</StatusBadge>
           </Button>
@@ -202,6 +209,7 @@ export function TaskView({
           </dl>
         </>,
       )}
+      <ExecutionUsageSummary usage={run.usage} />
       {(waiting.length > 0 || run.wait_reason) &&
         block(
           t("currentFocus"),

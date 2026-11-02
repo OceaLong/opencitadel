@@ -29,6 +29,31 @@ Execution Kernel 进程认领数据库工作，调用注册的 Activity Handler�
 `execution_run_projection`、`execution_resource_build_projection`、审批与 Activity 投影以及
 `execution_public_events` 都可重建。它们可以短暂落后，但不能产生事实或决定终态。
 
+## 租约、工具意图与外部效果恢复
+
+Worker 在认领前预留 slot。Claim 与心跳携带数据库时间、绝对租约期限与 claim generation；
+续租不延长 Activity 的业务期限。监督器覆盖 handler、内容写入和正式结算；旧 handler 晚返回也不能
+越过失效租约发布正式内容或结算结果。
+
+工具恢复按每个 Invocation 的冻结 `RecordedContract` 和精确 `ToolApprovalSubject` 执行，
+绑定参数、目标、scope 与授权 epoch。所选 schema、binding 或权限漂移在发送前停止。
+`ActivityFailed` v3 保留明确的未发送漂移证据；旧事件 upcast 不改存储哈希。
+刷新意图在同一 Run 中创建新的 Invocation 与审批，不能复用旧审批。
+
+外部效果事实仍在 Run 事件中；operation/receipt 表是可重建索引，核验请求是持久化工作。
+未知写入等待原 key 的 provider 查询或有证据的人工结算。`applied` 缺完整结果时等待补材料；
+`not_applied` 结算原 Invocation，不重发。Run 取消后的晚到事实不复活 Run，
+业务恢复不清除物理用量或预算 hold。[部署恢复说明](../operations/deployment.zh-CN.md)
+提供指标和操作指引。
+
+排队的人工核验在读取、复制证据之前重新检查操作者权限，提交结果时再次检查。
+查询重领仍消耗原 operation 的查询预算，包括响应丢失的尝试。
+矛盾结论或业务结果会隔离仍在运行的 Run；后续回执仅保留为证据，不能恢复执行或覆盖原结果。
+操作者仍可取消 Run，计费 hold 的结算权威保持独立。
+
+KB 与 memory 向量保存 `EmbeddingSpaceDescriptor`；维度或 model ID 相同不能证明空间兼容。
+缓存复用前重新校验访问权限与冻结空间。Provider 无法证明不可变 revision 时，不能满足严格 revision 策略。
+
 ## 水平扩展与单一写者投影
 
 多个执行内核副本可安全地对同一数据库运行：
@@ -103,6 +128,36 @@ Completeness 与 Missing Interval 元数据。
 过期数据库工作。Redis 丢失、进程重启和重复投递都属于正常故障模型。完整性或 OwnerScope
 校验失败时必须 fail-closed，并产生运维证据。
 
+## 版本固定与长任务执行
+
+准入在已接受 Run 中固定不可变 Definition Pin，明确 Planner、Activity Handler、
+Context Compiler 与支持的 Schema。切换发布 Head 只影响后续准入。Worker 发布带过期时间
+的能力，并在领取前过滤工作。缺少兼容 Worker 时派生版本不可用提示，不改变 Run 生命周期
+或重试次数。退休检查涵盖待批准事项和未结算外部操作，包括已取消 Run 上仍存在的义务。
+
+Command 恢复与普通物理发送共用可信 Run Loader：验证 Snapshot 身份、Serializer、
+Definition Pin 及正式 Anchor，再验证和折叠 Event Tail。坏 Snapshot 可以丢弃，坏正式事件链
+不能降级。事件先按存储原貌验证 Hash，再做 Schema Upcast。即使 Tail 很小，加载 Snapshot
+State 仍有成本。
+
+Agent 与 Ask 的上下文来自固定来源边界内已接受的私有输入和正式结果。持久化
+`context.prepare` 针对所有冻结模型候选确定性生成有界 Manifest；`context.compact`
+使用独立准入和结算的摘要调用，并持久化 Proposal 与回执以支持恢复。主模型与摘要发送
+均复验原生 Wire Payload 与准备证据是否一致，包括 Provider Fallback。摘要不会变成
+System 指令、可执行工具调用、原始证据或发送授权。
+
+Session Checkpoint 在完整来源集合可用后通过 CAS 发布。原文保留有界索引以支持精确读取；
+每次读取和物理发送再次检查当前 Scope 与来源权限。Agent 可通过只读工具请求原文片段，
+Ask 使用内核原文检索，不因此获得执行工具。来源撤权或缺失会使派生内容不可用。v2 Agent
+定义允许配置数量的工具轮次，再执行一次禁用工具的收尾回答；收尾仍有独立 Prepare 与
+预算准入。
+
+私有对象上传前，通过独立有界连接池持久登记所有权。发布与回收共用 Scope Append Lock。
+回收保留活跃任务、审批、未决外部操作、保留的 Session（包括回收站）、父子依赖、录制、
+Pin 与评测证据；无法验证的依赖闭包继续保留。可回收集合先写不可逆墓碑，再执行外部删除，
+通过有界重试与后续重扫处理失败和迟到上传。回收器不删除正式事件。默认保留期限与开发期
+重建数据库要求见 `api/README.md`。
+
 ## 运行时所有权与关闭
 
 `app.composition.kernel` 构建一个不可变 `KernelRuntime`，不会与 API 共享资源。
@@ -139,3 +194,12 @@ post-commit Effect。
 - 有界视图与 Cursor：`api/app/application/services/execution_view_service.py`、
   `api/app/application/execution/view_cursor.py`、
   `api/app/infrastructure/execution/postgres_execution_view.py`。
+- Definition 生命周期与可信恢复：
+  `api/app/infrastructure/execution/postgres_definition_store.py`、
+  `api/app/infrastructure/execution/verified_run_loader.py`。
+- 上下文准备与 Checkpoint：
+  `api/app/infrastructure/execution/context_preparation.py`、
+  `api/app/infrastructure/execution/context_wire_payload.py`、
+  `api/app/infrastructure/execution/postgres_context_checkpoint.py`。
+- 私有对象保留：`api/app/infrastructure/execution/execution_object_lifecycle.py`、
+  `api/app/infrastructure/execution/execution_object_roots.py`。

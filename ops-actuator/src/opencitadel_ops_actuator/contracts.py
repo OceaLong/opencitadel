@@ -31,6 +31,15 @@ class ActuatorErrorCode(StrEnum):
     TIMEOUT = "TIMEOUT"
     OUTPUT_TOO_LARGE = "OUTPUT_TOO_LARGE"
     INTERNAL = "INTERNAL"
+    OPERATION_CONFLICT = "OPERATION_CONFLICT"
+    OPERATION_NOT_FOUND = "OPERATION_NOT_FOUND"
+    OPERATION_UNKNOWN = "OPERATION_UNKNOWN"
+    OPERATION_PENDING = "OPERATION_PENDING"
+    OPERATION_JOURNAL_UNAVAILABLE = "OPERATION_JOURNAL_UNAVAILABLE"
+    OPERATION_JOURNAL_TOO_LARGE = "OPERATION_JOURNAL_TOO_LARGE"
+    OPERATION_JOURNAL_SENSITIVE = "OPERATION_JOURNAL_SENSITIVE"
+    PAYLOAD_DIGEST_MISMATCH = "PAYLOAD_DIGEST_MISMATCH"
+    TARGET_UID_MISMATCH = "TARGET_UID_MISMATCH"
 
 
 class EvidenceItem(BaseModel):
@@ -42,12 +51,19 @@ class EvidenceItem(BaseModel):
 
 
 class ActuatorEnvelope(BaseModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     target_ref: str
     executed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     action: str
-    action_outcome: Literal["applied", "skipped_idempotent", "failed"]
+    action_outcome: Literal["applied", "skipped_idempotent", "failed", "pending", "unknown"]
+    operation_id: str | None = None
+    state: Literal["pending", "applied", "not_applied", "unknown"] | None = None
+    receipt_revision: int = 0
+    payload_digest: str | None = None
+    key_digest: str | None = None
+    target: dict[str, str] = Field(default_factory=dict)
+    receipt: dict[str, Any] | None = None
     before: dict[str, Any] | None = None
     after: dict[str, Any] | None = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -57,14 +73,39 @@ class ActuatorEnvelope(BaseModel):
     error_message: str | None = Field(default=None, max_length=2000)
 
 
-class RestartRequest(BaseModel):
+class OperationRequest(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9:_-]+$")
+    payload_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    target_uid: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9:_-]+$")
+
+
+class GetOperationRequest(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9:_-]+$")
+
+
+class GetTargetRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=253)
+    workload: str = Field(min_length=1, max_length=253)
+    kind: Literal["deployment", "statefulset"]
+
+
+class TargetIdentity(BaseModel):
+    schema_version: Literal[2] = 2
+    target_ref: str
+    namespace: str
+    workload: str
+    kind: Literal["deployment", "statefulset"]
+    uid: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9:_-]+$")
+
+
+class RestartRequest(OperationRequest):
     namespace: str = Field(min_length=1, max_length=253)
     workload: str = Field(min_length=1, max_length=253)
     kind: Literal["deployment", "statefulset"]
     idempotency_key: str = Field(min_length=1, max_length=200)
 
 
-class ScaleRequest(BaseModel):
+class ScaleRequest(RestartRequest):
     namespace: str = Field(min_length=1, max_length=253)
     workload: str = Field(min_length=1, max_length=253)
     kind: Literal["deployment", "statefulset"]
@@ -72,11 +113,35 @@ class ScaleRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
 
 
-class RollbackRequest(BaseModel):
+class RollbackRequest(RestartRequest):
     namespace: str = Field(min_length=1, max_length=253)
     workload: str = Field(min_length=1, max_length=253)
     kind: Literal["deployment", "statefulset"]
     idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+def operation_payload_digest(
+    action: str,
+    target_ref: str,
+    namespace: str,
+    workload: str,
+    kind: str,
+    target_uid: str,
+    parameters: dict[str, Any] | None = None,
+) -> str:
+    """Public canonical v2 input digest; neither delivery identity nor credentials enter it."""
+    payload = {
+        "action": action,
+        "target_ref": target_ref,
+        "namespace": namespace,
+        "workload": workload,
+        "kind": kind,
+        "target_uid": target_uid,
+        "parameters": parameters or {},
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def evidence_for(target_ref: str, data: dict[str, Any], types: list[str]) -> list[EvidenceItem]:

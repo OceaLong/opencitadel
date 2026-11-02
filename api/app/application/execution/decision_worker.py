@@ -14,6 +14,7 @@ from app.application.execution.decisions import next_command
 from app.application.execution.orchestrator import CommandResult
 from app.application.execution.run_context import run_execution_context
 from app.domain.execution.commands import CommandContext, JsonValue, RegisteredCommand
+from app.domain.execution.definition import DefinitionUnavailable
 from app.domain.execution.run import RunState
 from core.otel import get_tracer
 
@@ -85,12 +86,14 @@ class DecisionWorker:
         source: DecisionSource,
         run_service: RunCommandService,
         approval_ttl_minutes: Callable[[datetime], Awaitable[int]] | None = None,
+        definitions=None,
     ) -> None:
         self._source = source
         self._run_service = run_service
         # Operations-policy approval TTL, injected into RequestApproval payloads
         # at submit time so tenants can override the aggregate's fixed default.
         self._approval_ttl_minutes = approval_ttl_minutes
+        self._definitions = definitions
 
     async def run_once(
         self,
@@ -117,7 +120,12 @@ class DecisionWorker:
                         run_context,
                         outcomes=candidate.decision_payloads,
                         now=now,
+                        definitions=self._definitions,
                     )
+                except DefinitionUnavailable:
+                    # SQL normally excludes this work before loading. A local
+                    # race still leaves its due marker and retry budget intact.
+                    continue
                 except Exception as exc:
                     logger.exception(
                         "decision planner failed run_id=%s family=%s",

@@ -53,7 +53,7 @@ OpenCitadel 是**受治理的私有化 AI Agent 平台**。数据、模型调用
 
 ## 快速开始
 
-**10 分钟体验（推荐）**
+**自带 API Key 体验（推荐）**
 
 ```bash
 git clone https://github.com/OceaLong/opencitadel.git
@@ -64,9 +64,13 @@ make quickstart
 打开 **http://localhost:8088**，登录后在 **设置 → 推理** 中配置 **Endpoint**、**Model**
 与 **Chat Binding**，即可运行第一个 Agent 任务。
 
-`make quickstart` 还会构建沙箱镜像，并默认使用内置 MinIO 存储——如需云存储或生产配置，见下方指南。
+新安装的知识库默认文本提取与关键词检索；向量检索、重排、GraphRAG 和 OCR 在配置模型后
+按需开启。升级保留已有策略。
 
-- 详细步骤：[10 分钟自托管教程（中文）](docs/tutorials/01-self-host-10-minutes.zh-CN.md)
+`make quickstart` 还会构建沙箱镜像，并默认使用内置 MinIO 存储——如需云存储或生产配置，见下方指南。
+首次构建需要下载浏览器和系统依赖，耗时取决于网络和镜像缓存；后续启动复用已构建的镜像。
+
+- 详细步骤：[自托管教程（中文）](docs/tutorials/01-self-host-10-minutes.zh-CN.md)
 - 生产部署：[部署指南](docs/operations/deployment.zh-CN.md)
 - 域名与 HTTPS：[HTTPS 配置](docs/operations/https-domain-setup.zh-CN.md)
 
@@ -89,20 +93,35 @@ make quickstart
 
 | 受众          | 推荐阅读                                                                                                                                                                                                                                                                                                                                       |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 首次体验      | [10 分钟自托管](docs/tutorials/01-self-host-10-minutes.zh-CN.md) · [10 分钟治理演示闭环](docs/tutorials/08-ten-minute-governance-demo.zh-CN.md)                                                                                                                                                                                                |
+| 首次体验      | [自托管教程](docs/tutorials/01-self-host-10-minutes.zh-CN.md) · [10 分钟治理演示闭环](docs/tutorials/08-ten-minute-governance-demo.zh-CN.md)                                                                                                                                                                                                   |
 | 运维 / DevOps | [生产部署](docs/operations/deployment.zh-CN.md) · [Ops Patrol 教程](docs/tutorials/06-ops-patrol.zh-CN.md) · [已批准的修复教程](docs/tutorials/07-approved-remediation.zh-CN.md) · [Patrol 运维](docs/operations/ops-patrol.zh-CN.md) · [HTTPS](docs/operations/https-domain-setup.zh-CN.md) · [Helm](deploy/helm/opencitadel/README.zh-CN.md) |
 | 企业场景      | [内部知识库](docs/tutorials/02-internal-knowledge-base.zh-CN.md) · [MCP 集成](docs/tutorials/03-mcp-integrations.zh-CN.md) · [受治理 Web Operator](docs/tutorials/04-governed-web-operator.zh-CN.md) · [退款对账与合规](docs/tutorials/05-refund-reconciliation-compliance.zh-CN.md)                                                           |
 | 平台 / 后端   | [文档中心](docs/README.zh-CN.md) · [执行内核](docs/architecture/execution-kernel.zh-CN.md) · [安全模型](docs/architecture/security-model.zh-CN.md) · [Ops Patrol 架构](docs/architecture/ops-patrol.zh-CN.md)                                                                                                                                  |
 | 开源贡献      | [贡献指南](.github/CONTRIBUTING.zh-CN.md) · [安全政策](.github/SECURITY.zh-CN.md)                                                                                                                                                                                                                                                              |
 
+## 仓库目录
+
+| 目录                              | 职责                                                           |
+| --------------------------------- | -------------------------------------------------------------- |
+| `api/`                            | API 与执行内核；领域、应用、适配器、装配及测试                 |
+| `ui/`                             | Next.js 应用及前端测试                                         |
+| `sandbox/`                        | 隔离的浏览器、Shell 与 VNC 运行时                              |
+| `ops-collector/`、`ops-actuator/` | 独立部署的只读采集与审批写入服务                               |
+| `deploy/`                         | Nginx、Helm、Kustomize 及运维配置                              |
+| `demo/`                           | OpsConsole 示例与一次性 Patrol 故障实验室                      |
+| `e2e/`                            | 浏览器验收场景、Provider 与证据采集器                          |
+| `scripts/`                        | 启动、备份、验收编排与容量工具；测试归入各自的 `tests/` 子目录 |
+| `contracts/`                      | 验收与 i18n 的共享契约                                         |
+| `docs/`                           | 持续维护的架构、运维与教程                                     |
+
+服务代码与测试随服务维护，部署资源统一放入 `deploy/`，可运行示例放入
+`demo/`。已退役计划从 Git 历史查阅，生成产物放入 `tmp/` 等已忽略的输出目录。
+
 ## 本地开发
 
 ```bash
-cp .env.example .env
-# 编辑 .env：设置 BOOTSTRAP_ADMIN_PASSWORD；首次登录后在设置 → 推理中配置 Endpoint/Model/Binding
-
-# 全栈（Compose）
-docker compose --profile local up --build
+make quickstart
+# 首次启动显示自动生成的管理员登录信息；登录后在设置 → 推理中配置模型
 
 # 或分别运行 API / UI 测试
 cd api && uv sync --all-groups && uv run pytest --ignore=tests/app/integration/test_execution_visualization_closed_loop.py
@@ -112,6 +131,10 @@ cd ui && npm ci && npm run test
 排除的六项当次验收消费者由[验收 Runner](e2e/README.zh-CN.md)在原生证据生成并校验后执行，要求六项全部通过且零跳过。
 
 模块说明：[api/README.zh-CN.md](api/README.zh-CN.md) · [ui/README.zh-CN.md](ui/README.zh-CN.md) · [sandbox/README.zh-CN.md](sandbox/README.zh-CN.md)
+
+`.env.example` 只列六项基础选择；凭据首次自动生成并持久保存在私有 `.env`。
+只准备配置可运行 `make configure`，高级覆盖分类见
+[`deploy/config/.env.reference`](deploy/config/.env.reference)。
 
 ## 许可证
 

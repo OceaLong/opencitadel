@@ -13,6 +13,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/users", labelKey: "users", icon: IconUsers, adminOnly: true },
   { href: "/admin/teams", labelKey: "teams", icon: IconUsers, adminOnly: true },
   { href: "/admin/invitations", labelKey: "invitations", icon: IconInvitation, adminOnly: true },
+  {
+    href: "/admin/execution-definitions",
+    labelKey: "executionDefinitions",
+    icon: IconAdmin,
+    adminOnly: true,
+  },
   { href: "/admin/audit", labelKey: "audit", icon: IconAudit },
   { href: "/admin/governance", labelKey: "governance", icon: IconSecurity },
   { href: "/admin/compliance", labelKey: "evidence", icon: IconAudit, exact: true },

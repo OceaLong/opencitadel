@@ -1,13 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import type { Page } from "@playwright/test";
 
 import type { components } from "../ui/src/lib/api/generated/schema";
 import { appApi, expect, test } from "./fixtures/acceptance.fixture";
 import { registerCleanupAction } from "./support/cleanup-journal";
+import { registerOwnedSession } from "./support/session-retirement";
 import { acceptanceId } from "./support/ids";
 import { pollProjection } from "./support/poll";
+import { readChatStream, waitForTerminalProfile } from "./support/execution";
 
 type FileInfo = components["schemas"]["File"];
 type KnowledgeBase = components["schemas"]["KnowledgeBaseResponse"];
@@ -45,6 +48,15 @@ async function uploadFixture(
   mimeType: string,
 ): Promise<FileInfo> {
   const content = readFileSync(path, "utf8");
+  return uploadText(page, content, filename, mimeType);
+}
+
+async function uploadText(
+  page: Page,
+  content: string,
+  filename: string,
+  mimeType: string,
+): Promise<FileInfo> {
   const result = await page.evaluate(
     async ({ content, filename, mimeType }) => {
       const cookies = document.cookie.split("; ");
@@ -162,7 +174,7 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
   operatorPage: page,
 }) => {
   test.setTimeout(300_000);
-  cover("KB-BUILD", "KB-PUBLISH", "KB-PIN", "KB-DEGRADED");
+  cover("KB-BUILD", "KB-PUBLISH", "KB-PIN");
 
   const uploaded = await uploadFixture(
     page,
@@ -204,13 +216,13 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
     firstCandidate.id,
   );
   expect(first.parent_version_id).toBeNull();
-  expect(first.state).toBe("degraded");
+  expect(first.state).toBe("ready");
   expect(first.capabilities).toMatchObject({
     keyword_search: true,
-    vector_search: true,
+    vector_search: false,
     graph_search: false,
   });
-  expect(first.degraded_reasons).toContain("GRAPH_UNAVAILABLE");
+  expect(first.degraded_reasons).toEqual([]);
 
   const currentKnowledge = (
     await appApi<KnowledgeBase>(
@@ -220,7 +232,7 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
   ).data;
   expect(currentKnowledge.active_version_id).toBe(first.id);
   expect(currentKnowledge.status).toBe("ready");
-  expect(currentKnowledge.error).toContain("GRAPH_UNAVAILABLE");
+  expect(currentKnowledge.error).toBeNull();
 
   const documents = (
     await appApi<KnowledgeDocuments>(
@@ -255,7 +267,6 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
   await expect(
     page.getByText(knowledgeBase.name, { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/GRAPH_UNAVAILABLE/).first()).toBeVisible();
 
   const session = (
     await appApi<KnowledgeSession>(
@@ -270,11 +281,7 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
       },
     )
   ).data;
-  registerCleanupAction({
-    action: "delete-resource",
-    resource: "session",
-    resource_id: session.session_id,
-  });
+  await registerOwnedSession(page, session.session_id);
   const initialBindings = (
     await appApi<ResourceBinding[]>(
       page,
@@ -325,4 +332,159 @@ test("knowledge candidates publish immutable versions and sessions remain pinned
       is_current: true,
     }),
   ]);
+});
+
+test("partial document failure publishes a usable keyword-only version", async ({
+  operatorPage: page,
+  bootstrapState,
+}) => {
+  test.setTimeout(300_000);
+  cover("KB-DEGRADED");
+  const uploaded = await uploadFixture(
+    page,
+    handbookPath,
+    "acceptance-handbook.md",
+    "text/markdown",
+  );
+  const broken = await uploadText(
+    page,
+    "Acceptance fault: this file intentionally lacks a PDF header and pages.\n",
+    "unparseable.pdf",
+    "application/pdf",
+  );
+  for (const file of [uploaded, broken]) {
+    registerCleanupAction({
+      action: "delete-resource",
+      resource: "file",
+      resource_id: file.id,
+    });
+  }
+  const knowledgeBase = (
+    await appApi<KnowledgeBase>(page, "/knowledge-bases", {
+      method: "POST",
+      body: { name: acceptanceId("partial-knowledge"), settings: {} },
+    })
+  ).data;
+  registerCleanupAction({
+    action: "delete-resource",
+    resource: "knowledge-base",
+    resource_id: knowledgeBase.id,
+  });
+  await appApi<KnowledgeBase>(
+    page,
+    `/knowledge-bases/${encodeURIComponent(knowledgeBase.id)}/documents`,
+    {
+      method: "POST",
+      body: {
+        file_ids: [uploaded.id, broken.id],
+        urls: [],
+        source_type: "upload",
+      },
+    },
+  );
+  const candidate = await observeKnowledgeCandidate(page, knowledgeBase.id);
+  const published = await waitForKnowledgePublication(
+    page,
+    knowledgeBase.id,
+    candidate.id,
+  );
+  expect(published.state).toBe("degraded");
+  expect(published.capabilities).toMatchObject({
+    keyword_search: true,
+    vector_search: false,
+    graph_search: false,
+  });
+  expect(published.degraded_reasons).toEqual(["DOCUMENT_PARTIAL"]);
+  const documents = (
+    await appApi<KnowledgeDocuments>(
+      page,
+      `/knowledge-bases/${encodeURIComponent(knowledgeBase.id)}/documents`,
+    )
+  ).data;
+  expect(documents.documents).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: "acceptance-handbook.md",
+        status: "ready",
+      }),
+      expect.objectContaining({ title: "unparseable.pdf", status: "failed" }),
+    ]),
+  );
+  await page.goto("/knowledge");
+  await expect(
+    page.getByText(knowledgeBase.name, { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/DOCUMENT_PARTIAL/).first()).toBeVisible();
+
+  const session = (
+    await appApi<KnowledgeSession>(
+      page,
+      `/knowledge-bases/${encodeURIComponent(knowledgeBase.id)}/sessions`,
+      {
+        method: "POST",
+        body: { mode: "ask", knowledge_base_version_id: published.id },
+      },
+    )
+  ).data;
+  await registerOwnedSession(page, session.session_id);
+  await readChatStream(page, session.session_id, {
+    message:
+      "[acceptance:evaluation:citation] What is the Citadel verification beacon and its rotation interval?",
+    mode: "ask",
+    model_id: bootstrapState.model_ids.chat,
+    request_id: randomUUID(),
+  });
+  await waitForTerminalProfile(page, session.session_id, "completed");
+  const runs = (
+    await appApi<{ items: Array<{ run_id: string }> }>(
+      page,
+      `/execution-runs?source_entity_type=session&source_entity_id=${encodeURIComponent(session.session_id)}`,
+    )
+  ).data.items;
+  expect(runs).toHaveLength(1);
+  const view = await pollProjection(
+    () =>
+      appApi<{
+        steps: Array<{
+          citation_refs?: Array<{
+            knowledge_base_id: string;
+            version_id: string;
+            doc_id: string;
+          }>;
+        }>;
+      }>(
+        page,
+        `/execution-runs/${encodeURIComponent(runs[0].run_id)}/view`,
+      ).then((response) => response.data),
+    (projection) =>
+      projection.steps.some((step) =>
+        step.citation_refs?.some(
+          (citation) =>
+            citation.knowledge_base_id === knowledgeBase.id &&
+            citation.version_id === published.id,
+        ),
+      ),
+    {
+      timeout: 60_000,
+      message:
+        "keyword retrieval retains exact published citations after a document failure",
+    },
+  );
+  const citation = view.steps
+    .flatMap((step) => step.citation_refs ?? [])
+    .find(
+      (item) =>
+        item.knowledge_base_id === knowledgeBase.id &&
+        item.version_id === published.id,
+    );
+  expect(citation).toBeDefined();
+  const content = (
+    await appApi<KnowledgeContent>(
+      page,
+      `/knowledge-bases/${encodeURIComponent(knowledgeBase.id)}/versions/${encodeURIComponent(published.id)}/documents/${encodeURIComponent(citation!.doc_id)}/content?limit=200`,
+    )
+  ).data;
+  expect(content.items?.map((item) => item.content).join("\n")).toContain(
+    handbookFact,
+  );
 });

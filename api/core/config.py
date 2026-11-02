@@ -1,8 +1,11 @@
 import ipaddress
-from urllib.parse import quote_plus
+from typing import Literal
+from urllib.parse import quote_plus, urlsplit
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 _DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel"
 _PLACEHOLDER_MARKERS = (
@@ -69,7 +72,7 @@ class DeploymentSettings(BaseSettings):
     evaluation_broker_journal_path: str = "/var/lib/opencitadel-evaluation/operations.sqlite"
 
     # 项目基础
-    env: str = "development"
+    env: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
     log_format: str = "text"  # text | json
     # 跨域来源列表（逗号分隔）。空串与 "*" 的实际效果相同：因为携带凭据
@@ -120,7 +123,7 @@ class DeploymentSettings(BaseSettings):
     # configured on the MCP Server registration (Settings -> Integrations), and
     # OPS_ACTUATOR_TOKEN belongs to the actuator server process itself.
     ops_collector_token: str = ""
-    sandbox_driver: str = "auto"
+    sandbox_driver: Literal["auto", "docker", "kubernetes"] = "auto"
     sandbox_address: str = ""
     sandbox_image: str = ""
     sandbox_name_prefix: str = ""
@@ -151,9 +154,11 @@ class DeploymentSettings(BaseSettings):
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
     cookie_domain: str = ""
-    cookie_secure: bool = False
-    oauth_redirect_base: str = "http://localhost:8088/api/auth/oauth"
-    frontend_base_url: str = "http://localhost:3000"
+    # One public origin owns generated invitations and OAuth callbacks. Existing
+    # explicit OAuth / cookie settings remain valid overrides.
+    cookie_secure: bool | None = None
+    oauth_redirect_base: str = ""
+    frontend_base_url: str = "http://localhost:8088"
     google_client_id: str = ""
     google_client_secret: str = ""
     github_client_id: str = ""
@@ -185,18 +190,18 @@ class DeploymentSettings(BaseSettings):
     postgres_admin_password: str = ""
     sqlalchemy_migration_database_uri: str = ""
     sqlalchemy_echo: bool = False
-    postgres_pool_size: int = 5
-    postgres_max_overflow: int = 5
-    postgres_pool_recycle_seconds: int = 1800
+    postgres_pool_size: int = Field(default=5, gt=0)
+    postgres_max_overflow: int = Field(default=5, ge=0)
+    postgres_pool_recycle_seconds: int = Field(default=1800, gt=0)
 
     # 执行内核批量/背压/轮询（P1-3）。
     # execution_activity_max_concurrency 是 ActivityWorker 每进程并发执行 claim
     # 的上限（Semaphore）。每个 claim 内含多次数据库连接 checkout，因此并发上限
     # 必须 <= 连接池有效容量（postgres_pool_size + postgres_max_overflow），否则
     # 高并发下会出现连接排队 / 死锁向量。保持默认 8 <= 10（5+5）。
-    execution_activity_batch_size: int = 100
-    execution_activity_max_concurrency: int = 8
-    execution_idle_poll_seconds: float = 1.0
+    execution_activity_batch_size: int = Field(default=100, gt=0)
+    execution_activity_max_concurrency: int = Field(default=8, gt=0)
+    execution_idle_poll_seconds: float = Field(default=1.0, gt=0)
     # Activity 毒丸防护（K2-2）：单个 activity task 行被 claim 的总次数上限
     # （含租约过期后的重捞）。超限转 dead_lettered，不再被 claim；对应 Run 由
     # 活动超时 timer（FailActivity/ACTIVITY_TIMEOUT）兜底收敛。
@@ -216,6 +221,10 @@ class DeploymentSettings(BaseSettings):
     execution_timer_retention_days: int = 30
     execution_activity_retention_days: int = 30
     execution_queue_purge_batch_size: int = 500
+    # Private execution originals: retained sessions/pins/unresolved effects override age.
+    execution_object_retention_days: int = Field(default=30, ge=1)
+    execution_object_orphan_hours: int = Field(default=24, ge=1)
+    execution_object_gc_batch_size: int = Field(default=100, ge=1, le=1000)
     # 单个空间的活跃工作流硬上限，计入待处理命令；父子 Run 共用容量，
     # 直到组内所有 Run 终态才释放。超限返回 HTTP 429。0 = 不限制。
     execution_max_active_runs_per_scope: int = 200
@@ -239,7 +248,7 @@ class DeploymentSettings(BaseSettings):
     redis_password: str | None = None
 
     # 对象存储：cos（默认）或 minio
-    storage_provider: str = "cos"
+    storage_provider: Literal["cos", "minio"] = "cos"
 
     # 腾讯云 COS 密钥与桶
     cos_secret_id: str = ""
@@ -268,8 +277,50 @@ class DeploymentSettings(BaseSettings):
         extra="ignore",
     )
 
+    @field_validator("env", "storage_provider", "sandbox_driver", mode="before")
+    @classmethod
+    def normalize_choice(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("cookie_secure", mode="before")
+    @classmethod
+    def empty_cookie_secure_uses_site_scheme(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("frontend_base_url")
+    @classmethod
+    def validate_public_origin(cls, value: str) -> str:
+        origin = value.strip().rstrip("/")
+        try:
+            parsed = urlsplit(origin)
+            port = parsed.port
+        except ValueError:
+            raise ValueError("frontend_base_url must be a valid HTTP(S) origin") from None
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or any(char.isspace() for char in origin)
+            or any(not (char.isalnum() or char in ".-_:") for char in (parsed.hostname or ""))
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            raise ValueError("frontend_base_url must be an HTTP(S) origin without a path")
+        return origin
+
     @model_validator(mode="after")
     def derive_sqlalchemy_database_uri(self) -> "DeploymentSettings":
+        if self.cookie_secure is None:
+            object.__setattr__(
+                self, "cookie_secure", urlsplit(self.frontend_base_url).scheme == "https"
+            )
+        if not self.oauth_redirect_base.strip():
+            object.__setattr__(
+                self, "oauth_redirect_base", f"{self.frontend_base_url}/api/auth/oauth"
+            )
         uri = (self.sqlalchemy_database_uri or "").strip()
         if not uri or uri == _DEFAULT_LOCAL_URI:
             user = quote_plus(self.postgres_user)
@@ -362,20 +413,32 @@ class DeploymentSettings(BaseSettings):
                 )
             if not self.cookie_secure:
                 raise ValueError("cookie_secure must be true in production")
-            if len(self.bootstrap_admin_password) < 12 or _looks_like_placeholder(
-                self.bootstrap_admin_password
+            if self.bootstrap_admin_email.strip() and (
+                len(self.bootstrap_admin_password) < 12
+                or _looks_like_placeholder(self.bootstrap_admin_password)
             ):
                 raise ValueError(
                     "bootstrap_admin_password must contain at least 12 characters in production"
                 )
+            try:
+                database_password = make_url(self.sqlalchemy_database_uri).password or ""
+            except (ArgumentError, ValueError):
+                raise ValueError("sqlalchemy_database_uri must be a valid database URL") from None
             if (
-                self.postgres_password == "postgres"
-                or len(self.postgres_password) < 16
-                or _looks_like_placeholder(self.postgres_password)
+                database_password == "postgres"
+                or len(database_password) < 16
+                or _looks_like_placeholder(database_password)
             ):
                 raise ValueError(
                     "postgres_password must be changed and contain at least "
                     "16 characters in production"
+                )
+            if self.public_cursor_secret and (
+                len(self.public_cursor_secret) < 32
+                or _looks_like_placeholder(self.public_cursor_secret)
+            ):
+                raise ValueError(
+                    "public_cursor_secret must contain at least 32 characters in production"
                 )
             if (
                 not self.redis_password

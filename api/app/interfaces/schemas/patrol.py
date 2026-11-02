@@ -226,6 +226,10 @@ class PatrolRemediationResponse(BaseModel):
     rollback_hint: str
     idempotency_key: str
     actuator_capability_hash: str | None
+    actuator_operation_id: str | None = None
+    actuator_payload_digest: str | None = None
+    actuator_target_uid: str | None = None
+    actuator_target_ref: str | None = None
     status: PatrolRemediationStatus
     before_observation: dict[str, Any] | None
     after_observation: dict[str, Any] | None

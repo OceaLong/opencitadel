@@ -349,9 +349,22 @@ async def test_full_100000_run_capture_and_100001_exclusion_boundary(datasets, i
     )
 
     objects = PrivateObjects()
+
+    class ObservedWorker(ExecutionExportWorker):
+        failure = None
+
+        async def _generate(self, lease):
+            try:
+                return await super()._generate(lease)
+            except Exception as error:
+                self.failure = f"{type(error).__name__}: {error}"
+                raise
+
     async with kernel_repository(repo) as kernel:
-        await ExecutionExportWorker(kernel, objects).process_pending()
-    assert (await repo.get(scope, principal, accepted["id"]))["status"] == "ready"
+        worker = ObservedWorker(kernel, objects)
+        await worker.process_pending()
+    status = await repo.get(scope, principal, accepted["id"])
+    assert status["status"] == "ready", (status, worker.failure)
     spool, _, _ = await ExportDownloader(repo, objects).prepare(scope, principal, accepted["id"])
     try:
         assert len(json.load(spool)["rows"]) == 100000

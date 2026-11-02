@@ -29,6 +29,12 @@ Important routes include `/sessions/[id]`, `/knowledge`, `/automation`,
 Settings contains General, Agent, Inference, Skills, Memory, Integrations, and an
 administrator-only Runtime section.
 
+Knowledge creation inherits the current server Execution Policy. New installs
+start with text extraction and keyword search; the Runtime form only shows
+enhancement tuning when its corresponding capability is enabled. Optional
+models are configured under Inference before enabling vector search, reranking,
+GraphRAG, or vision OCR. Existing policy values remain authoritative.
+
 ## Execution and evaluation surfaces
 
 - `/runs/[id]`: Live/Playback workbench and bounded bodies; historical views cannot dispatch current actions.
@@ -62,6 +68,12 @@ The development server runs on `http://localhost:3000`. The browser API base
 is `/api` by default. Next.js rewrites proxy it to `NEXT_PUBLIC_API_PROXY_TARGET`
 (default `http://localhost:8088`). `NEXT_PUBLIC_API_BASE_URL` explicitly overrides
 the browser base URL. Nginx handles production traffic through the same `/api` path.
+
+For the complete stack, run `make quickstart` at the root and use
+`http://localhost:8088`. When developing the UI at `http://localhost:3000`, set
+that origin as the backend's `FRONTEND_BASE_URL` so invitations and OAuth return
+to the development UI. Optional deployment overrides are grouped in
+[`deploy/config/.env.reference`](../deploy/config/.env.reference).
 
 See [frontend architecture](../docs/architecture/frontend-ui.md) and
 [execution kernel](../docs/architecture/execution-kernel.md).

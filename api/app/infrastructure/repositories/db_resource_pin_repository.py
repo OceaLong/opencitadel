@@ -204,7 +204,7 @@ class DBResourcePinRepository:
         else:
             result = await self.db_session.execute(
                 text(
-                    f"SELECT content_id,citation_refs FROM execution_public_content WHERE content_id::text=:id AND {_SCOPE} AND content_digest=:version AND EXISTS (SELECT 1 FROM execution_content_bindings b WHERE b.content_id=execution_public_content.content_id AND b.scope_key=execution_public_content.scope_key)"
+                    f"SELECT content_id,run_id,citation_refs,context_dependencies FROM execution_public_content WHERE content_id::text=:id AND {_SCOPE} AND content_digest=:version AND EXISTS (SELECT 1 FROM execution_content_bindings b WHERE b.content_id=execution_public_content.content_id AND b.scope_key=execution_public_content.scope_key)"
                 ),
                 p,
             )
@@ -226,6 +226,21 @@ class DBResourcePinRepository:
                 forget_result(result)
         from .db_file_repository import DBFileRepository
         from .db_knowledge_base_repository import DBKnowledgeBaseRepository
+
+        if row is not None and resource.resource_kind == "execution_content":
+            from app.infrastructure.execution.context_capture_dependencies import (
+                validate_captured_dependencies,
+            )
+            from app.infrastructure.execution.execution_object_lifecycle import (
+                guard_object_reference,
+            )
+
+            try:
+                await guard_object_reference(self.db_session, p["scope"], row.run_id)
+            except ValueError as exc:
+                raise ResourceUnavailable("original execution content unavailable") from exc
+
+            await validate_captured_dependencies(self.db_session, scope, row.context_dependencies)
 
         return await require_resolved_resource(
             scope,

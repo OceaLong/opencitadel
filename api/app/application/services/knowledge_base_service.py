@@ -26,10 +26,12 @@ from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.domain.execution.run import RunFamily, RunStatus
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.web_document import WebDocument, WebDocumentGateway
+from app.domain.models.embedding_space import EmbeddingSpaceDescriptor
 from app.domain.models.inference import (
     PLATFORM_EMBEDDING_DIMENSIONS,
     EmbeddingModelSettings,
     InferencePurpose,
+    ResolvedInferenceModel,
 )
 from app.domain.models.knowledge_base import (
     KBSourceType,
@@ -123,6 +125,7 @@ class KnowledgeBaseService:
                 "version_id": frozen.version_id,
                 "embedding_model_id": frozen.embedding_model_id,
                 "embedding_dimensions": frozen.embedding_dimensions,
+                "embedding_space_digest": frozen.embedding_space_digest,
             }
 
         await self._run_admission.admit(
@@ -160,10 +163,8 @@ class KnowledgeBaseService:
             return build
         if self._inference_bindings is None:
             raise RuntimeError("knowledge-base vector indexing requires InferenceBindingService")
-        # Resolve the effective embedding binding on the caller's UoW connection
-        # rather than opening a nested UoW (P1-2). We only need the frozen model
-        # id + platform dimensions here; endpoint invokability is re-validated by
-        # the KB_INGEST embedding activity at execution time.
+        # Resolve and freeze on the caller's UoW; opening another UoW here
+        # would exhaust the pool under concurrent build admission.
         binding = await uow.inference_binding.get_effective_binding(
             InferencePurpose.EMBEDDING,
             scope,
@@ -183,10 +184,25 @@ class KnowledgeBaseService:
             )
         if not isinstance(model.settings, EmbeddingModelSettings):
             raise ConflictError("embedding binding does not reference an embedding model")
+        endpoint = await uow.inference_endpoint.get_by_id(model.endpoint_id, scope=scope)
+        if endpoint is None:
+            raise ConflictError("embedding endpoint is missing or inaccessible")
+        space = EmbeddingSpaceDescriptor.from_resolved(
+            ResolvedInferenceModel(model=model, endpoint=endpoint)
+        )
+        kb = await uow.knowledge_base.get_kb(build.resource_id, scope=scope)
+        if kb is None:
+            raise NotFoundError("knowledge base not found")
+        if kb.settings.get("embedding_revision_policy") == "verified_only":
+            space.require_verified()
+        await uow.knowledge_version.freeze_embedding_space(
+            build.version_id, knowledge_base_id=build.resource_id, space=space
+        )
         return build.model_copy(
             update={
                 "embedding_model_id": model.id,
                 "embedding_dimensions": PLATFORM_EMBEDDING_DIMENSIONS,
+                "embedding_space_digest": space.digest,
             }
         )
 
@@ -314,6 +330,13 @@ class KnowledgeBaseService:
         settings: dict | None = None,
         scope: OwnerScope | None = None,
     ) -> KnowledgeBase:
+        if (settings or {}).get("embedding_revision_policy", "allow_unverified") not in {
+            "allow_unverified",
+            "verified_only",
+        }:
+            raise BadRequestError(
+                "embedding_revision_policy must be allow_unverified or verified_only"
+            )
         kb = KnowledgeBase(
             name=name or "未命名知识库",
             settings=settings or {},
@@ -866,6 +889,10 @@ class KnowledgeBaseService:
             parent_version_id=version.parent_version_id,
             build_id=version.build_id,
             state=version.state,
+            embedding_space_digest=version.embedding_space_digest,
+            revision_assurance=(
+                version.embedding_space.revision_assurance if version.embedding_space else None
+            ),
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
@@ -883,12 +910,22 @@ class KnowledgeBaseService:
         scope: OwnerScope,
     ) -> KnowledgeVersionProjection:
         version = result.version
+        async with self._uow_factory() as uow:
+            stored = await uow.knowledge_version.get_version(
+                version.id, knowledge_base_id=version.knowledge_base_id
+            )
+        if stored is not None:
+            version = stored
         return KnowledgeVersionProjection(
             id=version.id,
             knowledge_base_id=version.knowledge_base_id,
             parent_version_id=version.parent_version_id,
             build_id=version.build_id,
             state=version.state,
+            embedding_space_digest=version.embedding_space_digest,
+            revision_assurance=(
+                version.embedding_space.revision_assurance if version.embedding_space else None
+            ),
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,

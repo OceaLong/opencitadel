@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from app.domain.execution.definition import DefinitionManifest, DefinitionPin
 from app.domain.execution.family import RunFamily
 from app.domain.models.scope import OwnerScope
 from app.domain.runtime_policy.snapshot import (
@@ -22,6 +23,8 @@ class RunExecutionContext(BaseModel):
     owner_scope: OwnerScope
     policy_snapshot: RunPolicySnapshot
     correlation_id: UUID
+    definition_pin: DefinitionPin | None = None
+    definition_manifest: DefinitionManifest | None = None
     # Product anchor of the Run (session, patrol_run, knowledge base build...).
     # Off-stream telemetry (activity progress) needs it to address the public
     # event feed without a projection lookup per report.
@@ -33,6 +36,12 @@ class RunExecutionContext(BaseModel):
         validate_run_policy_snapshot(self.policy_snapshot)
         if self.family != self.policy_snapshot.family:
             raise ValueError("Run context policy family mismatch")
+        if self.definition_pin is not None and self.definition_pin.family != self.family:
+            raise ValueError("Run context definition family mismatch")
+        if self.definition_manifest is not None:
+            if self.definition_pin is None:
+                raise ValueError("Run context manifest requires a pin")
+            self.definition_manifest.require_pin(self.definition_pin)
         return self
 
 

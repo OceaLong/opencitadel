@@ -34,6 +34,10 @@ async def budget_binding_fixture(configurations, isolated_database, request):
     service, _, scope, principal = configurations
     await native_inventory(configurations)
     options = getattr(request, "param", {})
+    if options.get("smaller_context_fallback"):
+        from tests.app.integration.context_fallback_support import install_smaller_context_fallback
+
+        await install_smaller_context_fallback(configurations)
     if options.get("price") is not None:
         from app.application.evaluation.budget_service import BudgetAuthority
         from app.domain.evaluation.budget_capabilities import BudgetInventory

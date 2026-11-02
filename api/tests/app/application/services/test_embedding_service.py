@@ -64,7 +64,7 @@ async def test_missing_required_endpoint_credential_fails_before_adapter_call() 
     service = EmbeddingService(bindings, embedding_factory=_embedding_factory(adapter_factory))
 
     with pytest.raises(BadRequestError, match="credential missing"):
-        await service.embed(["hello"], scope=None)
+        await service.embed(["hello"], scope=OwnerScope.personal("user-1"))
 
     adapter_factory.assert_not_called()
 
@@ -81,7 +81,7 @@ async def test_wrong_embedding_dimension_is_rejected() -> None:
     )
 
     with pytest.raises(ServerRequestsError, match="1536"):
-        await service.embed(["hello"], scope=None)
+        await service.embed(["hello"], scope=OwnerScope.personal("user-1"))
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_batches_respect_bound_model_max_batch_size() -> None:
         embedding_factory=_embedding_factory(Mock(return_value=adapter)),
     )
 
-    vectors = await service.embed(["a", "b", "c"], scope=None)
+    vectors = await service.embed(["a", "b", "c"], scope=OwnerScope.personal("user-1"))
 
     assert len(vectors) == 3
     assert [call.args[0] for call in adapter.embed_batch.await_args_list] == [
@@ -121,9 +121,9 @@ async def test_cache_key_includes_model_id() -> None:
     adapter_factory = Mock(side_effect=[first_adapter, second_adapter])
     service = EmbeddingService(bindings, embedding_factory=_embedding_factory(adapter_factory))
 
-    first = await service.embed(["same"], scope=None)
-    cached = await service.embed(["same"], scope=None)
-    changed_model = await service.embed(["same"], scope=None)
+    first = await service.embed(["same"], scope=OwnerScope.personal("user-1"))
+    cached = await service.embed(["same"], scope=OwnerScope.personal("user-1"))
+    changed_model = await service.embed(["same"], scope=OwnerScope.personal("user-1"))
 
     assert first == cached
     assert changed_model != cached
@@ -143,7 +143,7 @@ async def test_response_cardinality_must_match_request() -> None:
     )
 
     with pytest.raises(ServerRequestsError, match="数量"):
-        await service.embed(["hello"], scope=None)
+        await service.embed(["hello"], scope=OwnerScope.personal("user-1"))
 
 
 @pytest.mark.asyncio
@@ -160,10 +160,10 @@ async def test_embedding_closes_request_adapter_and_cache_creates_no_client(fail
     service = EmbeddingService(bindings, embedding_factory=_embedding_factory(factory))
     if failure:
         with pytest.raises(RuntimeError, match="transport failed"):
-            await service.embed(["a"], scope=None)
+            await service.embed(["a"], scope=OwnerScope.personal("user-1"))
     else:
-        await service.embed(["a"], scope=None)
-        await service.embed(["a", " "], scope=None)
+        await service.embed(["a"], scope=OwnerScope.personal("user-1"))
+        await service.embed(["a", " "], scope=OwnerScope.personal("user-1"))
         assert factory.call_count == 1
     adapter.aclose.assert_awaited_once()
 

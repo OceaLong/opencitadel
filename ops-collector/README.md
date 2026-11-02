@@ -89,7 +89,7 @@ docker compose --profile patrol up -d --build opencitadel-ops-collector
 
 The Compose profile is useful for transport/configuration checks and non-Kubernetes registered probes. It does not mount a host kubeconfig. For real Kubernetes observations, deploy with the Helm or Kustomize ServiceAccount instead of adding a privileged host credential mount.
 
-Set a strong `OPS_COLLECTOR_TOKEN` in `.env` first. Compose passes namespace, HTTP-probe, and dependency registrations only; use an override or Helm/Kustomize for Prometheus, certificate, backup, and workload registries. The Collector joins both the application and Ops networks for local probes and publishes no host port; bearer authentication is its primary access boundary.
+For a fresh Compose installation, `make configure` generates and saves a strong `OPS_COLLECTOR_TOKEN` in `.env`; existing installations keep their token. Compose passes namespace, HTTP-probe, and dependency registrations only; use an override or Helm/Kustomize for Prometheus, certificate, backup, and workload registries. The Collector joins both the application and Ops networks for local probes and publishes no host port; bearer authentication is its primary access boundary.
 
 For development-only stdio:
 
@@ -109,7 +109,7 @@ Never enable stdio in the production deployment.
 
 The container runs as UID/GID 10001 with a read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, and only a bounded writable `/tmp`.
 
-The HTTP process refuses to start if the token is missing or shorter than 32 characters. Helm uses `opsCollector.token`; the Kustomize base Secret is empty and must be provisioned before apply. Configure `Authorization: Bearer <token>` in encrypted integration headers. TCP health probes verify only listener reachability, not Kubernetes/registered-target readiness or authenticated calls. Kubernetes manifests set `RuntimeDefault` seccomp; Compose sets non-root, read-only root, dropped capabilities, and `no-new-privileges`.
+The HTTP process refuses to start if the token is missing or shorter than 32 characters. Helm generates and persists the token when enabled; `opsCollector.token` remains an explicit override; the Kustomize base Secret is empty and must be provisioned before apply. Configure `Authorization: Bearer <token>` in encrypted integration headers. TCP health probes verify only listener reachability, not Kubernetes/registered-target readiness or authenticated calls. Kubernetes manifests set `RuntimeDefault` seccomp; Compose sets non-root, read-only root, dropped capabilities, and `no-new-privileges`.
 
 ## Authentication and data handling
 
@@ -125,7 +125,7 @@ uv sync --frozen
 uv run pytest -q
 ```
 
-The destructive golden-fixture lab is run only from the repository root with `./scripts/run-patrol-fixtures.sh`. See `deploy/patrol-demo/README.md`; never apply those fixtures to a shared cluster.
+The destructive golden-fixture lab is run only from the repository root with `./scripts/run-patrol-fixtures.sh`. See `demo/patrol/README.md`; never apply those fixtures to a shared cluster.
 
 ## Related documentation
 

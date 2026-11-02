@@ -9,7 +9,10 @@ from __future__ import annotations
 
 RETRIEVAL_SEARCH = "retrieval.search"
 MODEL_CALL = "model.call"
+CONTEXT_PREPARE = "context.prepare"
+CONTEXT_COMPACT = "context.compact"
 TOOL_CALL = "tool.call"
+TOOL_INTENT_REFRESH = "tool.intent_refresh"
 KNOWLEDGE_BUILD = "knowledge.build"
 CHILD_RUN_START = "child_run.start"
 PATROL_EXECUTE = "patrol.execute"
@@ -21,6 +24,7 @@ ALL_ACTIVITY_TYPES: frozenset[str] = frozenset(
         RETRIEVAL_SEARCH,
         MODEL_CALL,
         TOOL_CALL,
+        TOOL_INTENT_REFRESH,
         KNOWLEDGE_BUILD,
         CHILD_RUN_START,
         PATROL_EXECUTE,
@@ -39,4 +43,5 @@ __all__ = [
     "REMEDIATION_EXECUTE",
     "RETRIEVAL_SEARCH",
     "TOOL_CALL",
+    "TOOL_INTENT_REFRESH",
 ]

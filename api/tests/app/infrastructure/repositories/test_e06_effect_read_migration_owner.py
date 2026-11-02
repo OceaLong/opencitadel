@@ -28,7 +28,9 @@ def fresh_f07_database(isolated_database, monkeypatch):
     from core.config import load_deployment_settings
 
     engine, config = isolated_database
-    role = "opencitadel_migration_runtime"
+    # Use the explicitly configured non-bypass owner, not a deployment-specific
+    # login name: disposable test stacks provision independent role identities.
+    role = engine.url.username
     name = engine.url.database
     assert name.startswith("test_execution_view_")
     # This changes only the database created by this fixture. No cluster role,

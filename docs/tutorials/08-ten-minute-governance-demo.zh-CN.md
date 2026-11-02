@@ -10,7 +10,7 @@
 ./scripts/quickstart.sh --demo
 ```
 
-首次配置时设置 `BOOTSTRAP_ADMIN_PASSWORD` 与至少 32 字符的强 `OPS_COLLECTOR_TOKEN`。
+首次配置自动生成并保存 `BOOTSTRAP_ADMIN_PASSWORD` 与强 `OPS_COLLECTOR_TOKEN`。
 Quickstart 先构建动态 Sandbox 镜像，再启动服务栈。Demo Profile 启动 Ops Collector
 与 OpsConsole，注册只读 Collector Policy，并创建
 **Demo Governance Patrol**。如果未提供可选 `DEMO_INFERENCE_*` Seed 值，请在设置 → 推理中配置

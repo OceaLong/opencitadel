@@ -13,7 +13,9 @@ from tests.app.alembic.test_execution_view_migration import (  # noqa:F401
 
 def test_resource_pins_fresh_precreated_shape_and_drift(isolated_database):  # noqa: F811
     engine, config = isolated_database
-    command.upgrade(config, "head")
+    # Validate this historical migration at its own schema boundary. Later
+    # migrations legitimately extend execution_public_content.
+    command.upgrade(config, "0003resource_pins")
     spec = importlib.util.spec_from_file_location(
         "f06_migration", Path("alembic/versions/0003resource_pins.py")
     )

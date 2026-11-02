@@ -333,8 +333,12 @@ async def test_capture_binds_actual_initialized_connector_and_explicit_source(ch
     stored = []
 
     class Repo:
-        async def connector_binding(self, scope, pack, identity, *, lock):
+        async def connector_binding(
+            self, scope, pack, identity, *, lock, execution=False, tool_name=None
+        ):
             assert lock
+            assert execution
+            assert tool_name in {None, "actual_remote_tool"}
             assert identity == record.id
             return "revision"
 

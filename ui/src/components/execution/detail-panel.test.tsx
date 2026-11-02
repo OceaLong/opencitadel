@@ -59,6 +59,43 @@ const response = (content: string, extra = {}) => ({
   at: "cut",
   ...extra,
 });
+
+test("live cuts preserve renewal reason while scope changes clear it", async () => {
+  const drift = {
+    reason: "contract_changed" as const,
+    subject_digest: "a".repeat(64),
+    tool_name: "write",
+  };
+  const render = (at: string, revision: number, historical = false) =>
+    component({
+      selection: { ...selection, panel: "overview" },
+      detail: { ...step, at, projection_revision: revision, contract_drift: drift },
+      page: { ...page, at, revision },
+      run: { ...page.run, status: "waiting", wait_reason: "contract_changed" },
+      historical,
+    });
+  const r = await renderComponent(render("cut-1", 1));
+  const textarea = r.container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      textarea,
+      "Reviewed the new target",
+    );
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => r.root.render(render("cut-1", 1, true)));
+  expect(r.container.querySelector("textarea")).toBe(textarea);
+  expect(textarea.disabled).toBe(true);
+  expect(textarea.closest("[hidden]")).not.toBeNull();
+  await act(async () => r.root.render(render("cut-2", 2)));
+  expect(r.container.querySelector("textarea")).toBe(textarea);
+  expect(textarea.value).toBe("Reviewed the new target");
+  expect(r.container.querySelector("section button")!.hasAttribute("disabled")).toBe(false);
+  scope.revision += 1;
+  await act(async () => r.root.render(render("cut-3", 3)));
+  expect(r.container.querySelector("textarea")!.value).toBe("");
+  await r.unmount();
+});
 function component(extra: Partial<React.ComponentProps<typeof DetailPanel>> = {}) {
   return (
     <DetailPanel

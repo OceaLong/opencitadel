@@ -114,7 +114,14 @@ async def open_api_runtime(
                     kind=TaskKind.AUXILIARY,
                     restart=RestartPolicy(),
                 )
+            from app.composition.definition_management import build_definition_management
+            from app.composition.effects import build_effect_service
+
             runtime = ApiRuntime(
+                definition_management_factory=lambda authorization: build_definition_management(
+                    sessions=resources.postgres.session_factory, authorization=authorization
+                ),
+                effect_service=build_effect_service(resources=resources, shared=shared),
                 settings=settings,
                 resources=resources,
                 readiness=readiness,

@@ -39,6 +39,42 @@ polling pending PostgreSQL rows.
 and activity projections, and `execution_public_events` are rebuildable. They
 may lag but cannot create facts or decide terminal state.
 
+## Lease, tool intent and external effect recovery
+
+Worker slots are reserved before claiming. Claims and heartbeats carry the
+database clock, absolute lease deadline and claim generation; renewal never
+extends the Activity's business deadline. Supervision covers the handler,
+content write and settlement. A lost claim cannot publish formal content or
+settle its result, even if an old handler later returns.
+
+Tool recovery uses each Invocation's frozen `RecordedContract` and exact
+`ToolApprovalSubject`, including arguments, target, scope and authorization
+epoch. Selected schema, binding or permission drift stops before sending.
+`ActivityFailed` v3 retains explicit no-send drift evidence; earlier event
+versions upcast without rewriting stored hashes. Refreshing the intent creates
+a new Invocation and approval in the same Run. The old approval is not reusable.
+
+External effect facts remain in Run events. The operation/receipt indexes are
+rebuildable; verification requests are durable work. An uncertain write waits
+for an original-key provider query or evidence-backed human resolution.
+`applied` without a complete result waits for material, while `not_applied`
+settles the original Invocation without resending it. Late facts after Run
+cancellation do not revive it. Business recovery does not clear physical usage
+or budget holds. [Deployment recovery guidance](../operations/deployment.md)
+describes the metrics and operator actions.
+
+Queued human verification rechecks the actor before reading or copying evidence
+and again when committing the result. Reclaimed queries consume the original
+operation's query budget, including attempts whose responses were lost.
+Contradictory outcomes or business results quarantine the live Run. Later receipts
+remain evidence but cannot resume it or overwrite the original result; cancellation
+remains available and accounting holds retain their independent authority.
+
+KB and memory vectors carry an `EmbeddingSpaceDescriptor`; equal dimensions
+or model IDs do not establish compatible spaces. Access and the frozen space
+are rechecked before cache reuse. Providers without a verifiable immutable
+revision cannot satisfy strict revision policy.
+
 ## Horizontal scale and single-writer projection
 
 Multiple execution-kernel replicas run safely against the same database:
@@ -136,6 +172,52 @@ work. Redis loss, process restart, and duplicate delivery are expected
 conditions. If integrity or owner scope validation fails, execution stops
 closed and emits operational evidence.
 
+## Versioned long-running execution
+
+Admission fixes an immutable definition pin in the accepted Run. The pin names
+the planner, Activity handlers, context compiler and supported schemas; changing
+the published head affects future admissions only. Workers publish expiring
+capabilities and filter work before claiming it. Missing compatible workers
+produce a derived version-unavailable diagnostic, without changing the Run's
+lifecycle or retry count. Retirement checks include pending approvals and
+unresolved external effects, including obligations on cancelled Runs.
+
+Command recovery and ordinary physical dispatch share a verified Run loader.
+It validates snapshot identity, serializer, definition pin and formal anchor,
+then verifies and folds the event tail. A bad snapshot can be discarded; a bad
+formal event chain cannot. Stored event hashes are verified before schema
+upcasting. Snapshot state still has a loading cost even when the event tail is
+small.
+
+Agent and Ask context comes from accepted private inputs and formal results at
+a fixed source boundary. Durable `context.prepare` builds a deterministic,
+bounded manifest against every frozen model candidate. `context.compact` uses
+independently admitted and settled summary calls, with persisted proposals and
+receipts for recovery. Model and summary dispatch check the native wire payload
+against that evidence, including provider fallback. Summaries do not become
+system instructions, executable tool calls, original evidence or authority to
+send requests.
+
+Session checkpoints publish with compare-and-swap after their complete source
+collection is available. Original evidence retains bounded indexes for exact
+reads; current scope and source permissions are checked again on reads and
+physical sends. Agent may request original spans through its read tool, while
+Ask uses the kernel's original lookup without gaining execution tools. A
+revoked or missing source makes dependent content unavailable. The version-2
+Agent definition permits the configured number of tool rounds followed by one
+tools-disabled final answer; that answer still has its own prepare and budget
+admission.
+
+Private object writes register durable ownership before uploading bytes, using
+an independent bounded pool. Publication and collection share the scope append
+lock. The collector keeps active work, approvals, unresolved effects, retained
+Sessions including the recycle bin, parent/child dependencies, recordings, pins
+and evaluation evidence. It keeps unverifiable dependency closures rather than
+deleting them. Eligible collections receive an irreversible tombstone before
+external deletion; bounded retries and later sweeps also remove late uploads.
+The collector does not delete formal events. Retention defaults and the
+development database rebuild requirement are documented in `api/README.md`.
+
 ## Runtime ownership and shutdown
 
 `app.composition.kernel` constructs one immutable `KernelRuntime`; it never
@@ -182,3 +264,13 @@ scope even when the caller has system authorization.
 - Bounded views and cursors: `api/app/application/services/execution_view_service.py`,
   `api/app/application/execution/view_cursor.py`,
   `api/app/infrastructure/execution/postgres_execution_view.py`.
+- Definition lifecycle and verified recovery:
+  `api/app/infrastructure/execution/postgres_definition_store.py`,
+  `api/app/infrastructure/execution/verified_run_loader.py`.
+- Context preparation and checkpoints:
+  `api/app/infrastructure/execution/context_preparation.py`,
+  `api/app/infrastructure/execution/context_wire_payload.py`,
+  `api/app/infrastructure/execution/postgres_context_checkpoint.py`.
+- Private object retention:
+  `api/app/infrastructure/execution/execution_object_lifecycle.py`,
+  `api/app/infrastructure/execution/execution_object_roots.py`.

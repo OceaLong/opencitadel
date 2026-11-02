@@ -10,7 +10,9 @@ import { CaptureCaseAction } from "@/components/evaluation/capture-case-dialog";
 import { EvaluationResultEntry } from "@/components/evaluation/result-entry";
 import { DecisionNotice } from "@/components/execution/approval-detail";
 import { ArtifactPanel } from "@/components/execution/artifact-panel";
+import { ExecutionDefinitionAvailability } from "@/components/execution/definition-availability";
 import { DetailPanel } from "@/components/execution/detail-panel";
+import { ExecutionEffects } from "@/components/execution/effect-resolution-panel";
 import { PlaybackControls } from "@/components/execution/playback-controls";
 import { TaskView } from "@/components/execution/task-view";
 import { TraceView } from "@/components/execution/trace-view";
@@ -667,6 +669,15 @@ export function SessionDetailView({
   return (
     <>
       <WorkbenchShell
+        effects={
+          page && page.run.run_id === selection.runId ? (
+            <ExecutionEffects
+              runId={selection.runId}
+              revision={page.revision}
+              historical={Boolean(selection.at)}
+            />
+          ) : undefined
+        }
         onReturnLive={returnToCurrentRun}
         playback={
           <PlaybackControls
@@ -743,18 +754,26 @@ export function SessionDetailView({
           ) : undefined
         }
         notice={
-          workbench.targetUnavailable ? (
-            <Alert>
-              <AlertDescription>
-                {tw("targetUnavailable")}{" "}
-                <Button variant="ghost" size="sm" onClick={workbench.dismissTargetNotice}>
-                  {tw("dismiss")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : workbench.issues?.length ? (
-            <p role="status">{tw("invalidLocation")}</p>
-          ) : undefined
+          <>
+            {selection.runId && (
+              <ExecutionDefinitionAvailability
+                runId={selection.runId}
+                historical={Boolean(selection.at)}
+              />
+            )}
+            {workbench.targetUnavailable ? (
+              <Alert>
+                <AlertDescription>
+                  {tw("targetUnavailable")}{" "}
+                  <Button variant="ghost" size="sm" onClick={workbench.dismissTargetNotice}>
+                    {tw("dismiss")}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : workbench.issues?.length ? (
+              <p role="status">{tw("invalidLocation")}</p>
+            ) : undefined}
+          </>
         }
         detailOpen={Boolean(selection.panel || selection.stepId || (hasPreview && !historical))}
         onCloseDetail={() => {

@@ -1,14 +1,14 @@
 [简体中文](01-self-host-10-minutes.zh-CN.md)
 
-# Tutorial 1: Self-Host OpenCitadel in 10 Minutes
+# Tutorial 1: Self-Host OpenCitadel
 
 This guide gets you from zero to your first Agent task using **BYO API Key** (OpenAI, Anthropic, or any OpenAI-compatible provider).
 
 ## Prerequisites
 
-- Docker Desktop or Docker Engine + Compose v2
+- Running Docker Desktop or Docker Engine + Compose v2 (`docker info` must succeed)
 - 8 GB RAM minimum (16 GB recommended)
-- An LLM API key from your provider
+- A reachable inference endpoint for your first Agent task; configure it after startup
 
 ## Steps
 
@@ -20,13 +20,16 @@ cd opencitadel
 make quickstart
 ```
 
-On first run, the script copies `.env.example` → `.env`, generates secrets when
-`openssl` is available, and prompts you to set `BOOTSTRAP_ADMIN_PASSWORD`. An
-existing `.env` is preserved; check its secrets, profiles, and storage settings
-before rerunning. Non-interactive runs must supply the password in advance.
+On first run, the script creates a private `.env`, automatically generates
+independent random secrets and an administrator password, and starts the stack.
+After readiness succeeds, it displays the initial login. Existing configuration
+and credentials are preserved on subsequent runs. No interactive input is required.
+Use `make configure` to generate configuration without starting containers;
+optional overrides are grouped in [`deploy/config/.env.reference`](../../deploy/config/.env.reference).
 
 > **Local evaluation only:** quickstart deliberately sets
-> `ENV=development`, `COOKIE_SECURE=false`, bundled MinIO, and localhost URLs.
+> `ENV=development`, bundled MinIO and a localhost HTTP origin, which derives
+> `COOKIE_SECURE=false`.
 > Do not expose or promote that `.env` to a public or multi-user deployment.
 > Before production, follow the complete secret, database-role, Redis,
 > trusted-proxy, egress, and verification procedure in the [production
@@ -37,18 +40,20 @@ before rerunning. Non-interactive runs must supply the password in advance.
 `make quickstart` runs:
 
 1. `docker compose build opencitadel-sandbox` — required for dynamic sandbox creation (the compose service is under the `fixed-sandbox` profile and is not started by default, but kernel-created sandboxes need this image)
-2. `docker compose up -d --build` — starts API, execution kernel, UI, Postgres, Redis, and (with quickstart defaults) MinIO
+2. `docker compose up -d --build --wait --wait-timeout 300` — starts API, execution kernel, UI, Postgres, Redis, and (with quickstart defaults) MinIO, then waits for service health and successful migrations
 
-First build may take 5–10 minutes.
+A cold build downloads base images, browser/system packages and language
+dependencies. Its duration depends on network speed and existing caches and can
+exceed ten minutes; subsequent starts reuse those layers.
 
 Open **http://localhost:8088** when health check passes.
 
-> **Storage default**: quickstart uses local MinIO storage out of the box. For cloud COS and other storage config, see [deployment guide — deployment mode](../operations/deployment.md#deployment-mode-env).
+> **Storage default**: quickstart uses local MinIO storage out of the box. For cloud COS and other storage config, see [deployment guide — deployment mode](../operations/deployment.md).
 
 ### 3. Log in
 
 - Email: value of `BOOTSTRAP_ADMIN_EMAIL` (default `admin@example.com`)
-- Password: your `BOOTSTRAP_ADMIN_PASSWORD`
+- Password: the generated value displayed after first startup (`BOOTSTRAP_ADMIN_PASSWORD` in your private `.env`)
 
 ### 4. Configure inference
 
@@ -60,6 +65,12 @@ for each purpose. Full details: [Inference control plane](../architecture/infere
 2. Click **Add endpoint** — choose provider, base URL, paste API key
 3. Under that endpoint, click **Add model** — enter model name and select `chat`
 4. Bind the `chat` purpose to that model
+
+That is enough for first use. New installations use text extraction and keyword
+search for knowledge bases; embedding, reranking, GraphRAG, and OCR are optional.
+Configure their models and enable them in Runtime policy when needed, following
+the [knowledge tutorial](02-internal-knowledge-base.md). Upgrades preserve
+existing policies.
 
 ### 5. Run your first task
 
@@ -74,17 +85,13 @@ Watch the Agent plan, use tools in the sandbox, and stream results in real time.
 For local inference, set in `.env`:
 
 ```bash
-COMPOSE_PROFILES=local
-STORAGE_PROVIDER=minio
-COOKIE_SECURE=false
-FRONTEND_BASE_URL=http://localhost:8088
 OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
 Install [Ollama](https://ollama.com), pull a model, then add an **endpoint**
 (`http://host.docker.internal:11434/v1`), a chat **model**, and a `chat`
 **binding** in Settings → Inference. Keep the allowlist exact—no wildcard.
-Full local-mode reference: [deployment guide — local mode](../operations/deployment.md#local-mode).
+Full local-mode reference: [deployment guide — local mode](../operations/deployment.md).
 
 For an air-gapped installation, prepare all container images, model weights and
 dependencies before disconnecting, and use tasks that do not require remote

@@ -9,6 +9,26 @@ ACTUATOR_MCP_SERVER_NAME = "ops-actuator"
 
 
 class PatrolActuatorPort(Protocol):
+    async def get_target(
+        self,
+        server: MCPServerRecord,
+        *,
+        namespace: str,
+        workload: str,
+        kind: str,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 15,
+    ) -> dict[str, Any]: ...
+
+    async def get_operation(
+        self,
+        server: MCPServerRecord,
+        operation_id: str,
+        *,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 15,
+    ) -> dict[str, Any]: ...
+
     async def get_capabilities(
         self,
         server: MCPServerRecord,

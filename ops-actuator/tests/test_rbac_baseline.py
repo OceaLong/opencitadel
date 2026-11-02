@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 RBAC_FILES = [
-    ROOT / "deploy" / "patrol-demo" / "manifests" / "actuator-rbac.yaml",
+    ROOT / "demo" / "patrol" / "manifests" / "actuator-rbac.yaml",
     ROOT / "deploy" / "kustomize" / "ops-actuator" / "rbac.yaml",
 ]
 NETWORK_POLICY = ROOT / "deploy" / "kustomize" / "ops-actuator" / "network-policy.yaml"
@@ -27,6 +27,17 @@ def test_actuator_rbac_is_registered_write_verbs_only(manifest: Path):
     for role in roles:
         for rule in role.get("rules", []):
             verbs = set(rule.get("verbs", []))
+            if set(rule.get("resources", [])) == {"configmaps"}:
+                assert role["kind"] == "Role"
+                assert role["metadata"]["name"].endswith("-journal")
+                assert role["metadata"]["namespace"] == (
+                    "opencitadel-patrol-demo"
+                    if manifest.parent.name == "manifests"
+                    else "opencitadel"
+                )
+                assert rule["apiGroups"] == [""]
+                assert verbs == {"get", "create", "update"}
+                continue
             assert verbs <= allowed_verbs, f"unexpected verbs {verbs - allowed_verbs} in {manifest}"
             assert not (verbs & forbidden_verbs)
             assert not (set(rule.get("resources", [])) & forbidden_resources)

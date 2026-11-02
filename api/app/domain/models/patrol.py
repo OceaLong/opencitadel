@@ -480,6 +480,7 @@ class PatrolRemediationAction(StrEnum):
 class PatrolRemediationStatus(StrEnum):
     PROPOSED = "proposed"  # 提案已建，修复会话未批
     EXECUTING = "executing"  # 审批通过，执行中
+    UNKNOWN = "unknown"  # 外部结果未决；查询原 operation，不得重发或自动复检
     EXECUTED = "executed"  # actuator 已应用，待复检
     VERIFIED = "verified"  # 复检通过，Finding 已 resolved
     FAILED = "failed"  # 执行失败或复检未过
@@ -517,6 +518,11 @@ class PatrolRemediation(BaseModel):
     rollback_hint: str = Field(default="", max_length=2000)
     idempotency_key: str = Field(min_length=1, max_length=255)
     actuator_capability_hash: str | None = None
+    actuator_operation_id: str | None = None
+    actuator_payload_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    actuator_target_uid: str | None = None
+    actuator_target_ref: str | None = None
+    actuator_receipt: dict[str, JsonValue] | None = None
     status: PatrolRemediationStatus = PatrolRemediationStatus.PROPOSED
     before_observation: dict[str, JsonValue] | None = None
     after_observation: dict[str, JsonValue] | None = None
@@ -549,5 +555,25 @@ def patrol_remediation_params_hash(
         sort_keys=True,
         separators=(",", ":"),
         default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def patrol_actuator_payload_digest(remediation: PatrolRemediation) -> str:
+    """Ops Actuator v2 canonical payload; platform identities never come from the model."""
+    canonical = json.dumps(
+        {
+            "action": remediation.action.value,
+            "target_ref": remediation.actuator_target_ref,
+            "namespace": remediation.target_namespace,
+            "workload": remediation.target_workload,
+            "kind": remediation.target_kind.lower(),
+            "target_uid": remediation.actuator_target_uid,
+            "parameters": dict(remediation.params),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -6,7 +6,25 @@
 
 ## 1. 创建逻辑知识库
 
-打开 **知识库**，创建名称稳定的资料库，例如“研发手册”，选择所属工作区，并按需配置分块、检索、OCR 和 GraphRAG。
+在目标工作区打开 **知识库**，创建名称稳定的资料库，例如“研发手册”。新安装默认使用文本
+提取和关键词检索；上传、索引文本资料无需推理模型，Ask 与 Agent 生成回答仍需配置 Chat 模型。
+
+分块与检索行为遵循系统当前的 Execution Policy，由管理员在 **设置 → 运行时策略** 管理。
+升级保留已有策略 Revision 与进行中的任务，不会用新安装默认值覆盖它们。
+
+启用增强能力时，先在 **设置 → 推理** 配置所需模型，再开启 Execution Policy 的知识库字段：
+
+| 能力 | 所需配置 | 生效范围 |
+| ---- | -------- | -------- |
+| 向量检索 | 1536 维 Embedding 模型及 `embedding` Binding；`vector_enabled=true` | 新构建；已有知识库重建后补充向量 |
+| 重排 | Ask/Agent 当前选择的 Chat 模型，未选择时使用有效 `chat` Binding；`rerank.enabled=true` | 新的 Ask/Agent Run |
+| GraphRAG | 有效 `chat` Binding；`graphrag.enabled=true` | 新构建；已有知识库重建后补充图数据 |
+| 扫描 PDF OCR | 支持视觉的 Chat 模型及 `chat` Binding；`ocr.mode=vision_llm` | 解析新文档修订或之前失败的修订 |
+
+OCR 初始关闭。请使用可提取文本的 PDF，或在导入扫描件前启用 OCR。策略变更不修改已发布版本
+与进行中的 Run；重建会复用已有提取文本。
+
+当前知识库重排使用任务的 Chat 模型，不消费独立的 `rerank` Binding。
 
 此时知识库可能还没有 active 版本。文档数量或 `ready_doc_count` 本身不足以开启生产问答；必须存在已发布的 `ready` 或 `degraded` 版本。
 
@@ -31,18 +49,23 @@ GET /api/knowledge-bases/{kb_id}/versions/{version_id}
 | ---------- | ----------------------------------------------------- |
 | `building` | 候选尚不完整，Ask 和 Agent 都不能使用                 |
 | `ready`    | 已发布，所有配置能力可用                              |
-| `degraded` | 已发布；强制关键词/来源读取可用，可选能力禁用情况明确 |
+| `degraded` | 已发布；已索引文档可检索，明确报告失败文档或可选阶段 |
 | `failed`   | 候选未发布；上一个 active 版本持续可读                |
 
 修订处于 `parsed` 仍不可检索。必须等待候选版本发布，不能用 `ready_doc_count` 绕过检查。
 
+成功的基础构建状态为 `ready`，能力为 `keyword_search=true`、`vector_search=false`、
+`graph_search=false`。主动关闭增强能力不会使构建降级。
+
 ## 4. 处理降级构建
 
-向量或 GraphRAG 故障可能产生如实的 `degraded` 发布。请查看版本/构建的 capabilities 和 `degraded_reasons`：
+部分文档解析失败，或已开启的向量/GraphRAG 能力故障，可能产生如实的 `degraded` 发布。
+请查看版本/构建的 capabilities 和 `degraded_reasons`：
 
 - `vector_search=false` 表示检索继续使用关键词。
 - `graph_search=false` 表示图浏览不可用，且不会返回半成品图。
-- 解析、分块、关键词、验证或发布等强制阶段失败时，候选会失败，active 版本不变。
+- `DOCUMENT_PARTIAL` 表示部分文档解析失败，已成功索引的文档仍可检索。
+- 所有文档解析失败，或分块、关键词、验证、发布等强制阶段失败时，候选会失败，active 版本不变。
 
 图接口本身以 `capability=false` 和空节点、空边表达不可用；详细原因位于版本/构建状态面。
 

@@ -66,6 +66,7 @@ export function usePatrolLabels() {
       cancelled: t("remediation.status.cancelled"),
       executed: t("remediation.status.executed"),
       executing: t("remediation.status.executing"),
+      unknown: t("remediation.status.unknown"),
       failed: t("remediation.status.failed"),
       proposed: t("remediation.status.proposed"),
       verified: t("remediation.status.verified"),
